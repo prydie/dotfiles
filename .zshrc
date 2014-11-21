@@ -53,7 +53,10 @@ source $ZSH/oh-my-zsh.sh
 
 export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games"
 
-source virtualenvwrapper.sh
+
+if [ -f $(which name_of_executable) ] ; then
+    source virtualenvwrapper.sh
+fi
 
 alias tmux="TERM=screen-256color-bce tmux"
 
