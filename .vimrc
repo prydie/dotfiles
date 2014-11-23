@@ -1,65 +1,75 @@
 filetype plugin indent on
-" Setting up Vundle - the vim plugin bundler
-    let iCanHazVundle=1
-    let vundle_readme=expand('~/.vim/bundle/vundle/README.md')
-    if !filereadable(vundle_readme)
-        echo "Installing Vundle.."
-        echo ""
-        silent !mkdir -p ~/.vim/bundle
-        silent !git clone https://github.com/gmarik/vundle ~/.vim/bundle/vundle
-        let iCanHazVundle=0
-    endif
-    set rtp+=~/.vim/bundle/vundle/
-    call vundle#rc()
-    Bundle 'gmarik/vundle'
-    "Add your bundles here
-    Bundle 'scrooloose/nerdtree'
-    Bundle 'scrooloose/nerdcommenter'
-    Bundle 'scrooloose/syntastic'
-    Bundle 'Lokaltog/powerline'
-    Bundle 'kien/ctrlp.vim'
-    Bundle 'altercation/vim-colors-solarized'
-    Bundle 'EasyGrep'
-    Bundle 'Valloric/YouCompleteMe'
-    Bundle 'airblade/vim-gitgutter'
-    Bundle 'Rykka/riv.vim'
-    Bundle 'Rykka/clickable.vim'
-    Bundle 'rking/ag.vim'
-    Bundle 'jnwhiteh/vim-golang'
-    Bundle 'bronson/vim-trailing-whitespace'
-    Bundle 'klen/python-mode'
-    Bundle 'kchmck/vim-coffee-script'
-    Bundle 'fatih/vim-go'
-    Bundle 'tell-k/vim-autopep8'
-    Bundle 'tpope/vim-dispatch'
-    "...All your other bundles...
-    if iCanHazVundle == 0
-        echo "Installing Bundles, please ignore key map error messages"
-        echo ""
-        :BundleInstall
-    endif
-" Setting up Vundle - the vim plugin bundler end
 
-set number
-set guifont=Ubuntu\ Mono\ derivative\ Powerline\ 10
+" Setting up Vundle - the vim plugin bundler
+
+let iCanHazVundle=1
+let vundle_readme=expand('~/.vim/bundle/vundle/README.md')
+if !filereadable(vundle_readme)
+    echo "Installing Vundle.."
+    echo ""
+    silent !mkdir -p ~/.vim/bundle
+    silent !git clone https://github.com/gmarik/vundle ~/.vim/bundle/vundle
+    let iCanHazVundle=0
+endif
+set rtp+=~/.vim/bundle/vundle/
+call vundle#rc()
+Bundle 'gmarik/vundle'
+
+" Text processors
+Bundle 'tell-k/vim-autopep8'
+Bundle 'bronson/vim-trailing-whitespace'
+
+" UI Modules
+Bundle 'scrooloose/nerdtree'
+Bundle 'kien/ctrlp.vim'
+Bundle 'Valloric/YouCompleteMe'
+Bundle 'rking/ag.vim'
+Bundle 'tpope/vim-dispatch'
+
+" UI Enhancements
+Bundle 'altercation/vim-colors-solarized'
+Bundle 'airblade/vim-gitgutter'
+Bundle 'Lokaltog/powerline'
+
+" Misc Bundles
+Bundle 'scrooloose/nerdcommenter'
+Bundle 'scrooloose/syntastic'
+
+" Lang: Go
+Bundle 'jnwhiteh/vim-golang'
+Bundle 'fatih/vim-go'
+
+" Lang: Coffescript
+Bundle 'kchmck/vim-coffee-script'
+
+if iCanHazVundle == 0
+    echo "Installing Bundles, please ignore key map error messages"
+    echo ""
+    :BundleInstall
+endif
+
+" Setting up Vundle - the vim plugin bundler end
 
 syntax on
 syntax enable
-set backspace=indent,eol,start
+set number
+set smarttab
+set expandtab
+set colorcolumn=80
+set background=dark
+colorscheme solarized
 
-set nofoldenable    " disable folding
+set guifont=Ubuntu\ Mono\ derivative\ Powerline\ 10
+
+set backspace=indent,eol,start
 
 if $COLORTERM == 'gnome-terminal'
     set t_Co=256
 endif
 
-set background=dark
-colorscheme solarized
-
 "
 " NERDTree
 "
-
 autocmd vimenter * NERDTree
 autocmd VimEnter * wincmd p
 autocmd bufenter * if (winnr("$") == 1 && exists("b:NERDTreeType") && b:NERDTreeType == "primary") | q | endif
@@ -69,24 +79,9 @@ autocmd BufNew * wincmd l
 
 "
 " Powerline
-"
 
 set rtp+=~/.vim/bundle/powerline/powerline/bindings/vim
 set guifont=Ubuntu\ Mono\ derivative\ Powerline\ 12
-
-"
-" Python Spesific
-"
-
-set tabstop=4
-set softtabstop=4
-set shiftwidth=4
-set textwidth=80
-set smarttab
-set expandtab
-set colorcolumn=80
-
-let g:syntastic_python_checkers=['flake8']
 
 "
 " Ctrl-P
@@ -107,31 +102,23 @@ if executable('ag')
 endif
 
 "
+" The Silver Searcher (ag)
+"
+nnoremap K :Ag! "\b<cword>\b"<CR>:cw<CR>
+
+"
 " YCM
 "
 
 let g:ycm_autoclose_preview_window_after_completion=1
 nnoremap <leader>g :YcmCompleter GoToDefinitionElseDeclaration<CR>
 
-
 "
-" PyMode
+" Syntastic
 "
-let g:pymode_doc=0
-let g:pymode_rope_lookup_project = 0
-let g:pymode_rope_completion = 0
-
-
-"
-" EasyGrep
-"
-
-"let g:EasyGrepMode=2
-"let g:EasyGrepFilesToExclude="node_modules,env"
-"let g:EasyGrepRecursive=1
-"let g:EasyGrepCommand=1
 
 let g:syntastic_javascript_checkers = ['jshint']
+let g:syntastic_python_checkers=['flake8']
 
 "
 " Powerline
@@ -142,5 +129,8 @@ let g:powerline_config_overrides={"common":{"log_file":"/tmp/powerline.log"}}
 "
 " Filetype spesific
 "
+
+autocmd Filetype py setlocal ts=4 sts=4 sw=4
 autocmd Filetype cpp setlocal ts=2 sts=2 sw=2
+
 autocmd BufNewFile,BufReadPost *.go set filetype=go
