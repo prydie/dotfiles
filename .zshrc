@@ -53,7 +53,7 @@ source $ZSH/oh-my-zsh.sh
 
 export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games"
 
-wrapper_path=$(which name_of_executable)
+wrapper_path=$(which virtualenvwrapper.sh)
 
 if [ -f  "$wrapper_path" ] ; then
     source virtualenvwrapper.sh
