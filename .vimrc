@@ -132,5 +132,6 @@ let g:powerline_config_overrides={"common":{"log_file":"/tmp/powerline.log"}}
 
 autocmd Filetype py setlocal ts=4 sts=4 sw=4
 autocmd Filetype cpp setlocal ts=2 sts=2 sw=2
+autocmd Filetype yaml setlocal ts=2 sts=2 sw=2
 
 autocmd BufNewFile,BufReadPost *.go set filetype=go

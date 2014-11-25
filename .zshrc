@@ -61,6 +61,9 @@ fi
 
 alias tmux="TERM=screen-256color-bce tmux"
 
+# allow group write
+umask 002
+
 ###
 # GOLANG
 ###
