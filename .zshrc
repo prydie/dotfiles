@@ -1,3 +1,13 @@
+# Detect platform
+
+platform='unknown'
+unamestr=`uname`
+if [[ "$unamestr" == 'Linux' ]]; then
+   platform='linux'
+elif [[ "$unamestr" == 'Darwin' ]]; then
+   platform='osx'
+fi
+
 # Path to your oh-my-zsh installation.
 export ZSH=$HOME/.oh-my-zsh
 
@@ -51,7 +61,11 @@ source $ZSH/oh-my-zsh.sh
 
 # User configuration
 
-export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games"
+if [[ "$platform" == 'linux' ]]; then
+        export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games"
+elif [[ "$platform" == 'osx' ]]; then
+        export PATH="/Users/andrew/.rvm/gems/ruby-1.9.2-p320/bin:/Users/andrew/.rvm/gems/ruby-1.9.2-p320@global/bin:/Users/andrew/.rvm/rubies/ruby-1.9.2-p320/bin:/Users/andrew/.rvm/bin:/usr/local/bin:/Users/andrew/pear/bin:/opt/local/bin:/opt/local/sbin:/Users/andrew/bin:/Applications/VirtualBox.app/Contents/MacOS/:/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin:/usr/local/MacGPG2/bin:/usr/texbin:/Users/andrew/.rvm/gems/ruby-1.9.2-p320/bin:/Users/andrew/.rvm/gems/ruby-1.9.2-p320@global/bin:/Users/andrew/.rvm/rubies/ruby-1.9.2-p320/bin:/Users/andrew/.rvm/bin:/Users/andrew/pear/bin:/opt/local/bin:/opt/local/sbin:/Users/andrew/bin:/Applications/VirtualBox.app/Contents/MacOS/:/bin:$PATH"
+fi
 
 wrapper_path=$(which virtualenvwrapper.sh)
 
