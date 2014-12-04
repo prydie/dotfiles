@@ -58,14 +58,22 @@ set expandtab
 set colorcolumn=80
 set background=dark
 colorscheme solarized
+let g:solarized_termtrans = 1
+let g:solarized_termcolors= 256
+set shiftwidth=4
+set softtabstop=4
+set autoindent
+set tabstop=4
+
+if $COLORTERM == 'gnome-terminal'
+  set t_Co=256
+else
+  set t_Co=16
+endif
 
 set guifont=Ubuntu\ Mono\ derivative\ Powerline\ 10
 
 set backspace=indent,eol,start
-
-if $COLORTERM == 'gnome-terminal'
-    set t_Co=256
-endif
 
 "
 " NERDTree
@@ -130,8 +138,9 @@ let g:powerline_config_overrides={"common":{"log_file":"/tmp/powerline.log"}}
 " Filetype spesific
 "
 
-autocmd Filetype py setlocal ts=4 sts=4 sw=4
+autocmd Filetype py setlocal ts=4 sts=4 sw=4 et sta ai
 autocmd Filetype cpp setlocal ts=2 sts=2 sw=2
 autocmd Filetype yaml setlocal ts=2 sts=2 sw=2
+autocmd Filetype go setlocal ts=4 sts=4 sw=4 et!
 
 autocmd BufNewFile,BufReadPost *.go set filetype=go
