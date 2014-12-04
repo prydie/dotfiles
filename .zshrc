@@ -1,5 +1,11 @@
 # Detect platform
 
+if [ -n "$TMUX" ]; then
+    export TERM=screen-256color
+else
+    export TERM=xterm-256color
+fi
+
 platform='unknown'
 unamestr=`uname`
 if [[ "$unamestr" == 'Linux' ]]; then
@@ -73,7 +79,9 @@ if [ -f  "$wrapper_path" ] ; then
     source virtualenvwrapper.sh
 fi
 
-alias tmux="TERM=screen-256color-bce tmux"
+if [[ "$platform" == 'osx' ]]; then
+        alias tmux="TERM=screen-256color-bce tmux"
+fi
 
 # allow group write
 umask 002
