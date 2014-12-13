@@ -18,6 +18,7 @@ Bundle 'gmarik/vundle'
 " Text processors
 Bundle 'tell-k/vim-autopep8'
 Bundle 'bronson/vim-trailing-whitespace'
+Bundle 'tpope/vim-jdaddy'
 
 " UI Modules
 Bundle 'scrooloose/nerdtree'
@@ -25,6 +26,7 @@ Bundle 'kien/ctrlp.vim'
 Bundle 'Valloric/YouCompleteMe'
 Bundle 'rking/ag.vim'
 Bundle 'tpope/vim-dispatch'
+Bundle 'majutsushi/tagbar'
 
 " UI Enhancements
 Bundle 'altercation/vim-colors-solarized'
@@ -36,7 +38,6 @@ Bundle 'scrooloose/nerdcommenter'
 Bundle 'scrooloose/syntastic'
 
 " Lang: Go
-Bundle 'jnwhiteh/vim-golang'
 Bundle 'fatih/vim-go'
 
 " Lang: Coffescript
@@ -53,17 +54,21 @@ endif
 syntax on
 syntax enable
 set number
+set splitbelow
+set splitright
+
 set smarttab
 set expandtab
+set shiftwidth=4
+set softtabstop=4
+set autoindent
+set tabstop=4
+
 set colorcolumn=80
 set background=dark
 colorscheme solarized
 let g:solarized_termtrans = 1
 let g:solarized_termcolors= 256
-set shiftwidth=4
-set softtabstop=4
-set autoindent
-set tabstop=4
 
 if $COLORTERM == 'gnome-terminal'
   set t_Co=256
@@ -144,3 +149,8 @@ autocmd Filetype yaml setlocal ts=2 sts=2 sw=2
 autocmd Filetype go setlocal ts=4 sts=4 sw=4 et!
 
 autocmd BufNewFile,BufReadPost *.go set filetype=go
+
+"
+" vim-go
+"
+let g:go_auto_type_info = 0
