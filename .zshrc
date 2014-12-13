@@ -89,8 +89,13 @@ umask 002
 ###
 # GOLANG
 ###
-export GOPATH=$HOME/go
-export PATH=$PATH:$GOPATH/bin
+if [[ "$platform" == 'linux' ]]; then
+    export GOPATH=/Projects/go
+    export PATH=$PATH:$GOPATH/bin
+else
+    export GOPATH=$HOME/go
+    export PATH=$PATH:$GOPATH/bin
+fi
 
 # export MANPATH="/usr/local/man:$MANPATH"
 
@@ -113,3 +118,5 @@ export EDITOR='vim'
 # Example aliases
 # alias zshconfig="mate ~/.zshrc"
 # alias ohmyzsh="mate ~/.oh-my-zsh"
+
+[[ -s "/home/andrew/.gvm/scripts/gvm" ]] && source "/home/andrew/.gvm/scripts/gvm"
