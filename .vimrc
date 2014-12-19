@@ -154,3 +154,4 @@ autocmd BufNewFile,BufReadPost *.go set filetype=go
 " vim-go
 "
 let g:go_auto_type_info = 0
+au FileType go nmap <Leader>e <Plug>(go-rename)
