@@ -76,9 +76,10 @@ else
   set t_Co=16
 endif
 
-set guifont=Ubuntu\ Mono\ derivative\ Powerline\ 10
-
 set backspace=indent,eol,start
+
+" Mouse scrolling
+set mouse=a
 
 "
 " NERDTree
@@ -86,7 +87,7 @@ set backspace=indent,eol,start
 autocmd vimenter * NERDTree
 autocmd VimEnter * wincmd p
 autocmd bufenter * if (winnr("$") == 1 && exists("b:NERDTreeType") && b:NERDTreeType == "primary") | q | endif
-let NERDTreeIgnore = ['\.pyc$']
+let NERDTreeIgnore = ['\.pyc$', '__pycache__']
 map <C-n> :NERDTreeToggle<CR>
 autocmd BufNew * wincmd l
 
@@ -94,7 +95,7 @@ autocmd BufNew * wincmd l
 " Powerline
 
 set rtp+=~/.vim/bundle/powerline/powerline/bindings/vim
-set guifont=Ubuntu\ Mono\ derivative\ Powerline\ 12
+set guifont=Ubuntu\ Mono\ derivative\ Powerline\ 13
 
 "
 " Ctrl-P
@@ -154,4 +155,5 @@ autocmd BufNewFile,BufReadPost *.go set filetype=go
 " vim-go
 "
 let g:go_auto_type_info = 0
+let g:go_fmt_command = "gofmt"
 au FileType go nmap <Leader>e <Plug>(go-rename)
