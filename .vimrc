@@ -23,7 +23,8 @@ Bundle 'tpope/vim-jdaddy'
 " UI Modules
 Bundle 'scrooloose/nerdtree'
 Bundle 'kien/ctrlp.vim'
-Bundle 'Valloric/YouCompleteMe'
+"Bundle 'Valloric/YouCompleteMe'
+Bundle 'davidhalter/jedi-vim'
 Bundle 'rking/ag.vim'
 Bundle 'tpope/vim-dispatch'
 Bundle 'majutsushi/tagbar'
@@ -32,6 +33,7 @@ Bundle 'majutsushi/tagbar'
 Bundle 'altercation/vim-colors-solarized'
 Bundle 'airblade/vim-gitgutter'
 Bundle 'Lokaltog/powerline'
+Bundle 'Yggdroot/indentLine'
 
 " Misc Bundles
 Bundle 'scrooloose/nerdcommenter'
