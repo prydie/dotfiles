@@ -69,8 +69,6 @@ source $ZSH/oh-my-zsh.sh
 
 if [[ "$platform" == 'linux' ]]; then
         export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games"
-elif [[ "$platform" == 'osx' ]]; then
-        export PATH="/Users/andrew/.rvm/gems/ruby-1.9.2-p320/bin:/Users/andrew/.rvm/gems/ruby-1.9.2-p320@global/bin:/Users/andrew/.rvm/rubies/ruby-1.9.2-p320/bin:/Users/andrew/.rvm/bin:/usr/local/bin:/Users/andrew/pear/bin:/opt/local/bin:/opt/local/sbin:/Users/andrew/bin:/Applications/VirtualBox.app/Contents/MacOS/:/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin:/usr/local/MacGPG2/bin:/usr/texbin:/Users/andrew/.rvm/gems/ruby-1.9.2-p320/bin:/Users/andrew/.rvm/gems/ruby-1.9.2-p320@global/bin:/Users/andrew/.rvm/rubies/ruby-1.9.2-p320/bin:/Users/andrew/.rvm/bin:/Users/andrew/pear/bin:/opt/local/bin:/opt/local/sbin:/Users/andrew/bin:/Applications/VirtualBox.app/Contents/MacOS/:/bin:$PATH"
 fi
 
 wrapper_path=$(which virtualenvwrapper.sh)
@@ -94,7 +92,8 @@ if [[ "$platform" == 'linux' ]]; then
     export PATH=$PATH:$GOPATH/bin
 else
     export GOPATH=$HOME/go
-    export PATH=$PATH:$GOPATH/bin
+    export PATH=$PATH:/usr/local/opt/go/libexec/bin
+
 fi
 
 # export MANPATH="/usr/local/man:$MANPATH"
