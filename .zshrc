@@ -121,5 +121,3 @@ fi
 # Example aliases
 # alias zshconfig="mate ~/.zshrc"
 # alias ohmyzsh="mate ~/.oh-my-zsh"
-
-[[ -s "/home/andrew/.gvm/scripts/gvm" ]] && source "/home/andrew/.gvm/scripts/gvm"

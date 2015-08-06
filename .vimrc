@@ -23,8 +23,7 @@ Bundle 'tpope/vim-jdaddy'
 " UI Modules
 Bundle 'scrooloose/nerdtree'
 Bundle 'kien/ctrlp.vim'
-"Bundle 'Valloric/YouCompleteMe'
-Bundle 'davidhalter/jedi-vim'
+Bundle 'Valloric/YouCompleteMe'
 Bundle 'rking/ag.vim'
 Bundle 'tpope/vim-dispatch'
 Bundle 'majutsushi/tagbar'
@@ -45,9 +44,12 @@ Bundle 'fatih/vim-go'
 " Lang: Coffescript
 Bundle 'kchmck/vim-coffee-script'
 
+" Lang: Python
+Bundle 'klen/python-mode'
+
+
 if iCanHazVundle == 0
-    echo "Installing Bundles, please ignore key map error messages"
-    echo ""
+    echo "Installing Bundles, please ignore key map error messages" echo ""
     :BundleInstall
 endif
 
@@ -127,6 +129,11 @@ nnoremap K :Ag! "\b<cword>\b"<CR>:cw<CR>
 "
 
 let g:ycm_autoclose_preview_window_after_completion=1
+let g:ycm_collect_identifiers_from_tags_files = 1       " Let YCM read tags from Ctags file
+let g:ycm_use_ultisnips_completer = 1                   " Default 1, just ensure
+let g:ycm_seed_identifiers_with_syntax = 1              " Completion for programming language's keyword
+let g:ycm_complete_in_comments = 1                      " Completion in comments
+let g:ycm_complete_in_strings = 1                       " Completion in string
 nnoremap <leader>g :YcmCompleter GoToDefinitionElseDeclaration<CR>
 
 "
@@ -135,6 +142,12 @@ nnoremap <leader>g :YcmCompleter GoToDefinitionElseDeclaration<CR>
 
 let g:syntastic_javascript_checkers = ['jshint']
 let g:syntastic_python_checkers=['flake8']
+
+"
+" Pymode
+"
+let g:pymode_folding = 0
+
 
 "
 " Powerline
