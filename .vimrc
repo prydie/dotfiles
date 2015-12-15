@@ -1,59 +1,49 @@
-filetype plugin indent on
+set nocompatible              " be iMproved, required
+filetype off                  " required
 
-" Setting up Vundle - the vim plugin bundler
+" set the runtime path to include Vundle and initialize
+set rtp+=~/.vim/bundle/Vundle.vim
+call vundle#begin()
 
-let iCanHazVundle=1
-let vundle_readme=expand('~/.vim/bundle/vundle/README.md')
-if !filereadable(vundle_readme)
-    echo "Installing Vundle.."
-    echo ""
-    silent !mkdir -p ~/.vim/bundle
-    silent !git clone https://github.com/gmarik/vundle ~/.vim/bundle/vundle
-    let iCanHazVundle=0
-endif
-set rtp+=~/.vim/bundle/vundle/
-call vundle#rc()
-Bundle 'gmarik/vundle'
+" let Vundle manage Vundle, required
+Plugin 'VundleVim/Vundle.vim'
 
 " Text processors
-Bundle 'tell-k/vim-autopep8'
-Bundle 'bronson/vim-trailing-whitespace'
-Bundle 'tpope/vim-jdaddy'
+Plugin 'bronson/vim-trailing-whitespace'
+Plugin 'tpope/vim-jdaddy'
 
 " UI Modules
-Bundle 'scrooloose/nerdtree'
-Bundle 'kien/ctrlp.vim'
-Bundle 'Valloric/YouCompleteMe'
-Bundle 'rking/ag.vim'
-Bundle 'tpope/vim-dispatch'
-Bundle 'majutsushi/tagbar'
+Plugin 'scrooloose/nerdtree'
+Plugin 'kien/ctrlp.vim'
+Plugin 'Valloric/YouCompleteMe'
+Plugin 'rking/ag.vim'
+Plugin 'tpope/vim-dispatch'
+Plugin 'majutsushi/tagbar'
 
 " UI Enhancements
-Bundle 'altercation/vim-colors-solarized'
-Bundle 'airblade/vim-gitgutter'
-Bundle 'Lokaltog/powerline'
-Bundle 'Yggdroot/indentLine'
+Plugin 'flazz/vim-colorschemes'
+Plugin 'powerline/powerline', {'rtp': 'powerline/bindings/vim/'}
+Plugin 'Yggdroot/indentLine'
 
-" Misc Bundles
-Bundle 'scrooloose/nerdcommenter'
-Bundle 'scrooloose/syntastic'
+" Misc Plugins
+Plugin 'scrooloose/nerdcommenter'
+Plugin 'scrooloose/syntastic'
+Plugin 'ervandew/supertab'
+
+" Git plugins
+Plugin 'airblade/vim-gitgutter'
+Plugin 'tpope/vim-fugitive'
+Plugin 'Xuyuanp/nerdtree-git-plugin'
 
 " Lang: Go
-Bundle 'fatih/vim-go'
-
-" Lang: Coffescript
-Bundle 'kchmck/vim-coffee-script'
+Plugin 'fatih/vim-go'
 
 " Lang: Python
-Bundle 'klen/python-mode'
+Plugin 'klen/python-mode'
 
-
-if iCanHazVundle == 0
-    echo "Installing Bundles, please ignore key map error messages" echo ""
-    :BundleInstall
-endif
-
-" Setting up Vundle - the vim plugin bundler end
+"All of your Plugins must be added before the following line
+call vundle#end()            " required
+filetype plugin indent on    " required
 
 syntax on
 syntax enable
@@ -69,16 +59,13 @@ set autoindent
 set tabstop=4
 
 set colorcolumn=80
+
 set background=dark
 colorscheme solarized
+let g:solarized_termcolors = 256
 let g:solarized_termtrans = 1
-let g:solarized_termcolors= 256
 
-if $COLORTERM == 'gnome-terminal'
-  set t_Co=256
-else
-  set t_Co=16
-endif
+set t_Co=16
 
 set backspace=indent,eol,start
 
@@ -88,60 +75,59 @@ set mouse=a
 "
 " NERDTree
 "
-autocmd vimenter * NERDTree
-autocmd VimEnter * wincmd p
-autocmd bufenter * if (winnr("$") == 1 && exists("b:NERDTreeType") && b:NERDTreeType == "primary") | q | endif
+
+" open a NERDTree automatically when vim starts up if no files were specified
+autocmd StdinReadPre * let s:std_in=1
+autocmd VimEnter * if argc() == 0 && !exists("s:std_in") | NERDTree | endif
+
+" close vim if the only window left open is a NERDTree
+autocmd bufenter * if (winnr("$") == 1 && exists("b:NERDTree") && b:NERDTree.isTabTree()) | q | endif
+
 let NERDTreeIgnore = ['\.pyc$', '__pycache__']
+
 map <C-n> :NERDTreeToggle<CR>
+
 autocmd BufNew * wincmd l
 
-"
-" Powerline
-
-set rtp+=~/.vim/bundle/powerline/powerline/bindings/vim
-set guifont=Ubuntu\ Mono\ derivative\ Powerline\ 13
+set guifont=Source\ Code\ Pro\ for\ Powerline\ Light
 
 "
 " Ctrl-P
 "
-
 let g:ctrlp_custom_ignore = {
   \ 'dir':  '\v[\/]\.(git|hg|svn)$',
   \ 'file': '\v\.(exe|so|dll|pyc)$',
-  \ 'link': 'some_bad_symbolic_links',
   \ }
 
+"
+" The Silver Searcher (ag)
+"
 if executable('ag')
   " Use ag in CtrlP for listing files. Lightning fast and respects .gitignore
   let g:ctrlp_user_command = 'ag %s -l --nocolor -g ""'
 
   " ag is fast enough that CtrlP doesn't need to cache
   let g:ctrlp_use_caching = 0
+    nnoremap K :Ag! "\b<cword>\b"<CR>:cw<CR>
 endif
 
-"
-" The Silver Searcher (ag)
-"
-nnoremap K :Ag! "\b<cword>\b"<CR>:cw<CR>
 
 "
 " YCM
 "
-
 let g:ycm_autoclose_preview_window_after_completion=1
-let g:ycm_collect_identifiers_from_tags_files = 1       " Let YCM read tags from Ctags file
-let g:ycm_use_ultisnips_completer = 1                   " Default 1, just ensure
 let g:ycm_seed_identifiers_with_syntax = 1              " Completion for programming language's keyword
+
 let g:ycm_complete_in_comments = 1                      " Completion in comments
 let g:ycm_complete_in_strings = 1                       " Completion in string
+
 nnoremap <leader>g :YcmCompleter GoToDefinitionElseDeclaration<CR>
 
 "
 " Syntastic
 "
-
 let g:syntastic_javascript_checkers = ['jshint']
-let g:syntastic_python_checkers=['flake8']
+let g:syntastic_python_checkers=[]
 
 "
 " Pymode
@@ -150,15 +136,8 @@ let g:pymode_folding = 0
 
 
 "
-" Powerline
-"
-
-let g:powerline_config_overrides={"common":{"log_file":"/tmp/powerline.log"}}
-
-"
 " Filetype spesific
 "
-
 autocmd Filetype py setlocal ts=4 sts=4 sw=4 et sta ai
 autocmd Filetype cpp setlocal ts=2 sts=2 sw=2
 autocmd Filetype yaml setlocal ts=2 sts=2 sw=2

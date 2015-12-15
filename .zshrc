@@ -1,7 +1,5 @@
-# Detect platform
-
 if [ -n "$TMUX" ]; then
-    export TERM=screen-256color
+    export TERM=xterm-256color
 else
     export TERM=xterm-256color
 fi
@@ -68,17 +66,13 @@ source $ZSH/oh-my-zsh.sh
 # User configuration
 
 if [[ "$platform" == 'linux' ]]; then
-        export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games"
+    export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games"
 fi
 
 wrapper_path=$(which virtualenvwrapper.sh)
 
 if [ -f  "$wrapper_path" ] ; then
     source virtualenvwrapper.sh
-fi
-
-if [[ "$platform" == 'osx' ]]; then
-        alias tmux="TERM=screen-256color-bce tmux"
 fi
 
 # allow group write
