@@ -1,73 +1,67 @@
-set nocompatible              " be iMproved, required
-filetype off                  " required
+call plug#begin()
 
-" set the runtime path to include Vundle and initialize
-set rtp+=~/.vim/bundle/Vundle.vim
-call vundle#begin()
-
-" let Vundle manage Vundle, required
-Plugin 'VundleVim/Vundle.vim'
+Plug 'tpope/vim-sensible'
+Plug 'Xuyuanp/nerdtree-git-plugin' | Plug 'scrooloose/nerdtree'
 
 " Text processors
-Plugin 'bronson/vim-trailing-whitespace'
-Plugin 'tpope/vim-jdaddy'
+Plug 'bronson/vim-trailing-whitespace'
+Plug 'tpope/vim-jdaddy'
 
 " UI Modules
-Plugin 'scrooloose/nerdtree'
-Plugin 'kien/ctrlp.vim'
-Plugin 'Valloric/YouCompleteMe'
-Plugin 'rking/ag.vim'
-Plugin 'tpope/vim-dispatch'
-Plugin 'majutsushi/tagbar'
+Plug 'Valloric/YouCompleteMe'
+Plug 'junegunn/fzf', { 'dir': '~/.fzf', 'do': 'yes \| ./install' }
+Plug 'tpope/vim-dispatch'
+Plug 'majutsushi/tagbar'
 
 " UI Enhancements
-Plugin 'flazz/vim-colorschemes'
-Plugin 'powerline/powerline', {'rtp': 'powerline/bindings/vim/'}
-Plugin 'Yggdroot/indentLine'
+Plug 'flazz/vim-colorschemes'
+Plug 'powerline/powerline', {'rtp': 'powerline/bindings/vim/'}
+Plug 'Yggdroot/indentLine'
 
-" Misc Plugins
-Plugin 'scrooloose/nerdcommenter'
-Plugin 'scrooloose/syntastic'
-Plugin 'ervandew/supertab'
+" Misc Plugs
+Plug 'scrooloose/nerdcommenter'
+Plug 'scrooloose/syntastic'
+Plug 'ervandew/supertab'
 
 " Git plugins
-Plugin 'airblade/vim-gitgutter'
-Plugin 'tpope/vim-fugitive'
-Plugin 'Xuyuanp/nerdtree-git-plugin'
+Plug 'airblade/vim-gitgutter'
+Plug 'tpope/vim-fugitive'
 
 " Lang: Go
-Plugin 'fatih/vim-go'
+Plug 'fatih/vim-go'
 
 " Lang: Python
-Plugin 'klen/python-mode'
+Plug 'davidhalter/jedi-vim', {'for': 'python'}
 
-"All of your Plugins must be added before the following line
-call vundle#end()            " required
-filetype plugin indent on    " required
+call plug#end()
 
-syntax on
-syntax enable
-set number
-set splitbelow
-set splitright
-
-set smarttab
-set expandtab
-set shiftwidth=4
-set softtabstop=4
-set autoindent
-set tabstop=4
-
-set colorcolumn=80
-
+"
+" Colourscheme
+"
 set background=dark
 colorscheme solarized
 let g:solarized_termcolors = 256
 let g:solarized_termtrans = 1
 
+" Probably only needed on OS X (Terminal)
 set t_Co=16
 
-set backspace=indent,eol,start
+"
+set ignorecase!
+
+" Line numbers
+set number
+
+set splitbelow
+set splitright
+
+set expandtab
+set shiftwidth=4
+set softtabstop=4
+set tabstop=4
+
+" Remind us to keep it short and sweet
+set colorcolumn=80
 
 " Mouse scrolling
 set mouse=a
@@ -83,7 +77,7 @@ autocmd VimEnter * if argc() == 0 && !exists("s:std_in") | NERDTree | endif
 " close vim if the only window left open is a NERDTree
 autocmd bufenter * if (winnr("$") == 1 && exists("b:NERDTree") && b:NERDTree.isTabTree()) | q | endif
 
-let NERDTreeIgnore = ['\.pyc$', '__pycache__']
+let NERDTreeIgnore = ['\.pyc$', '\.egg$', '\.o$', '\~$', '__pycache__$', '\.egg-info$']
 
 map <C-n> :NERDTreeToggle<CR>
 
@@ -92,25 +86,17 @@ autocmd BufNew * wincmd l
 set guifont=Source\ Code\ Pro\ for\ Powerline\ Light
 
 "
-" Ctrl-P
+" FZF
 "
-let g:ctrlp_custom_ignore = {
-  \ 'dir':  '\v[\/]\.(git|hg|svn)$',
-  \ 'file': '\v\.(exe|so|dll|pyc)$',
-  \ }
 
-"
-" The Silver Searcher (ag)
-"
-if executable('ag')
-  " Use ag in CtrlP for listing files. Lightning fast and respects .gitignore
-  let g:ctrlp_user_command = 'ag %s -l --nocolor -g ""'
+" Map main trigger for fuzzy file finder
+noremap <C-p> :FZF<CR>
 
-  " ag is fast enough that CtrlP doesn't need to cache
-  let g:ctrlp_use_caching = 0
-    nnoremap K :Ag! "\b<cword>\b"<CR>:cw<CR>
-endif
+" Ignore .gitignore files when using ctrl-p
+let $FZF_DEFAULT_COMMAND = 'ag -l -g ""'
 
+" Set hight of FZF window
+let g:fzf_height = '25%'
 
 "
 " YCM
@@ -126,8 +112,13 @@ nnoremap <leader>g :YcmCompleter GoToDefinitionElseDeclaration<CR>
 "
 " Syntastic
 "
+let g:syntastic_auto_jump = 0
+let g:syntastic_check_on_open = 1
+let g:syntastic_enable_signs = 1
+let g:syntastic_error_symbol = "✗"
 let g:syntastic_javascript_checkers = ['jshint']
-let g:syntastic_python_checkers=[]
+let g:syntastic_python_checkers=['flake8']
+let g:syntastic_warning_symbol = "⚠"
 
 "
 " Pymode
