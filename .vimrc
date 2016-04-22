@@ -1,13 +1,14 @@
 call plug#begin()
 
+" Sane defaults
 Plug 'tpope/vim-sensible'
-Plug 'Xuyuanp/nerdtree-git-plugin' | Plug 'scrooloose/nerdtree'
 
 " Text processors
 Plug 'bronson/vim-trailing-whitespace'
 Plug 'tpope/vim-jdaddy'
 
 " UI Modules
+Plug 'Xuyuanp/nerdtree-git-plugin' | Plug 'scrooloose/nerdtree'
 Plug 'Valloric/YouCompleteMe'
 Plug 'junegunn/fzf', { 'dir': '~/.fzf', 'do': 'yes \| ./install' }
 Plug 'tpope/vim-dispatch'
@@ -15,23 +16,27 @@ Plug 'majutsushi/tagbar'
 
 " UI Enhancements
 Plug 'flazz/vim-colorschemes'
-Plug 'powerline/powerline', {'rtp': 'powerline/bindings/vim/'}
+"Plug 'powerline/powerline', {'rtp': 'powerline/bindings/vim/'}
+Plug 'vim-airline/vim-airline'
 Plug 'Yggdroot/indentLine'
 
 " Misc Plugs
 Plug 'scrooloose/nerdcommenter'
 Plug 'scrooloose/syntastic'
 Plug 'ervandew/supertab'
+Plug 'gabesoft/vim-ags'
+Plug 'wakatime/vim-wakatime'
 
 " Git plugins
 Plug 'airblade/vim-gitgutter'
-Plug 'tpope/vim-fugitive'
+Plug 'tommcdo/vim-fubitive' | Plug 'tpope/vim-fugitive'
 
 " Lang: Go
-Plug 'fatih/vim-go'
+Plug 'fatih/vim-go', {'for': 'go'}
 
 " Lang: Python
 Plug 'davidhalter/jedi-vim', {'for': 'python'}
+Plug 'fisadev/vim-isort', {'for': 'python'}
 
 call plug#end()
 
@@ -46,8 +51,10 @@ let g:solarized_termtrans = 1
 " Probably only needed on OS X (Terminal)
 set t_Co=16
 
-"
+" Ignore case while searching
 set ignorecase!
+
+set spell spelllang=en_gb
 
 " Line numbers
 set number
@@ -81,9 +88,11 @@ let NERDTreeIgnore = ['\.pyc$', '\.egg$', '\.o$', '\~$', '__pycache__$', '\.egg-
 
 map <C-n> :NERDTreeToggle<CR>
 
+" Focus main split rather than NERDTree
 autocmd BufNew * wincmd l
 
 set guifont=Source\ Code\ Pro\ for\ Powerline\ Light
+let g:airline_powerline_fonts = 1
 
 "
 " FZF
@@ -101,6 +110,7 @@ let g:fzf_height = '25%'
 "
 " YCM
 "
+let g:ycm_server_python_interpreter = "/usr/bin/python"
 let g:ycm_autoclose_preview_window_after_completion=1
 let g:ycm_seed_identifiers_with_syntax = 1              " Completion for programming language's keyword
 
@@ -108,6 +118,9 @@ let g:ycm_complete_in_comments = 1                      " Completion in comments
 let g:ycm_complete_in_strings = 1                       " Completion in string
 
 nnoremap <leader>g :YcmCompleter GoToDefinitionElseDeclaration<CR>
+
+" Syntax checker options
+let g:flake8_ignore="E501"
 
 "
 " Syntastic
@@ -118,13 +131,8 @@ let g:syntastic_enable_signs = 1
 let g:syntastic_error_symbol = "✗"
 let g:syntastic_javascript_checkers = ['jshint']
 let g:syntastic_python_checkers=['flake8']
+let g:syntastic_python_flake8_args='--ignore=E501'
 let g:syntastic_warning_symbol = "⚠"
-
-"
-" Pymode
-"
-let g:pymode_folding = 0
-
 
 "
 " Filetype spesific
@@ -135,6 +143,9 @@ autocmd Filetype yaml setlocal ts=2 sts=2 sw=2
 autocmd Filetype go setlocal ts=4 sts=4 sw=4 et!
 
 autocmd BufNewFile,BufReadPost *.go set filetype=go
+
+" isort mapping
+let g:vim_isort_map = '<C-i>'
 
 "
 " vim-go

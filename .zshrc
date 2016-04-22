@@ -1,11 +1,6 @@
-if [ -n "$TMUX" ]; then
-    export TERM=xterm-256color
-else
-    export TERM=xterm-256color
-fi
-
 platform='unknown'
 unamestr=`uname`
+
 if [[ "$unamestr" == 'Linux' ]]; then
    platform='linux'
 elif [[ "$unamestr" == 'Darwin' ]]; then
@@ -81,9 +76,11 @@ umask 002
 ###
 # GOLANG
 ###
+
 if [[ "$platform" == 'linux' ]]; then
-    export GOPATH=/Projects/go
-    export PATH=$PATH:$GOPATH/bin
+    export GOPATH=$HOME/Projects/go
+    export PATH=$PATH:/usr/local/go/bin
+    export PATH=$PATH:$GOROOT/bin
 else
     export GOPATH=$HOME/go
     export PATH=$PATH:/usr/local/opt/go/libexec/bin
