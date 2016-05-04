@@ -6,6 +6,7 @@ Plug 'tpope/vim-sensible'
 " Text processors
 Plug 'bronson/vim-trailing-whitespace'
 Plug 'tpope/vim-jdaddy'
+Plug 'editorconfig/editorconfig-vim'
 
 " UI Modules
 Plug 'Xuyuanp/nerdtree-git-plugin' | Plug 'scrooloose/nerdtree'
@@ -153,3 +154,8 @@ let g:vim_isort_map = '<C-i>'
 let g:go_auto_type_info = 0
 let g:go_fmt_command = "gofmt"
 au FileType go nmap <Leader>e <Plug>(go-rename)
+
+"
+" editorconfig
+"
+let g:EditorConfig_exclude_patterns = ['fugitive://.*']
