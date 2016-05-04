@@ -101,7 +101,7 @@ export EDITOR='vim'
 # export SSH_KEY_PATH="~/.ssh/dsa_id"
 
 if [[ "$platform" == 'linux' ]]; then
-    alias clipboard='xclip -sel clip'
+    alias clipboard="tr -d '\n' | xclip -sel clip"
 fi
 
 # Set personal aliases, overriding those provided by oh-my-zsh libs,
