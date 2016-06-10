@@ -101,7 +101,7 @@ export EDITOR='vim'
 # export SSH_KEY_PATH="~/.ssh/dsa_id"
 
 if [[ "$platform" == 'linux' ]]; then
-    alias clipboard="tr -d '\n' | xclip -sel clip"
+    alias clipboard="perl -pe 'chomp if eof' | xclip -sel clip"
 fi
 
 # Python
