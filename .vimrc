@@ -32,14 +32,19 @@ Plug 'wakatime/vim-wakatime'
 Plug 'airblade/vim-gitgutter'
 Plug 'tommcdo/vim-fubitive' | Plug 'tpope/vim-fugitive'
 
-" Lang: Go
+" ft=go
 Plug 'fatih/vim-go', {'for': 'go'}
 
-" Lang: Python
+" ft=python
 Plug 'davidhalter/jedi-vim', {'for': 'python'}
 Plug 'fisadev/vim-isort', {'for': 'python'}
 
+" ft=nginx
+Plug 'evanmiller/nginx-vim-syntax'
+
 call plug#end()
+
+set modeline
 
 "
 " Colourscheme
@@ -159,3 +164,8 @@ au FileType go nmap <Leader>e <Plug>(go-rename)
 " editorconfig
 "
 let g:EditorConfig_exclude_patterns = ['fugitive://.*']
+
+"
+" Vagrant
+"
+autocmd BufNewFile,BufRead Vagrantfile set filetype=ruby
