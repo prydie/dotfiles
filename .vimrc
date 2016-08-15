@@ -36,8 +36,9 @@ Plug 'tommcdo/vim-fubitive' | Plug 'tpope/vim-fugitive'
 Plug 'fatih/vim-go', {'for': 'go'}
 
 " ft=python
-Plug 'davidhalter/jedi-vim', {'for': 'python'}
+Plug 'davidhalter/jedi-vim'
 Plug 'fisadev/vim-isort', {'for': 'python'}
+Plug 'jmcantrell/vim-virtualenv'
 
 " ft=nginx
 Plug 'evanmiller/nginx-vim-syntax'
@@ -97,7 +98,7 @@ map <C-n> :NERDTreeToggle<CR>
 " Focus main split rather than NERDTree
 autocmd BufNew * wincmd l
 
-set guifont=Source\ Code\ Pro\ for\ Powerline\ Light
+set guifont=Source\ Code\ Pro\ for\ Powerline\ Regular
 let g:airline_powerline_fonts = 1
 
 "
@@ -117,6 +118,7 @@ let g:fzf_height = '25%'
 " YCM
 "
 let g:ycm_server_python_interpreter = "/usr/bin/python"
+let g:ycm_python_binary_path = 'python'
 let g:ycm_autoclose_preview_window_after_completion=1
 let g:ycm_seed_identifiers_with_syntax = 1              " Completion for programming language's keyword
 
