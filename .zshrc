@@ -1,12 +1,5 @@
-platform='unknown'
+export TERM="xterm-256color"
 unamestr=`uname`
-
-if [[ "$unamestr" == 'Linux' ]]; then
-   platform='linux'
-elif [[ "$unamestr" == 'Darwin' ]]; then
-   platform='osx'
-   export DYLD_FORCE_FLAT_NAMESPACE=1  # fix YCM vim crash
-fi
 
 # Path to your oh-my-zsh installation.
 export ZSH=$HOME/.oh-my-zsh
@@ -17,6 +10,7 @@ export ZSH=$HOME/.oh-my-zsh
 # time that oh-my-zsh is loaded.
 # git clone https://github.com/bhilburn/powerlevel9k.git ~/.oh-my-zsh/custom/themes/powerlevel9k
 ZSH_THEME="powerlevel9k/powerlevel9k"
+POWERLEVEL9K_MODE='awesome-fontconfig'
 POWERLEVEL9K_LEFT_PROMPT_ELEMENTS=(context dir virtualenv vcs)
 POWERLEVEL9K_RIGHT_PROMPT_ELEMENTS=(status time)
 
@@ -66,10 +60,6 @@ source $ZSH/oh-my-zsh.sh
 
 # User configuration
 
-if [[ "$platform" == 'linux' ]]; then
-    export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games"
-fi
-
 wrapper_path=$(which virtualenvwrapper.sh)
 
 if [ -f  "$wrapper_path" ] ; then
@@ -78,20 +68,6 @@ fi
 
 # allow group write
 umask 002
-
-###
-# GOLANG
-###
-
-if [[ "$platform" == 'linux' ]]; then
-    export GOPATH=$HOME/Projects/go
-    export PATH=$PATH:/usr/local/go/bin
-    export PATH=$PATH:$GOROOT/bin
-else
-    export GOPATH=$HOME/go
-    export PATH=$PATH:/usr/local/opt/go/libexec/bin
-
-fi
 
 # export MANPATH="/usr/local/man:$MANPATH"
 
@@ -106,9 +82,7 @@ export EDITOR='vim'
 # ssh
 # export SSH_KEY_PATH="~/.ssh/dsa_id"
 
-if [[ "$platform" == 'linux' ]]; then
-    alias clipboard="perl -pe 'chomp if eof' | xclip -sel clip"
-fi
+alias clipboard="perl -pe 'chomp if eof' | xclip -sel clip"
 
 # Python
 export WORKON_HOME=$HOME/.virtualenvs
