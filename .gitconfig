@@ -4,6 +4,6 @@
 [push]
 	default = simple
 [alias]
-    lastcommit = rev-parse --short HEAD
+	lastcommit = rev-parse --short HEAD
 [core]
 	excludesfile = /home/andrew/.gitignore
