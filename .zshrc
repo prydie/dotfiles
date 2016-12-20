@@ -46,3 +46,7 @@ nexus() {
 
 # FZF
 [ -f ~/.fzf.zsh ] && source ~/.fzf.zsh
+
+# Go
+export GOPATH=$HOME/Projects/go
+export PATH=$PATH:$GOPATH/bin

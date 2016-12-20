@@ -10,24 +10,27 @@ endif
 
 call plug#begin('~/.config/nvim/plugged')
 
-" General
+" Auto completion
 Plug 'Shougo/deoplete.nvim'
 Plug 'zchee/deoplete-jedi'
-Plug 'davidhalter/jedi-vim'
+Plug 'zchee/deoplete-go'
 
+" Misc.
 Plug 'Xuyuanp/nerdtree-git-plugin' | Plug 'scrooloose/nerdtree', { 'on':  'NERDTreeToggle' }
 Plug 'tpope/vim-fugitive'
 Plug 'neomake/neomake'
 Plug 'scrooloose/nerdcommenter'
+Plug 'ervandew/supertab'
+
+" text wrangling
 Plug 'tpope/vim-surround'
+Plug 'vimwiki/vimwiki'
+Plug 'editorconfig/editorconfig-vim'
 
 " UI
-Plug 'bling/vim-airline'
+Plug 'vim-airline/vim-airline'
 Plug 'airblade/vim-gitgutter'
 Plug 'kshenoy/vim-signature'
-
-Plug 'editorconfig/editorconfig-vim'
-Plug 'ervandew/supertab'
 
 " snippets
 Plug 'SirVer/ultisnips'
@@ -36,6 +39,10 @@ Plug 'honza/vim-snippets'
 " In-file searching ala 'ack'
 Plug 'gabesoft/vim-ags'
 
+" language specific
+Plug 'fatih/vim-go'
+Plug 'davidhalter/jedi-vim'
+
 " Fuzzy file finder
 Plug 'junegunn/fzf', { 'dir': '~/.fzf', 'do': './install --all' }
 Plug 'junegunn/fzf.vim'
@@ -43,6 +50,9 @@ Plug 'junegunn/fzf.vim'
 " Syntax highlighting
 Plug 'stephpy/vim-yaml'
 Plug 'Glench/Vim-Jinja2-Syntax'
+Plug 'evanmiller/nginx-vim-syntax'
+Plug 'pearofducks/ansible-vim'
+Plug 'Matt-Deacalion/vim-systemd-syntax'
 
 " Ctags tagbar
 Plug 'majutsushi/tagbar'
@@ -144,6 +154,9 @@ autocmd BufWritePost *.py Neomake flake8
 " npm install -g eslint
 autocmd BufWritePost *.js Neomake eslint
 
+" :GoInstallBinaries
+autocmd BufWritePost *.go Neomake go golint govet
+
 " Airline configuration
 """""""""""""""""""""""
 
@@ -191,7 +204,7 @@ let g:airline_section_x = '%{PencilMode()}'
 
 " Editorconfig exceptions
 """""""""""""""""""""""""
-let g:EditorConfig_exclude_patterns = ['fugitive://.*', 'scp://.*']
+let g:EditorConfig_exclude_patterns = ['fugitive://.*', 'scp://.*', '[Location List]']
 
 " nerdcommenter
 """""""""""""""
@@ -225,3 +238,10 @@ let g:deoplete#file#enable_buffer_path=1
 """""""""""""""""""""""""""""""""
 let g:jedi#completions_enabled = 0
 autocmd BufWinEnter '__doc__' setlocal bufhidden=delete
+
+" vim-wiki
+"""""""""""""""""""""""""""""""""
+let wiki = {}
+let wiki.path = '~/Dropbox/Apps/vimwiki/'
+let wiki.nested_syntaxes = {'python': 'python'}
+let g:vimwiki_list = [wiki]
