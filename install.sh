@@ -1,5 +1,16 @@
 #!/usr/bin/env bash
 
+set -e
+
+YES_MODE=0
+
+while getopts 'y' flag; do
+  case "${flag}" in
+    y) YES_MODE=1 ;;
+    *) error "Unexpected option ${flag}" ;;
+  esac
+done
+
 printf "\e[38;5;87m"
 cat << "EOF"
 
@@ -19,7 +30,6 @@ DOTFILES_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 
 # Some useful general vars
 platform=$(uname)
-USER_SHELL=$(getent passwd $LOGNAME | cut -d: -f7)
 
 # Neovim vars
 NVIM_DIR="$HOME/.config/nvim"
@@ -58,9 +68,6 @@ function print_result() {
   [ $1 -eq 0 ] \
     && print_success "$2" \
     || print_error "$2"
-
-  [ "$3" == "true" ] && [ $1 -ne 0 ] \
-    && exit
 }
 
 function execute() {
@@ -89,6 +96,10 @@ function answer_is_yes() {
 }
 
 function ask_for_confirmation() {
+  if [ "$YES_MODE" -eq 1 ]; then
+    return
+  fi
+
   print_question "$1 (y/n) "
   while true; do
     read yn
@@ -164,7 +175,7 @@ function zsh_install() {
   else
     # If the platform is Linux, try an apt-get to install zsh and then recurse
     if [[ $platform == 'Linux' ]]; then
-      sudo apt-get install zsh
+      sudo apt-get install -y zsh &> /dev/null
       zsh_install
     # If the platform is OS X, tell the user to install zsh :)
     elif [[ $platform == 'Darwin' ]]; then
@@ -177,10 +188,10 @@ function zsh_install() {
 
 function zsh_set_as_default_shell() {
   # Set the default shell to zsh if it isn't currently set to zsh
-  if [[ $(echo $USER_SHELL) == $(which zsh) ]]; then
+  if [[ $(getent passwd $LOGNAME | cut -d: -f7) == $(which zsh) ]]; then
     print_success "Zsh set as default shell"
   else
-    chsh -s $(which zsh)
+    sudo chsh -s $(which zsh) $LOGNAME
     zsh_set_as_default_shell
   fi
 }
@@ -190,15 +201,14 @@ function zsh_setup() {
 
   powerlevel9k_install
   oh_my_zsh_install
-  zsh_set_as_default_shell
   zsh_install
+  zsh_set_as_default_shell
 }
 
 # Neovim
 # ------
 
 # TODO
-#  - Install linters
 #  - Run :PlugInstall?
 #  - run :GoInstallBinaries?
 
@@ -249,12 +259,12 @@ function neovim_install() {
     return
   else
     if [[ $platform == 'Linux' ]]; then
-      execute "sudo apt-get install software-properties-common" \
+      execute "sudo apt-get install -y software-properties-common" \
         "Installing software-properties-common"
       execute "sudo add-apt-repository ppa:neovim-ppa/unstable" \
         "Adding neovim PPA"
-      execute "sudo apt-get update" "apt update"
-      execute "sudo apt-get install neovim" "apt install neovim"
+      sudo apt-get update &> /dev/null
+      sudo apt-get install -y neovim &> /dev/null
     elif [[ $platform == 'Darwin' ]]; then
       execute "brew install neovim/neovim/neovim" "brew installing neovim"
     fi
