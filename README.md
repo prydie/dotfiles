@@ -1,5 +1,7 @@
 # Prydie's dotfiles
 
+[![Build Status](https://travis-ci.org/prydie/dotfiles.svg?branch=master)](https://travis-ci.org/prydie/dotfiles)
+
 A not particularly well thought through collection of dotfiles.
 
 ## Tools of the trade
