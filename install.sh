@@ -281,12 +281,18 @@ function neovim_setup() {
 
   neovim_install_python_hosts
   neovim_install_checkers
+  symlink_dotfile ".config/nvim/init.vim" ".config/nvim/init.vim"
+
+  set +e
+  nvim +PlugInstall +qall &> /dev/null
+  nvim +GoInstallBinaries +qall &> /dev/null
+  set -e
+  print_success "Installed vim plugins"
 }
 
 function symlink_dotfiles() {
   print_info "Symlinking dotfiles..."
 
-  symlink_dotfile ".config/init.vim" ".config/init.vim"
   symlink_dotfile ".gitconfig" ".gitconfig"
   symlink_dotfile ".gitignore" ".gitignore"
   symlink_dotfile ".tmux.conf" ".tmux.conf"
