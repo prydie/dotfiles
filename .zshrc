@@ -1,4 +1,5 @@
 [[ $TMUX = "" ]] && export TERM="xterm-256color"
+
 unamestr=`uname`
 
 export ZSH=$HOME/.oh-my-zsh
@@ -9,11 +10,6 @@ POWERLEVEL9K_LEFT_PROMPT_ELEMENTS=(context dir virtualenv vcs)
 POWERLEVEL9K_RIGHT_PROMPT_ELEMENTS=(status time)
 
 DEFAULT_USER="andrew"
-
-# Uncomment the following line if you want to disable marking untracked files
-# under VCS as dirty. This makes repository status check for large repositories
-# much, much faster.
-# DISABLE_UNTRACKED_FILES_DIRTY="true"
 
 plugins=(git vagrant httpie python pip tmux npm gulp virtualenv)
 
@@ -33,6 +29,7 @@ export EDITOR='nvim'
 
 # virtualenvs
 export WORKON_HOME=$HOME/.virtualenvs
+
 wrapper_path=$(which virtualenvwrapper.sh)
 if [ -f  "$wrapper_path" ] ; then
     source virtualenvwrapper.sh

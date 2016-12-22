@@ -2,15 +2,6 @@
 
 set -e
 
-YES_MODE=0
-
-while getopts 'y' flag; do
-  case "${flag}" in
-    y) YES_MODE=1 ;;
-    *) error "Unexpected option ${flag}" ;;
-  esac
-done
-
 printf "\e[38;5;87m"
 cat << "EOF"
 
@@ -25,21 +16,26 @@ cat << "EOF"
 EOF
 printf "\e[0m"
 
-# Get the dotfiles directory's absolute path
+# opts.
+# -----
+
+# Set to 1 using -y flag. Suppresses all prompts.
+YES_MODE=0
+
+while getopts 'y' flag; do
+  case "${flag}" in
+    y) YES_MODE=1 ;;
+    *) error "Unexpected option ${flag}" ;;
+  esac
+done
+
+# Globals
+# -------
+
 DOTFILES_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-
-# Some useful general vars
 platform=$(uname)
-
-# Neovim vars
 NVIM_DIR="$HOME/.config/nvim"
-
-# Zsh vars
 OH_MY_ZSH_DIR=$HOME/.oh-my-zsh/
-
-# Folders created inside $NVIM_DIR
-declare -a NVIM_DIRS=(
-)
 
 # Utilities
 # ---------
@@ -212,16 +208,6 @@ function zsh_setup() {
 # Neovim
 # ------
 
-# TODO
-#  - Run :PlugInstall?
-#  - run :GoInstallBinaries?
-
-function neovim_mkdirs() {
-  for d in ${NVIM_DIRS[@]}; do
-    mkd "$NVIM_DIR/$d"
-  done
-}
-
 function neovim_install_python_hosts() {
   local venvs_dir="$NVIM_DIR/virtualenvs"
 
@@ -230,12 +216,15 @@ function neovim_install_python_hosts() {
   local neopy2="$venvs_dir/neovim2"
   local neopy3="$venvs_dir/neovim3"
 
+  # PY2
   if [ ! -d "$neopy2" ]; then
     execute "virtualenv $neopy2 --python=python2" "Creating neovim py2 venv"
     execute "$neopy2/bin/pip install neovim" "Installing neovim (pip2)"
   else
     print_success "Neovim py2 venv installed"
   fi
+
+  # PY3
   if [ ! -d "$neopy3" ]; then
     execute "virtualenv $neopy3 --python=python3" "Creating neovim py3 env"
     execute "$neopy2/bin/pip install neovim" "Installing neovim (pip3)"
@@ -268,7 +257,7 @@ function neovim_install() {
       execute "sudo add-apt-repository ppa:neovim-ppa/unstable" \
         "Adding neovim PPA"
       sudo apt-get update &> /dev/null
-      sudo apt-get install -y neovim &> /dev/null
+      execute "sudo apt-get install -y neovim" "Installed neovim"
     elif [[ $platform == 'Darwin' ]]; then
       execute "brew install neovim/neovim/neovim" "brew installing neovim"
     fi
@@ -280,6 +269,7 @@ function neovim_setup() {
   print_info "Installing neovim..."
 
   neovim_install
+
   mkdir -p $NVIM_DIR/{backup,undo,swap}_files &> /dev/null
   print_result $? "Creating neovim dirs"
 
@@ -291,6 +281,7 @@ function neovim_setup() {
   nvim +PlugInstall +qall &> /dev/null
   nvim +GoInstallBinaries +qall &> /dev/null
   set -e
+
   print_success "Installed vim plugins"
 }
 
