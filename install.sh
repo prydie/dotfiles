@@ -90,6 +90,10 @@ function mkd() {
 }
 
 function answer_is_yes() {
+  if [ "$YES_MODE" -eq 1 ]; then
+    return
+  fi
+
   [[ "$REPLY" =~ ^[Yy]$ ]] \
     && return 0 \
     || return 1
