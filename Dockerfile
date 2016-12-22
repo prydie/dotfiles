@@ -14,7 +14,6 @@ RUN apt-get update -qq && \
       python-pip \
       sudo \
       tmux \
-      nodejs \
     && apt-get clean
 
 RUN curl -sL https://deb.nodesource.com/setup_6.x | sudo -E bash -
