@@ -2,21 +2,23 @@
 """"""""""""""""
 
 " Autoinstall Plug
-if empty(glob('~/.config/nvim/autoload/plug.vim'))
-  silent !curl -fLo ~/.config/nvim/autoload/plug.vim --create-dirs
-        \ https://raw.githubusercontent.com/junegunn/vim-plug/master/plug.vim
-  autocmd VimEnter * PlugInstall
+if empty(glob('~/.local/share/nvim/plugged'))
+  silent !curl -fLo ~/.local/share/nvim/site/autoload/plug.vim --create-dirs
+    \ https://raw.githubusercontent.com/junegunn/vim-plug/master/plug.vim
+  autocmd VimEnter * PlugInstall | source $MYVIMRC
 endif
 
-call plug#begin('~/.config/nvim/plugged')
+call plug#begin('~/.local/share/nvim/plugged')
 
 " Auto completion
-Plug 'Shougo/deoplete.nvim'
+Plug 'Shougo/deoplete.nvim', { 'do': ':UpdateRemotePlugins' }
 Plug 'zchee/deoplete-jedi'
 Plug 'zchee/deoplete-go'
 
 " Misc.
-Plug 'Xuyuanp/nerdtree-git-plugin' | Plug 'scrooloose/nerdtree', { 'on':  'NERDTreeToggle' }
+Plug 'scrooloose/nerdtree', { 'on':  'NERDTreeToggle' }
+  Plug 'Xuyuanp/nerdtree-git-plugin'
+
 Plug 'tpope/vim-fugitive'
 Plug 'neomake/neomake'
 Plug 'scrooloose/nerdcommenter'
@@ -34,18 +36,18 @@ Plug 'kshenoy/vim-signature'
 
 " snippets
 Plug 'SirVer/ultisnips'
-Plug 'honza/vim-snippets'
+  Plug 'honza/vim-snippets'
 
 " In-file searching ala 'ack'
 Plug 'gabesoft/vim-ags'
 
 " language specific
-Plug 'fatih/vim-go'
+Plug 'fatih/vim-go', { 'do': ':GoInstallBinaries' }
 Plug 'davidhalter/jedi-vim'
 
 " Fuzzy file finder
 Plug 'junegunn/fzf', { 'dir': '~/.fzf', 'do': './install --all' }
-Plug 'junegunn/fzf.vim'
+  Plug 'junegunn/fzf.vim'
 
 " Syntax highlighting
 Plug 'stephpy/vim-yaml'

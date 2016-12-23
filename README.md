@@ -26,3 +26,21 @@ listed below:
  - [nicksp/dotfiles](https://github.com/nicksp/dotfiles)
  - [gabrielelana/awesome-terminal-fonts](https://github.com/gabrielelana/awesome-terminal-fonts)
    for the Source Code Pro variant.
+
+## Requirements
+
+There are a number of requirements I haven't bothered automating their
+installation. These include:
+
+ - `git`
+ - `tmux`
+ - `curl`
+ - `python`
+ - `python3`
+ - `python-pip`
+ - `python3-pip`
+ - `ruby`
+ - `pip`
+ - `npm` (`nodejs`)
+
+ For a more complete list see the `DockerFile`.

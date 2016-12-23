@@ -159,8 +159,11 @@ function powerlevel9k_install() {
 
 function oh_my_zsh_install() {
   # Install Oh My Zsh if it isn't already present
-  if [[ ! -d $HOME/.oh-my-zsh/ ]]; then
-    sh -c "$(curl -fsSL https://raw.githubusercontent.com/robbyrussell/oh-my-zsh/master/tools/install.sh)"
+  if [[ ! -d "$OH_MY_ZSH_DIR" ]]; then
+    set +e
+    sh -c "$(curl -fsSL https://raw.githubusercontent.com/robbyrussell/oh-my-zsh/master/tools/install.sh)" &> /dev/null
+    set -e
+
     oh_my_zsh_install
   else
     print_success "Oh My Zsh installed"
@@ -199,10 +202,9 @@ function zsh_set_as_default_shell() {
 function zsh_setup() {
   print_info "Installing Zsh..."
 
-  powerlevel9k_install
-  oh_my_zsh_install
   zsh_install
-  zsh_set_as_default_shell
+  oh_my_zsh_install
+  powerlevel9k_install
 }
 
 # Neovim
@@ -229,7 +231,7 @@ function neovim_install() {
     if [[ $platform == 'Linux' ]]; then
       execute "sudo apt-get install -y software-properties-common" \
         "Installing software-properties-common"
-      execute "sudo add-apt-repository ppa:neovim-ppa/unstable" \
+      execute "sudo add-apt-repository ppa:neovim-ppa/unstable -y" \
         "Adding neovim PPA"
       sudo apt-get update &> /dev/null
       execute "sudo apt-get install -y neovim" "Installed neovim"
@@ -253,13 +255,12 @@ function neovim_setup() {
   execute "sudo gem install neovim" "Install neovim (ruby gem)"
 
   neovim_install_checkers
+
   symlink_dotfile ".config/nvim/init.vim" ".config/nvim/init.vim"
 
   set +e
   nvim +PlugInstall +qall &> /dev/null
-  nvim +GoInstallBinaries +qall &> /dev/null
   set -e
-
   print_success "Installed vim plugins"
 }
 
