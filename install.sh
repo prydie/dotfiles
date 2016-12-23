@@ -208,31 +208,6 @@ function zsh_setup() {
 # Neovim
 # ------
 
-function neovim_install_python_hosts() {
-  local venvs_dir="$NVIM_DIR/virtualenvs"
-
-  mkd "$venvs_dir"
-
-  local neopy2="$venvs_dir/neovim2"
-  local neopy3="$venvs_dir/neovim3"
-
-  # PY2
-  if [ ! -d "$neopy2" ]; then
-    execute "virtualenv $neopy2 --python=python2" "Creating neovim py2 venv"
-    execute "$neopy2/bin/pip install neovim" "Installing neovim (pip2)"
-  else
-    print_success "Neovim py2 venv installed"
-  fi
-
-  # PY3
-  if [ ! -d "$neopy3" ]; then
-    execute "virtualenv $neopy3 --python=python3" "Creating neovim py3 env"
-    execute "$neopy2/bin/pip install neovim" "Installing neovim (pip3)"
-  else
-    print_success "Neovim py3 venv installed"
-  fi
-}
-
 function neovim_install_checkers() {
   if [ ! -x "$(command -v "flake8")" ]; then
     execute "pip install --user flake8" "Installing flake8"
@@ -273,7 +248,10 @@ function neovim_setup() {
   mkdir -p $NVIM_DIR/{backup,undo,swap}_files &> /dev/null
   print_result $? "Creating neovim dirs"
 
-  neovim_install_python_hosts
+  execute "pip2 install --user --upgrade neovim" "Install neovim (py2)"
+  execute "pip3 install --user --upgrade neovim" "Install neovim (py3)"
+  execute "sudo gem install neovim" "Install neovim (ruby gem)"
+
   neovim_install_checkers
   symlink_dotfile ".config/nvim/init.vim" ".config/nvim/init.vim"
 
