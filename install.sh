@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
 
-set -e
+set -o errexit
+set -o pipefail
+set -o nounset
 
-printf "\e[38;5;87m"
-cat << "EOF"
+function print_banner() {
+  printf "\e[38;5;87m"
+  cat << "EOF"
 
   ██████╗ ██████╗ ██╗   ██╗██████╗ ██╗███████╗███████╗       ███████╗██╗██╗     ███████╗███████╗
   ██╔══██╗██╔══██╗╚██╗ ██╔╝██╔══██╗██║██╔════╝██╔════╝       ██╔════╝██║██║     ██╔════╝██╔════╝
@@ -14,35 +17,22 @@ cat << "EOF"
 █████╗█████╗█████╗█████╗█████╗█████╗█████╗█████╗█████╗█████╗█████╗█████╗█████╗█████╗█████╗█████╗
 ╚════╝╚════╝╚════╝╚════╝╚════╝╚════╝╚════╝╚════╝╚════╝╚════╝╚════╝╚════╝╚════╝╚════╝╚════╝╚════╝
 EOF
-printf "\e[0m"
-
-# opts.
-# -----
-
-# Set to 1 using -y flag. Suppresses all prompts.
-YES_MODE=0
-
-while getopts 'y' flag; do
-  case "${flag}" in
-    y) YES_MODE=1 ;;
-    *) error "Unexpected option ${flag}" ;;
-  esac
-done
+  printf "\e[0m"
+}
 
 # Globals
 # -------
 
-DOTFILES_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+__dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd )"
 platform=$(uname)
-NVIM_DIR="$HOME/.config/nvim"
-OH_MY_ZSH_DIR=$HOME/.oh-my-zsh/
+NVIM_DIR="${HOME}/.config/nvim"
 
 # Utilities
 # ---------
 
 function print_error() {
   # Print output in red
-  printf "\e[0;31m  [✖] $1 $2\e[0m\n"
+  printf "\e[0;31m  [✖] $1 \e[0m\n"
 }
 
 function print_question() {
@@ -86,24 +76,24 @@ function mkd() {
 }
 
 function answer_is_yes() {
-  if [ "$YES_MODE" -eq 1 ]; then
+  if [ "${YES_MODE}" -eq 1 ]; then
     return
   fi
 
-  [[ "$REPLY" =~ ^[Yy]$ ]] \
+  [[ "${REPLY}" =~ ^[Yy]$ ]] \
     && return 0 \
     || return 1
 }
 
 function ask_for_confirmation() {
-  if [ "$YES_MODE" -eq 1 ]; then
+  if [ "${YES_MODE}" -eq 1 ]; then
     return
   fi
 
   print_question "$1 (y/n) "
   while true; do
     read yn
-    case $yn in
+    case ${yn} in
       [Yy]* ) break;;
       [Nn]* ) exit;;
       * ) print_question "$1 (y/n) ";;
@@ -113,23 +103,39 @@ function ask_for_confirmation() {
 }
 
 function symlink_dotfile() {
-    local source_file="$DOTFILES_DIR/$1"
-    local target_file="$HOME/$2"
+    local source_file="${__dir}/$1"
+    local target_file="${HOME}/$2"
 
-    if [ ! -e "$target_file" ]; then
-      execute "ln -fs $source_file $target_file" "$target_file → $source_file"
-    elif [ "$(readlink "$target_file")" == "$source_file" ]; then
-      print_success "$target_file → $source_file"
+    if [ ! -e "${target_file}" ]; then
+      execute "ln -fs ${source_file} ${target_file}" \
+        "${target_file} → ${source_file}"
+    elif [ "$(readlink "${target_file}")" == "${source_file}" ]; then
+      print_success "${target_file} → ${source_file}"
     else
-      ask_for_confirmation "'$target_file' already exists, do you want to overwrite it?"
+      ask_for_confirmation "'${target_file}' already exists, do you want to overwrite it?"
       if answer_is_yes; then
-        rm -rf "$target_file"
-        execute "ln -fs $source_file $target_file" "$target_file → $source_file"
+        rm -rf "${target_file}"
+        execute "ln -fs ${source_file} ${target_file}" "${target_file} → ${source_file}"
       else
-        print_error "$target_file → $source_file"
+        print_error "${target_file} → ${source_file}"
       fi
     fi
 }
+
+
+# Opts.
+# -----
+
+# Set to 1 using -y flag. Suppresses all prompts.
+YES_MODE=0
+
+while getopts 'yv' flag; do
+  case "${flag}" in
+    y) YES_MODE=1 ;;
+    v) set -x ;;
+    *) print_error "Unexpected option ${flag}" ;;
+  esac
+done
 
 # Python
 # ------
@@ -147,55 +153,26 @@ function python_setup() {
 # Zsh
 # ---
 
-function powerlevel9k_install() {
-  local target=$OH_MY_ZSH_DIR/custom/themes/powerlevel9k
-  if [[ -d $target ]]; then
-    print_success "powerlevel9k installed"
+function antigen_install() {
+  if [[ ! -f "${HOME}/antigen.zsh" ]]; then
+    curl -fsSL https://cdn.rawgit.com/zsh-users/antigen/v1.3.1/bin/antigen.zsh \
+      > ${HOME}/antigen.zsh
+    antigen_install
   else
-    execute "git clone https://github.com/bhilburn/powerlevel9k.git $target" \
-      "Cloning powerlevel9k"
-  fi
-}
-
-function oh_my_zsh_install() {
-  # Install Oh My Zsh if it isn't already present
-  if [[ ! -d "$OH_MY_ZSH_DIR" ]]; then
-    set +e
-    sh -c "$(curl -fsSL https://raw.githubusercontent.com/robbyrussell/oh-my-zsh/master/tools/install.sh)" &> /dev/null
-    set -e
-
-    oh_my_zsh_install
-  else
-    print_success "Oh My Zsh installed"
+    print_success "antigen already installed"
   fi
 }
 
 function zsh_install() {
   # Test to see if Zsh is installed.  If it is:
-  if [ -f /bin/zsh -o -f /usr/bin/zsh ]; then
-    print_success "Zsh installed"
-    return
+  if [ -x "$(command -v "zsh")" ]; then
+    print_success "Zsh already installed"
   else
-    # If the platform is Linux, try an apt-get to install zsh and then recurse
-    if [[ $platform == 'Linux' ]]; then
-      sudo apt-get install -y zsh &> /dev/null
-      zsh_install
-    # If the platform is OS X, tell the user to install zsh :)
-    elif [[ $platform == 'Darwin' ]]; then
-      echo "We'll install zsh, then re-run this script!"
-      brew install zsh
-      exit
+    if [[ "${platform}" == "Linux" ]]; then
+      execute "sudo apt-get install -y zsh" "Installing Zsh"
+    elif [[ "${platform}" == "Darwin" ]]; then
+      execute "brew install zsh" "Installed ZSH"
     fi
-  fi
-}
-
-function zsh_set_as_default_shell() {
-  # Set the default shell to zsh if it isn't currently set to zsh
-  if [[ $(getent passwd $LOGNAME | cut -d: -f7) == $(which zsh) ]]; then
-    print_success "Zsh set as default shell"
-  else
-    sudo chsh -s $(which zsh) $LOGNAME
-    zsh_set_as_default_shell
   fi
 }
 
@@ -203,8 +180,7 @@ function zsh_setup() {
   print_info "Installing Zsh..."
 
   zsh_install
-  oh_my_zsh_install
-  powerlevel9k_install
+  antigen_install
 }
 
 # Neovim
@@ -224,22 +200,22 @@ function neovim_install_checkers() {
 }
 
 function neovim_install() {
-  if [ -f /bin/nvim -o -f /usr/bin/nvim ]; then
+  if [ "$(command -v "nvim")" ]; then
     print_success "Neovim installed"
     return
   else
-    if [[ $platform == 'Linux' ]]; then
+    if [[ "${platform}" == "Linux" ]]; then
       execute "sudo apt-get install -y software-properties-common" \
         "Installing software-properties-common"
       execute "sudo add-apt-repository ppa:neovim-ppa/unstable -y" \
         "Adding neovim PPA"
       sudo apt-get update &> /dev/null
       execute "sudo apt-get install -y neovim" "Installed neovim"
-    elif [[ $platform == 'Darwin' ]]; then
+    elif [[ ${platform} == "Darwin" ]]; then
       execute "brew install neovim/neovim/neovim" "brew installing neovim"
+      neovim_install
     fi
   fi
-  neovim_install
 }
 
 function neovim_setup() {
@@ -247,9 +223,10 @@ function neovim_setup() {
 
   neovim_install
 
-  mkdir -p $NVIM_DIR/{backup,undo,swap}_files &> /dev/null
+  mkdir -p ${NVIM_DIR}/{backup,undo,swap}_files &> /dev/null
   print_result $? "Creating neovim dirs"
 
+  # Enstall neovim python providers
   execute "pip2 install --user --upgrade neovim" "Install neovim (py2)"
   execute "pip3 install --user --upgrade neovim" "Install neovim (py3)"
   execute "sudo gem install neovim" "Install neovim (ruby gem)"
@@ -258,10 +235,22 @@ function neovim_setup() {
 
   symlink_dotfile ".config/nvim/init.vim" ".config/nvim/init.vim"
 
-  set +e
+  # Bootstrap neovim. We blindly say we've been successful as
+  set +o errexit
   nvim +PlugInstall +qall &> /dev/null
-  set -e
-  print_success "Installed vim plugins"
+  nvim +GoInstallBinaries +qall &> /dev/null
+  nvim -es '+CheckHealth' '+w healthcheck.log' '+qa!' &> /dev/null
+  set -o errexit
+
+  local healthcheck_warnings=$(cat ${__dir}/healthcheck.log | grep -o WARNING | wc -l)
+
+  # We accept 1 WARNING as in CI it's the system clipboard
+  if [ "${healthcheck_warnings}" -gt 1 ]; then
+    print_error "Git healthcheck failed. See ${__dir}/healthcheck.log for details."
+  else
+    print_success "Installed neovim plugins. CheckHealth passed."
+    rm "${__dir}/healthcheck.log"
+  fi
 }
 
 function symlink_dotfiles() {
@@ -275,12 +264,14 @@ function symlink_dotfiles() {
 }
 
 function fonts_install() {
-  mkd "$HOME/.fonts/"
-  execute "cp .fonts/SourceCodePro+Powerline+Awesome+Regular.ttf $HOME/.fonts/" \
+  mkd "${HOME}/.fonts/"
+  execute "cp .fonts/SourceCodePro+Powerline+Awesome+Regular.ttf ${HOME}/.fonts/" \
     "Installed Source Code Pro Powerline Awesome"
 }
 
 function main () {
+  print_banner
+
   ask_for_confirmation "Warning: this will overwrite your current dotfiles. Continue?"
   if [ ! answer_is_yes ]; then
     exit

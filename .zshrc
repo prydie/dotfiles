@@ -2,19 +2,43 @@
 
 unamestr=`uname`
 
-export ZSH=$HOME/.oh-my-zsh
-
-ZSH_THEME="powerlevel9k/powerlevel9k"
+# powerlevel9k settings
 POWERLEVEL9K_MODE='awesome-fontconfig'
 POWERLEVEL9K_LEFT_PROMPT_ELEMENTS=(context dir virtualenv vcs)
 POWERLEVEL9K_RIGHT_PROMPT_ELEMENTS=(status time)
 POWERLEVEL9K_MODE='flat'
 
+source $HOME/antigen.zsh
+
+# Load the oh-my-zsh's library
+antigen use oh-my-zsh
+
+antigen bundles <<EOBUNDLES
+vagrant
+command-not-found
+colored-man-pages
+git
+httpie
+python
+pip
+tmux
+npm
+gulp
+virtualenv
+zsh-users/zsh-syntax-highlighting
+zsh-users/zsh-autosuggestions
+zsh-users/zsh-completions
+EOBUNDLES
+
+
+
+# Load the theme
+antigen theme bhilburn/powerlevel9k powerlevel9k
+
+# Tell antigen that you're done
+antigen apply
+
 DEFAULT_USER="andrew"
-
-plugins=(git vagrant httpie python pip tmux npm gulp virtualenv)
-
-source $ZSH/oh-my-zsh.sh
 
 # allow group write
 umask 002
