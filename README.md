@@ -24,3 +24,5 @@ many places to provide a comprehensive list here. Some more notable sources are
 listed below:
 
  - [nicksp/dotfiles](https://github.com/nicksp/dotfiles)
+ - [gabrielelana/awesome-terminal-fonts](https://github.com/gabrielelana/awesome-terminal-fonts)
+   for the Source Code Pro variant.

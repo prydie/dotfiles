@@ -295,6 +295,12 @@ function symlink_dotfiles() {
   symlink_dotfile ".editorconfig" ".editorconfig"
 }
 
+function fonts_install() {
+  mkd "$HOME/.fonts/"
+  execute "cp .fonts/SourceCodePro+Powerline+Awesome+Regular.ttf $HOME/.fonts/" \
+    "Installed Source Code Pro Powerline Awesome"
+}
+
 function main () {
   ask_for_confirmation "Warning: this will overwrite your current dotfiles. Continue?"
   if [ ! answer_is_yes ]; then
@@ -305,6 +311,7 @@ function main () {
   zsh_setup
   neovim_setup
   symlink_dotfiles
+  fonts_install
 }
 
 main
