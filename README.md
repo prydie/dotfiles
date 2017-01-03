@@ -44,3 +44,14 @@ installation. These include:
  - `npm` (`nodejs`)
 
  For a more complete list see the `DockerFile`.
+
+### Mac OS X
+
+There is no CI for OS X in place so installation is a little more involved,
+however, it is tested.
+
+Additional Steps:
+
+ - Install homebrew: `/usr/bin/ruby -e "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/master/install)"`
+ - Install pip https://pip.pypa.io/en/stable/installing/
+ - `brew install python3 tmux wget node`

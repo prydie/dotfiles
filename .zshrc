@@ -1,6 +1,6 @@
 [[ $TMUX = "" ]] && export TERM="xterm-256color"
 
-unamestr=`uname`
+unamestr=$(uname)
 
 # powerlevel9k settings
 POWERLEVEL9K_MODE='awesome-fontconfig'
@@ -19,6 +19,7 @@ command-not-found
 colored-man-pages
 git
 httpie
+pass
 python
 pip
 tmux
@@ -66,9 +67,32 @@ nexus() {
     sudo service openvpn@nexus $1
 }
 
+# Check if we can read given files and source those we can.
+xsource() {
+    if (( ${#argv} < 1 )) ; then
+        printf 'usage: xsource FILE(s)...\n' >&2
+        return 1
+    fi
+
+    while (( ${#argv} > 0 )) ; do
+        [[ -r "$1" ]] && source "$1"
+        shift
+    done
+    return 0
+}
+
+# Adds a new directory at the END of $PATH checking whether it exists or not
+pathadd() {
+    if [ -d "$1" ] && [[ ":$PATH:" != *":$1:"* ]]; then
+        PATH="${PATH:+"$PATH:"}$1"
+    fi
+}
+
 # FZF
 [ -f ~/.fzf.zsh ] && source ~/.fzf.zsh
 
 # Go
 export GOPATH=$HOME/Projects/go
-export PATH=$PATH:$GOPATH/bin
+pathadd "$GOPATH/bin"
+
+xsource $HOME/.zshrc.local

@@ -113,7 +113,7 @@ function symlink_dotfile() {
       print_success "${target_file} → ${source_file}"
     else
       ask_for_confirmation "'${target_file}' already exists, do you want to overwrite it?"
-      if answer_is_yes; then
+      if [ answer_is_yes ]; then
         rm -rf "${target_file}"
         execute "ln -fs ${source_file} ${target_file}" "${target_file} → ${source_file}"
       else
@@ -157,7 +157,7 @@ function antigen_install() {
   if [[ ! -f "${HOME}/antigen.zsh" ]]; then
     curl -fsSL https://cdn.rawgit.com/zsh-users/antigen/v1.3.1/bin/antigen.zsh \
       > ${HOME}/antigen.zsh
-    antigen_install
+    print_success "antigen installed"
   else
     print_success "antigen already installed"
   fi
@@ -264,8 +264,14 @@ function symlink_dotfiles() {
 }
 
 function fonts_install() {
-  mkd "${HOME}/.fonts/"
-  execute "cp .fonts/SourceCodePro+Powerline+Awesome+Regular.ttf ${HOME}/.fonts/" \
+  if [[ "${platform}" == "Linux" ]]; then
+    local fonts_dir="${HOME}/.fonts/"
+  elif [[ "${platform}" == "Darwin" ]]; then
+    local fonts_dir="$HOME/Library/Fonts/"
+  fi
+
+  mkd "${fonts_dir}"
+  execute "cp .fonts/SourceCodePro+Powerline+Awesome+Regular.ttf ${fonts_dir}" \
     "Installed Source Code Pro Powerline Awesome"
 }
 
