@@ -59,10 +59,6 @@ Plug 'Matt-Deacalion/vim-systemd-syntax'
 " Ctags tagbar
 Plug 'majutsushi/tagbar'
 
-" Allow better soft-wrapping of text in prose-based
-" formats e.g. markdown.
-Plug 'reedes/vim-pencil'
-
 " Markdown syntax augmentation
 Plug 'tpope/vim-markdown'
 Plug 'junegunn/goyo.vim'
@@ -113,6 +109,7 @@ match ErrorMsg '^\(<\|=\|>\)\{7\}\([^=].\+\)\?$'
 
 " Special characters for hilighting non-priting spaces/tabs/etc.
 set list listchars=tab:»\ ,trail:·
+autocmd Filetype go setlocal nolist
 
 hi Search ctermfg=0 ctermbg=11 guifg=Black guibg=Yellow
 hi SpellBad ctermfg=15 ctermbg=9 guifg=White guibg=Red
@@ -180,25 +177,6 @@ set list                " Show problematic characters.
 " Highlight all tabs and trailing whitespace characters.
 highlight ExtraWhitespace ctermbg=red guibg=red
 match ExtraWhitespace /\s\+\%#\@<!$/
-
-" vim-pencil
-""""""""""""
-let g:pencil#wrapModeDefault = 'soft'   " default is 'hard'
-augroup pencil
-  autocmd!
-  autocmd FileType markdown,mkd,liquid call pencil#init()
-                            \ | setl spell spl=en_gb fdl=4 noru nonu nornu
-                            \ | setl fdo+=search
-  autocmd Filetype git,gitsendemail,*commit*,*COMMIT*
-                            \   call pencil#init()
-                            \ | setl spell spl=en_gb et sw=2 ts=2 tw=72 noai
-  autocmd Filetype mail         call pencil#init({'wrap': 'hard', 'textwidth': 80})
-                            \ | setl spell spl=en_gb et sw=2 ts=2 noai nonu nornu
-  autocmd Filetype html,xml     call pencil#init({'wrap': 'soft'})
-                            \ | setl spell spl=en_gb et sw=2 ts=2
-augroup END
-
-let g:airline_section_x = '%{PencilMode()}'
 
 " Editorconfig exceptions
 """""""""""""""""""""""""

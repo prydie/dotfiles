@@ -1,43 +1,63 @@
 [[ $TMUX = "" ]] && export TERM="xterm-256color"
 
-unamestr=$(uname)
+if [ ! -f ~/.zshrc.zwc -o ~/.zshrc -nt ~/.zshrc.zwc ]; then
+    zcompile ~/.zshrc
+fi
 
+#####################################################################
 # powerlevel9k settings
+#####################################################################
+
 POWERLEVEL9K_MODE='awesome-fontconfig'
 POWERLEVEL9K_LEFT_PROMPT_ELEMENTS=(context dir virtualenv vcs)
 POWERLEVEL9K_RIGHT_PROMPT_ELEMENTS=(status time)
 POWERLEVEL9K_MODE='flat'
+POWERLEVEL9K_NODE_VERSION_BACKGROUND="red"
+POWERLEVEL9K_NODE_VERSION_FOREGROUND="white"
+POWERLEVEL9K_SHORTEN_DIR_LENGTH=1
+POWERLEVEL9K_SHORTEN_DELIMITER=""
+POWERLEVEL9K_SHORTEN_STRATEGY="truncate_from_right"
 
-source $HOME/antigen.zsh
+#####################################################################
+# zplug
+#####################################################################
 
-# Load the oh-my-zsh's library
-antigen use oh-my-zsh
+# Install zplug if not installed
+[[ -d ~/.zplug ]] || {
+  git clone https://github.com/zplug/zplug ~/.zplug
+  source ~/.zplug/init.zsh
+  zplug update --self
+}
 
-antigen bundles <<EOBUNDLES
-vagrant
-command-not-found
-colored-man-pages
-git
-httpie
-pass
-python
-pip
-tmux
-npm
-gulp
-virtualenv
-zsh-users/zsh-syntax-highlighting
-zsh-users/zsh-autosuggestions
-zsh-users/zsh-completions
-EOBUNDLES
+source ~/.zplug/init.zsh
 
+zplug "zsh-users/zsh-syntax-highlighting", defer:2
+zplug "zsh-users/zsh-history-substring-search"
+zplug "zsh-users/zsh-autosuggestions", defer:3
 
+# Completions
+zplug "zsh-users/zsh-completions"
+zplug "plugins/pass", from:oh-my-zsh
 
-# Load the theme
-antigen theme bhilburn/powerlevel9k powerlevel9k
+#  Aliases
+zplug "plugins/common-aliases", from:oh-my-zsh
+zplug "plugins/git", from:oh-my-zsh
 
-# Tell antigen that you're done
-antigen apply
+# Themes
+zplug "bhilburn/powerlevel9k", use:powerlevel9k.zsh-theme
+
+if ! zplug check --verbose; then
+  printf "Install? [y/N]: "
+  if read -q; then
+    echo; zplug install
+  fi
+fi
+
+zplug load
+
+#####################################################################
+# environment
+#####################################################################
 
 DEFAULT_USER="andrew"
 
@@ -47,13 +67,15 @@ umask 002
 export LANG=en_GB.UTF-8
 export EDITOR='nvim'
 
-# Compilation flags
-# export ARCHFLAGS="-arch x86_64"
+export LESS='--tabs=4 --no-init --LONG-PROMPT --ignore-case --quit-if-one-screen --RAW-CONTROL-CHARS'
 
-# ssh
-# export SSH_KEY_PATH="~/.ssh/id_rsa"
+export HISTFILE=~/.zsh_history
+export SAVEHIST=10000
 
-# virtualenvs
+#####################################################################
+# Python
+#####################################################################
+
 export WORKON_HOME=$HOME/.virtualenvs
 
 wrapper_path=$(which virtualenvwrapper.sh)
@@ -61,7 +83,9 @@ if [ -f  "$wrapper_path" ] ; then
     source virtualenvwrapper.sh
 fi
 
-alias clipboard="perl -pe 'chomp if eof' | xclip -sel clip"
+#####################################################################
+# Functions
+#####################################################################
 
 nexus() {
     sudo service openvpn@nexus $1
@@ -82,17 +106,48 @@ xsource() {
 }
 
 # Adds a new directory at the END of $PATH checking whether it exists or not
-pathadd() {
+pathadd_end() {
     if [ -d "$1" ] && [[ ":$PATH:" != *":$1:"* ]]; then
         PATH="${PATH:+"$PATH:"}$1"
     fi
 }
 
-# FZF
+# Adds a new directory at the FRONT of $PATH checking whether it exists or not
+pathadd_front() {
+    if [ -d "$1" ] && [[ ":$PATH:" != *":$1:"* ]]; then
+        PATH="$1${PATH:+":$PATH"}"
+    fi
+}
+
+alias clipboard="perl -pe 'chomp if eof' | xclip -sel clip"
+
+#####################################################################
+# Go
+#####################################################################
+
+export GOPATH=$HOME/Projects/go
+pathadd_end "$GOPATH/bin"
+
+#####################################################################
+# GPG
+#####################################################################
+
+# Sets up gpg-agent automatically for every shell
+if [ -f ~/.gnupg/.gpg-agent-info ] && [ -n "$(pgrep gpg-agent)" ]; then
+    source ~/.gnupg/.gpg-agent-info
+    export GPG_AGENT_INFO
+else
+    eval $(gpg-agent --daemon --write-env-file ~/.gnupg/.gpg-agent-info)
+fi
+
+#####################################################################
+# fzf
+#####################################################################
+
 [ -f ~/.fzf.zsh ] && source ~/.fzf.zsh
 
-# Go
-export GOPATH=$HOME/Projects/go
-pathadd "$GOPATH/bin"
+#####################################################################
+# Local overrides
+#####################################################################
 
 xsource $HOME/.zshrc.local

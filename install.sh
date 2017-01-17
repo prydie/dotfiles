@@ -153,16 +153,6 @@ function python_setup() {
 # Zsh
 # ---
 
-function antigen_install() {
-  if [[ ! -f "${HOME}/antigen.zsh" ]]; then
-    curl -fsSL https://cdn.rawgit.com/zsh-users/antigen/v1.3.1/bin/antigen.zsh \
-      > ${HOME}/antigen.zsh
-    print_success "antigen installed"
-  else
-    print_success "antigen already installed"
-  fi
-}
-
 function zsh_install() {
   # Test to see if Zsh is installed.  If it is:
   if [ -x "$(command -v "zsh")" ]; then
@@ -180,7 +170,6 @@ function zsh_setup() {
   print_info "Installing Zsh..."
 
   zsh_install
-  antigen_install
 }
 
 # Neovim
