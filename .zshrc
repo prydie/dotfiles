@@ -64,6 +64,9 @@ DEFAULT_USER="andrew"
 # allow group write
 umask 002
 
+# enable emacs key bindings for ^A / ^E
+bindkey -e
+
 export LANG=en_GB.UTF-8
 export EDITOR='nvim'
 
