@@ -109,10 +109,28 @@ match ErrorMsg '^\(<\|=\|>\)\{7\}\([^=].\+\)\?$'
 
 " Special characters for hilighting non-priting spaces/tabs/etc.
 set list listchars=tab:»\ ,trail:·
-autocmd Filetype go setlocal nolist
 
 hi Search ctermfg=0 ctermbg=11 guifg=Black guibg=Yellow
 hi SpellBad ctermfg=15 ctermbg=9 guifg=White guibg=Red
+
+
+" Golang
+""""""""
+autocmd Filetype go setlocal nolist
+
+" settings
+let g:go_highlight_functions = 1
+let g:go_highlight_methods = 1
+let g:go_highlight_fields = 1
+let g:go_highlight_types = 1
+let g:go_highlight_operators = 1
+let g:go_highlight_build_constraints = 1
+
+" mappings
+au FileType go nmap <leader>r <Plug>(go-run)
+au FileType go nmap <leader>b <Plug>(go-build)
+au FileType go nmap <leader>t <Plug>(go-test)
+au FileType go nmap <leader>c <Plug>(go-coverage)
 
 " FZF file finder plugin
 """"""""""""""""""""""""
