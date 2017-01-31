@@ -90,6 +90,10 @@ fi
 # Functions
 #####################################################################
 
+rsa-fingerprint() {
+    openssl rsa -pubout -outform DER -in $1 2> /dev/null | openssl md5 -c
+}
+
 nexus() {
     sudo service openvpn@nexus $1
 }
@@ -147,6 +151,7 @@ fi
 # fzf
 #####################################################################
 
+export FZF_TMUX=1
 [ -f ~/.fzf.zsh ] && source ~/.fzf.zsh
 
 #####################################################################
