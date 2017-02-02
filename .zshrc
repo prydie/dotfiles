@@ -73,10 +73,29 @@ export EDITOR='nvim'
 
 export LESS='--tabs=4 --no-init --LONG-PROMPT --ignore-case --quit-if-one-screen --RAW-CONTROL-CHARS'
 
-export HISTFILE=~/.zsh_history
+# display how long all tasks over 10 seconds take
+export REPORTTIME=10
+
+####################################################################
+# History
+#####################################################################
+
+export HISTFILE=$HOME/.zsh_history
+export HISTSIZE=10000
 export SAVEHIST=10000
 
-#####################################################################
+alias history='fc -fl 1' # history timestamps (mm/dd/yyyy)
+
+setopt append_history
+setopt extended_history
+setopt hist_expire_dups_first
+setopt hist_ignore_dups
+setopt hist_ignore_space
+setopt hist_verify
+setopt inc_append_history
+setopt share_history
+
+####################################################################
 # Python
 #####################################################################
 
