@@ -60,6 +60,7 @@ zplug load
 #####################################################################
 
 DEFAULT_USER="andrew"
+platform=$(uname)
 
 # allow group write
 umask 002
@@ -140,11 +141,13 @@ pathadd_end "$GOPATH/bin"
 #####################################################################
 
 # Sets up gpg-agent automatically for every shell
-if [ -f ~/.gnupg/.gpg-agent-info ] && [ -n "$(pgrep gpg-agent)" ]; then
-    source ~/.gnupg/.gpg-agent-info
-    export GPG_AGENT_INFO
-else
-    eval $(gpg-agent --daemon --write-env-file ~/.gnupg/.gpg-agent-info)
+if [ "${platform}" = "Darwin" ]; then
+    if [ -f ~/.gnupg/.gpg-agent-info ] && [ -n "$(pgrep gpg-agent)" ]; then
+        source ~/.gnupg/.gpg-agent-info
+        export GPG_AGENT_INFO
+    else
+        eval $(gpg-agent --daemon --write-env-file ~/.gnupg/.gpg-agent-info)
+    fi
 fi
 
 #####################################################################
