@@ -245,6 +245,8 @@ function neovim_setup() {
 function symlink_dotfiles() {
   print_info "Symlinking dotfiles..."
 
+  execute "mkdir -p $HOME/.config/powerline/themes" "mkdir ~/.config/powerline/themes"
+  symlink_dotfile ".config/powerline/themes/powerline.json" ".config/powerline/themes/powerline.json"
   symlink_dotfile ".gitconfig" ".gitconfig"
   symlink_dotfile ".gitignore" ".gitignore"
   symlink_dotfile ".tmux.conf" ".tmux.conf"
