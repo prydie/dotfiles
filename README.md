@@ -7,7 +7,7 @@ A not particularly well thought through collection of dotfiles.
 ## Tools of the trade
 
  - [Zsh](http://zsh.sourceforge.net/)
- - [Oh my Zsh](https://github.com/robbyrussell/oh-my-zsh)
+ - [zplug](https://github.com/zplug/zplug)
  - [tmux](https://tmux.github.io/)
  - [neovim](https://neovim.io/)
 
