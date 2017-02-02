@@ -47,7 +47,7 @@ Plug 'davidhalter/jedi-vim'
 
 " Fuzzy file finder
 Plug 'junegunn/fzf', { 'dir': '~/.fzf', 'do': './install --all' }
-  Plug 'junegunn/fzf.vim'
+Plug 'junegunn/fzf.vim'
 
 " Syntax highlighting
 Plug 'stephpy/vim-yaml'
@@ -68,6 +68,7 @@ Plug 'iCyMind/NeoSolarized'
 Plug 'morhetz/gruvbox'
 Plug 'reedes/vim-colors-pencil'
 Plug 'vim-airline/vim-airline-themes'
+Plug 'mhartington/oceanic-next'
 
 " Python
 Plug 'fisadev/vim-isort', {'for': 'python'}
@@ -76,11 +77,13 @@ call plug#end()
 
 " Colorscheme
 """""""""""""""""""""""
-set termguicolors
-set background=dark
-silent! colorscheme NeoSolarized
-let $NVIM_TUI_ENABLE_TRUE_COLOR=1
 let $NVIM_TUI_ENABLE_CURSOR_SHAPE=1
+if (has("termguicolors"))
+ set termguicolors
+endif
+
+set background=dark
+silent! colorscheme OceanicNext
 
 " Basic configurations
 """"""""""""""""""""""
@@ -93,7 +96,6 @@ set vb                  " No error bells!
 set colorcolumn=80      " Keep an eye on our line length.
 set breakindent
 set breakindentopt=sbr
-" I use a unicode curly array with a <backslash><space>
 set showbreak=↪>
 
 " Where swap and backup files go
@@ -182,7 +184,8 @@ let g:airline_left_sep=''
 let g:airline_right_sep=''
 
 " Use theme for Airline
-let g:airline_theme='papercolor'
+let g:airline_theme='oceanicnext'
+
 
 " Tell Vim which characters to show for expanded TABs,
 " trailing whitespace, and end-of-lines. VERY useful!
