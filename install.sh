@@ -194,6 +194,7 @@ function neovim_install() {
     return
   else
     if [[ "${platform}" == "Linux" ]]; then
+      sudo apt-get update &> /dev/null
       execute "sudo apt-get install -y software-properties-common" \
         "Installing software-properties-common"
       execute "sudo add-apt-repository ppa:neovim-ppa/unstable -y" \
