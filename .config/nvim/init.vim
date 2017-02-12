@@ -98,6 +98,10 @@ set breakindent
 set breakindentopt=sbr
 set showbreak=↪>
 
+" nvim Python hosts
+let g:python_host_prog = expand('~') . '/.config/nvim/virtualenvs/neovim2/bin/python'
+let g:python3_host_prog = expand('~') . '/.config/nvim/virtualenvs/neovim3/bin/python3.5'
+
 " Where swap and backup files go
 set backupdir=~/.config/nvim/backup_files//
 set directory=~/.config/nvim/swap_files//
