@@ -16,8 +16,8 @@ Plug 'zchee/deoplete-jedi'
 Plug 'zchee/deoplete-go'
 
 " Misc.
-Plug 'scrooloose/nerdtree', { 'on':  'NERDTreeToggle' }
-  Plug 'Xuyuanp/nerdtree-git-plugin'
+Plug 'scrooloose/nerdtree'
+Plug 'Xuyuanp/nerdtree-git-plugin'
 
 Plug 'tpope/vim-fugitive'
 Plug 'neomake/neomake'
@@ -36,7 +36,7 @@ Plug 'kshenoy/vim-signature'
 
 " snippets
 Plug 'SirVer/ultisnips'
-  Plug 'honza/vim-snippets'
+Plug 'honza/vim-snippets'
 
 " In-file searching ala 'ack'
 Plug 'gabesoft/vim-ags'
