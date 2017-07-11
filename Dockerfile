@@ -1,9 +1,10 @@
 FROM ubuntu:16.10
-MAINTAINER Andrew Pryde <andrew@>
+MAINTAINER Andrew Pryde <andrew@rocketpod.co.uk>
 
 RUN locale-gen en_GB.UTF-8
 ENV LANG='en_GB.UTF-8' LANGUAGE='en_GB:en' LC_ALL='en_GB.UTF-8'
 
+RUN curl -sL https://deb.nodesource.com/setup_6.x | sudo -E bash -
 RUN apt-get update -qq && \
     apt-get install -qq \
       build-essential \
@@ -23,13 +24,8 @@ RUN apt-get update -qq && \
       golang \
       ruby \
       ruby-dev \
-    && apt-get clean
-
-RUN curl -sL https://deb.nodesource.com/setup_6.x | sudo -E bash -
-RUN apt-get install -qq \
       nodejs \
     && apt-get clean
-
 
 RUN useradd -s /bin/bash tester
 

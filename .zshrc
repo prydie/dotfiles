@@ -8,12 +8,9 @@ fi
 # powerlevel9k settings
 #####################################################################
 
-POWERLEVEL9K_MODE='awesome-fontconfig'
-POWERLEVEL9K_LEFT_PROMPT_ELEMENTS=(context dir virtualenv vcs)
+POWERLEVEL9K_LEFT_PROMPT_ELEMENTS=(dir virtualenv vcs)
 POWERLEVEL9K_RIGHT_PROMPT_ELEMENTS=(status time)
 POWERLEVEL9K_MODE='flat'
-POWERLEVEL9K_NODE_VERSION_BACKGROUND="red"
-POWERLEVEL9K_NODE_VERSION_FOREGROUND="white"
 POWERLEVEL9K_SHORTEN_DIR_LENGTH=1
 POWERLEVEL9K_SHORTEN_DELIMITER=""
 POWERLEVEL9K_SHORTEN_STRATEGY="truncate_from_right"
@@ -80,7 +77,7 @@ export REPORTTIME=10
 # History
 #####################################################################
 
-export HISTFILE=$HOME/.zsh_history
+export HISTFILE="${HOME}/.zsh_history"
 export HISTSIZE=10000
 export SAVEHIST=10000
 
@@ -95,20 +92,13 @@ setopt hist_verify
 setopt inc_append_history
 setopt share_history
 
-####################################################################
-# Python
-#####################################################################
-
-export WORKON_HOME=$HOME/.virtualenvs
-
-wrapper_path=$(which virtualenvwrapper.sh)
-if [ -f  "$wrapper_path" ] ; then
-    source virtualenvwrapper.sh
-fi
-
 #####################################################################
 # Functions
 #####################################################################
+
+command_exists() {
+    type "$1" &> /dev/null ;
+}
 
 rsa-fingerprint() {
     openssl rsa -pubout -outform DER -in $1 2> /dev/null | openssl md5 -c
@@ -148,12 +138,31 @@ pathadd_front() {
 
 alias clipboard="perl -pe 'chomp if eof' | xclip -sel clip"
 
+####################################################################
+# Completions
+#####################################################################
+if command_exists gopass; then
+    source <(gopass completion zsh)
+fi
+
+
+####################################################################
+# Python
+#####################################################################
+
+export WORKON_HOME="${HOME}/.virtualenvs"
+
+wrapper_path=$(which virtualenvwrapper.sh)
+if [ -f  "${wrapper_path}" ] ; then
+    source virtualenvwrapper.sh
+fi
+
 #####################################################################
 # Go
 #####################################################################
 
-export GOPATH=$HOME/Projects/go
-pathadd_end "$GOPATH/bin"
+export GOPATH="${HOME}/go"
+pathadd_end "${GOPATH}/bin"
 
 #####################################################################
 # GPG
@@ -180,4 +189,4 @@ export FZF_TMUX=1
 # Local overrides
 #####################################################################
 
-xsource $HOME/.zshrc.local
+xsource "${HOME}/.zshrc.local"

@@ -50,11 +50,12 @@ Plug 'junegunn/fzf', { 'dir': '~/.fzf', 'do': './install --all' }
 Plug 'junegunn/fzf.vim'
 
 " Syntax highlighting
-Plug 'stephpy/vim-yaml'
 Plug 'Glench/Vim-Jinja2-Syntax'
+Plug 'Matt-Deacalion/vim-systemd-syntax'
+Plug 'ekalinin/Dockerfile.vim'
 Plug 'evanmiller/nginx-vim-syntax'
 Plug 'pearofducks/ansible-vim'
-Plug 'Matt-Deacalion/vim-systemd-syntax'
+Plug 'stephpy/vim-yaml'
 
 " Ctags tagbar
 Plug 'majutsushi/tagbar'
