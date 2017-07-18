@@ -1,7 +1,5 @@
 # Prydie's dotfiles
 
-[![Build Status](https://travis-ci.org/prydie/dotfiles.svg?branch=master)](https://travis-ci.org/prydie/dotfiles)
-
 A not particularly well thought through collection of dotfiles.
 
 ## Tools of the trade
@@ -9,7 +7,7 @@ A not particularly well thought through collection of dotfiles.
  - [Zsh](http://zsh.sourceforge.net/)
  - [zplug](https://github.com/zplug/zplug)
  - [tmux](https://tmux.github.io/)
- - [neovim](https://neovim.io/)
+ - [vim](http://www.vim.org/)
 
 ## Languages
 
@@ -24,8 +22,6 @@ many places to provide a comprehensive list here. Some more notable sources are
 listed below:
 
  - [nicksp/dotfiles](https://github.com/nicksp/dotfiles)
- - [gabrielelana/awesome-terminal-fonts](https://github.com/gabrielelana/awesome-terminal-fonts)
-   for the Source Code Pro variant.
 
 ## Requirements
 
@@ -43,12 +39,7 @@ installation. These include:
  - `pip`
  - `npm` (`nodejs`)
 
- For a more complete list see the `DockerFile`.
-
 ### Mac OS X
-
-There is no CI for OS X in place so installation is a little more involved,
-however, it is tested.
 
 Additional Steps:
 

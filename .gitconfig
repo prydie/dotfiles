@@ -6,4 +6,11 @@
 [alias]
 	lastcommit = rev-parse --short HEAD
 [core]
-	excludesfile = /home/andrew/.gitignore
+    excludesfile = /home/andrew/.gitignore
+
+[url "git@github.com:"]
+    insteadOf = "gh:"
+    insteadOf = "git://github.com"
+    pushInsteadOf = "github:"
+    pushInsteadOf = "git://github.com/"
+    pushInsteadOf = "https://github.com/"
