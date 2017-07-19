@@ -16,11 +16,11 @@ logging.basicConfig(stream=sys.stdout, level=logging.INFO,
                     format='%(asctime)s [%(levelname)s] %(message)s')
 
 DOTFILES = {
-    '.vimrc': '.vimrc',
-    'tmux/tmux.conf': '.tmux.conf',
-    'zsh/.zshenv': '.zshenv',
-    'zsh/.zshrc': '.zshrc',
-    '.gitconfig': '.gitconfig',
+    'vimrc': '.vimrc',
+    'tmux.conf': '.tmux.conf',
+    'zshenv': '.zshenv',
+    'zshrc': '.zshrc',
+    'gitconfig': '.gitconfig',
 }
 
 BASE_DIR = os.path.dirname(os.path.realpath(__file__))
