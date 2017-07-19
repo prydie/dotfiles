@@ -32,11 +32,15 @@ fi
 
 zplug load
 
+
 # Environment
+#############
 
 bindkey -e  # emacs key bindings
 
-## Command history configuration
+
+# Command history
+#################
 
 if [ -z "$HISTFILE" ]; then
     HISTFILE=$HOME/.zsh_history
@@ -56,6 +60,16 @@ setopt hist_verify
 setopt inc_append_history
 setopt share_history
 
+
+# Python
+########
+
+# Load virtualenvwrapper if present
+_venvwrapper=$(which virtualenvwrapper.sh)
+[[ -x "${_venvwrapper}" ]] && . "${_venvwrapper}"
+
+
 # FZF
+#####
 
 [ -f ~/.fzf.zsh ] && source ~/.fzf.zsh
