@@ -38,6 +38,14 @@ zplug load
 
 bindkey -e  # emacs key bindings
 
+# colors!
+autoload -U colors
+colors
+
+# editor
+export VISUAL=vim
+export EDITOR=$VISUAL
+
 
 # Command history
 #################
