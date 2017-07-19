@@ -1,10 +1,10 @@
 [user]
-	email = andrew@rocketpod.co.uk
-	name = Andrew Pryde
+    email = andrew.pryde@oracle.com
+    name = Andrew Pryde
 [push]
-	default = simple
+    default = simple
 [alias]
-	lastcommit = rev-parse --short HEAD
+    lastcommit = rev-parse --short HEAD
 [core]
     excludesfile = /home/andrew/.gitignore
 
@@ -14,3 +14,6 @@
     pushInsteadOf = "github:"
     pushInsteadOf = "git://github.com/"
     pushInsteadOf = "https://github.com/"
+
+[include]
+    path = ~/.gitconfig.local
