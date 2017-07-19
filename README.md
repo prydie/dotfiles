@@ -4,16 +4,35 @@ A not particularly well thought through collection of dotfiles.
 
 ## Tools of the trade
 
- - [Zsh](http://zsh.sourceforge.net/)
- - [zplug](https://github.com/zplug/zplug)
- - [tmux](https://tmux.github.io/)
- - [vim](http://www.vim.org/)
+ - [zsh][1]
+ - [zplug][2]
+ - [tmux][3]
+ - [vim][4]
 
-## Languages
+## Installation
 
- - Python
- - Golang
- - Misc. sysadmin
+ 1. Install [`rcm`][7]
+ 2. `env RCRC=$HOME/.dotfiles/rcrc rcup`
+
+## Additional requirements
+
+There are a number of requirements I haven't bothered automating their
+installation. These include:
+
+ - `curl`
+ - `git`
+ - `npm`
+ - `pip`
+ - `python3`
+ - `python`
+ - `ruby`
+ - `tmux`
+
+### Mac OS X
+
+ - Install homebrew:
+   `/usr/bin/ruby -e "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/master/install)"`
+ - Install pip https://pip.pypa.io/en/stable/installing/
 
 ## Inspiration / plagiarism
 
@@ -21,28 +40,13 @@ As with dotfiles everywhere I've begged, borrowed, and stolen snippets from too
 many places to provide a comprehensive list here. Some more notable sources are
 listed below:
 
- - [nicksp/dotfiles](https://github.com/nicksp/dotfiles)
+ - [nicksp/dotfiles][5]
+ - [thoughtbot/dotfiles][6]
 
-## Requirements
-
-There are a number of requirements I haven't bothered automating their
-installation. These include:
-
- - `git`
- - `tmux`
- - `curl`
- - `python`
- - `python3`
- - `python-pip`
- - `python3-pip`
- - `ruby`
- - `pip`
- - `npm` (`nodejs`)
-
-### Mac OS X
-
-Additional Steps:
-
- - Install homebrew: `/usr/bin/ruby -e "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/master/install)"`
- - Install pip https://pip.pypa.io/en/stable/installing/
- - `brew install python3 tmux wget node`
+[1]: http://zsh.sourceforge.net/
+[2]: https://github.com/zplug/zplug
+[3]: https://tmux.github.io/
+[4]: http://www.vim.org/
+[5]: https://github.com/nicksp/dotfiles
+[6]: https://github.com/thoughtbot/dotfiles
+[7]: https://github.com/thoughtbot/rcm
