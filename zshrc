@@ -1,12 +1,5 @@
 [[ $TMUX = "" ]] && export TERM="xterm-256color"
 
-# Install zplug if not installed
-[[ -d ~/.zplug ]] || {
-  git clone https://github.com/zplug/zplug ~/.zplug
-  source ~/.zplug/init.zsh
-  zplug update --self
-}
-
 source ~/.zplug/init.zsh
 
 zplug "zsh-users/zsh-syntax-highlighting", defer:2
