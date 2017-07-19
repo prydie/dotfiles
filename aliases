@@ -1,0 +1,3 @@
+# vim: set ft=sh:
+
+alias clipboard="perl -pe 'chomp if eof' | xclip -sel clip"

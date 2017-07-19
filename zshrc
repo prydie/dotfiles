@@ -77,6 +77,12 @@ _venvwrapper=$(which virtualenvwrapper.sh)
 [[ -x "${_venvwrapper}" ]] && . "${_venvwrapper}"
 
 
+# Aliases
+#########
+
+[[ -f ~/.aliases ]] && . ~/.aliases
+
+
 # FZF
 #####
 
