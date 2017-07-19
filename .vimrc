@@ -71,10 +71,11 @@ set vb                  " No error bells!
 set colorcolumn=80      " Keep an eye on our line length.
 set mouse=a             " Scoll vim not tmux!
 
+" Highlight trailing whitespace
+set list listchars=tab:»·,trail:·,nbsp:·
 
-" Mappings
-""""""""""
-map <C-n> :NERDTreeToggle<CR>
+" Always use vertical diffs
+set diffopt+=vertical
 
 
 " Theme
@@ -83,6 +84,12 @@ set termguicolors
 let &t_8f = "\<Esc>[38;2;%lu;%lu;%lum"
 let &t_8b = "\<Esc>[48;2;%lu;%lu;%lum"
 colorscheme solarized8_dark
+
+
+" NERDTree
+""""""""""
+map <C-n> :NERDTreeToggle<CR>
+autocmd FileType nerdtree setlocal nolist
 
 
 " Golang
@@ -128,8 +135,7 @@ let g:fzf_colors =
 
 " Airline configuration
 """""""""""""""""""""""
-"let g:airline_powerline_fonts = 0
-"let g:airline_symbols = {}
+let g:airline_powerline_fonts = 1
 
 let g:airline_left_sep=''
 let g:airline_right_sep=''

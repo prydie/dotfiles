@@ -20,7 +20,7 @@ DOTFILES = {
     'tmux/tmux.conf': '.tmux.conf',
     'zsh/.zshenv': '.zshenv',
     'zsh/.zshrc': '.zshrc',
-    '.gitconfig': '.gitconfig'
+    '.gitconfig': '.gitconfig',
 }
 
 BASE_DIR = os.path.dirname(os.path.realpath(__file__))
