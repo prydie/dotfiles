@@ -1,9 +1,0 @@
-[user]
-	email = andrew@rocketpod.co.uk
-	name = Andrew Pryde
-[push]
-	default = simple
-[alias]
-	lastcommit = rev-parse --short HEAD
-[core]
-	excludesfile = /home/andrew/.gitignore
