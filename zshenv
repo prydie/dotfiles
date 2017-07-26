@@ -1,11 +1,9 @@
-# Editor
-export EDITOR=vim
-
-# FZF
-export FZF_DEFAULT_COMMAND='ag -l -g ""'
-#export FZF_DEFAULT_OPTS='--height 40% --reverse --border'
-export FZF_TMUX=1
-
 export PATH="${HOME}/.local/bin:${PATH}"
+
+# Go
+####
+
+export GOPATH="${HOME}/go"
+export PATH="${PATH}:${GOPATH}/bin"
 
 [[ -f ~/.zshenv.local ]] && source ~/.zshenv.local
