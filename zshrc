@@ -76,6 +76,15 @@ _venvwrapper=$(which virtualenvwrapper.sh)
 [[ -f ~/.aliases ]] && . ~/.aliases
 
 
+# Completions
+#############
+
+_kubectl=$(which kubectl)
+if [ -x "${_kubectl}" ]; then
+    source <(kubectl completion zsh)
+fi
+
+
 # FZF
 #####
 
