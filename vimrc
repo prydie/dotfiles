@@ -74,6 +74,12 @@ set list listchars=tab:»·,trail:·,nbsp:·
 " Always use vertical diffs
 set diffopt+=vertical
 
+" If you prefer the Omni-Completion tip window to close when a selection is
+" made, these lines close it on movement in insert mode or when leaving
+" insert mode
+autocmd CursorMovedI * if pumvisible() == 0|pclose|endif
+autocmd InsertLeave * if pumvisible() == 0|pclose|endif
+
 
 " Theme
 """""""
@@ -94,6 +100,7 @@ autocmd FileType nerdtree setlocal nolist
 autocmd Filetype go setlocal nolist
 
 " settings
+let g:go_echo_go_info = 0
 let g:go_highlight_functions = 1
 let g:go_highlight_methods = 1
 let g:go_highlight_fields = 1
@@ -139,5 +146,8 @@ let g:airline_theme='papercolor'
 " Ale linter
 """"""""""""
 let g:ale_set_loclist = 1
-let g:ale_open_list = 1
+let g:ale_open_list = 0
 let g:ale_lint_on_text_changed = 'never'
+let g:ale_linters = {
+\   'go': ['go build', 'gofmt', 'golint', 'gometalinter', 'gosimple', 'go vet', 'staticcheck'],
+\}
