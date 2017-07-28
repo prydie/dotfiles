@@ -63,6 +63,11 @@ set vb                  " No error bells!
 set colorcolumn=80      " Keep an eye on our line length.
 set mouse=a             " Scoll vim not tmux!
 
+" temp files
+set backupdir=~/.vim/backup,.
+set directory=~/.vim/temp//,.
+set undodir=~/.vim/undo,.
+
 " Highlight trailing whitespace
 set list listchars=tab:»·,trail:·,nbsp:·
 
