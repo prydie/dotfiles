@@ -10,6 +10,7 @@ Plug 'junegunn/fzf.vim'
 " Language support
 Plug 'fatih/vim-go', { 'do': ':GoInstallBinaries' }
 Plug 'sheerun/vim-polyglot'
+Plug 'pangloss/vim-javascript'
 Plug 'fisadev/vim-isort'  " python import sorting
 
 " Omnicomplete
@@ -93,6 +94,7 @@ let &t_8b = "\<Esc>[48;2;%lu;%lu;%lum"
 """"""""""
 map <C-n> :NERDTreeToggle<CR>
 autocmd FileType nerdtree setlocal nolist
+let NERDTreeIgnore = ['\.pyc$']
 
 
 " Golang
@@ -145,9 +147,19 @@ let g:airline_theme='papercolor'
 
 " Ale linter
 """"""""""""
+let g:ale_sign_error = '✗'
+let g:ale_sign_warning = '⚠'
 let g:ale_set_loclist = 1
 let g:ale_open_list = 0
 let g:ale_lint_on_text_changed = 'never'
 let g:ale_linters = {
 \   'go': ['go build', 'gofmt', 'golint', 'gometalinter', 'gosimple', 'go vet', 'staticcheck'],
 \}
+let g:ale_python_pylint_executable = ''
+
+" YouCompleteMe
+"""""""""""""""
+
+let g:ycm_autoclose_preview_window_after_completion = 1
+let g:ycm_filetype_specific_completion_to_disable = {'javascript': 1}
+nnoremap <leader>g :YcmCompleter GoTo<CR>
