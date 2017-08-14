@@ -35,6 +35,9 @@ bindkey -e  # emacs key bindings
 autoload -U colors
 colors
 
+# shut it!
+setopt NO_BEEP
+
 # editor
 export VISUAL=vim
 export EDITOR=$VISUAL

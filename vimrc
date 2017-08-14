@@ -41,6 +41,7 @@ Plug 'ryanoasis/vim-devicons'
 
 " Git
 Plug 'tpope/vim-fugitive'
+Plug 'tpope/vim-rhubarb'
 Plug 'airblade/vim-gitgutter'
 
 " Text wrangling
@@ -100,9 +101,11 @@ let NERDTreeIgnore = ['\.pyc$']
 " Golang
 """"""""
 autocmd Filetype go setlocal nolist
+autocmd BufNewFile,BufRead *.go setlocal noexpandtab tabstop=4 shiftwidth=4
 
 " settings
 let g:go_echo_go_info = 0
+let g:go_fmt_command = "goimports"
 let g:go_highlight_functions = 1
 let g:go_highlight_methods = 1
 let g:go_highlight_fields = 1
@@ -153,7 +156,7 @@ let g:ale_set_loclist = 1
 let g:ale_open_list = 0
 let g:ale_lint_on_text_changed = 'never'
 let g:ale_linters = {
-\   'go': ['go build', 'gofmt', 'golint', 'gometalinter', 'gosimple', 'go vet', 'staticcheck'],
+\   'go': ['gometalinter'],
 \}
 let g:ale_python_pylint_executable = ''
 
