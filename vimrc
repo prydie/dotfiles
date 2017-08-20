@@ -64,6 +64,7 @@ set splitright          " Vertical split to right of current.
 set vb                  " No error bells!
 set colorcolumn=80      " Keep an eye on our line length.
 set mouse=a             " Scoll vim not tmux!
+set modeline            " Pickup conf from modeline comments.
 
 " temp files
 set backupdir=~/.vim/backup,.
@@ -102,6 +103,11 @@ let NERDTreeIgnore = ['\.pyc$']
 """"""""
 autocmd Filetype go setlocal nolist
 autocmd BufNewFile,BufRead *.go setlocal noexpandtab tabstop=4 shiftwidth=4
+
+
+" git commit
+""""""""""""
+autocmd Filetype gitcommit setlocal cc=72
 
 " settings
 let g:go_echo_go_info = 0
