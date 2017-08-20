@@ -28,6 +28,7 @@ function! BuildYCM(info)
 endfunction
 
 Plug 'Valloric/YouCompleteMe', { 'do': function('BuildYCM') }
+Plug 'majutsushi/tagbar'
 
 " Linting
 Plug 'w0rp/ale'
@@ -70,9 +71,9 @@ set mouse=a             " Scoll vim not tmux!
 set modeline            " Pickup conf from modeline comments.
 
 " temp files
-set backupdir=~/.vim/backup,.
-set directory=~/.vim/temp//,.
-set undodir=~/.vim/undo,.
+set undodir=~/.vim/undo//
+set backupdir=~/.vim/backup//
+set directory=~/.vim/swp//
 
 " Highlight trailing whitespace
 set list listchars=tab:»·,trail:·,nbsp:·
@@ -138,6 +139,10 @@ au FileType go nmap <leader>b :<C-u>call <SID>build_go_files()<CR>
 au FileType go nmap <leader>t <Plug>(go-test)
 au FileType go nmap <leader>c <Plug>(go-coverage)
 
+" git commit
+""""""""""""
+autocmd Filetype gitcommit setlocal cc=72
+
 
 " FZF file finder plugin
 """"""""""""""""""""""""
@@ -185,3 +190,35 @@ let g:ale_python_pylint_executable = ''
 let g:ycm_autoclose_preview_window_after_completion = 1
 let g:ycm_filetype_specific_completion_to_disable = {'javascript': 1}
 nnoremap <leader>g :YcmCompleter GoTo<CR>
+
+" Tagbar
+""""""""
+
+nmap <F8> :TagbarToggle<CR>
+let g:tagbar_type_go = {
+    \ 'ctagstype' : 'go',
+    \ 'kinds'     : [
+        \ 'p:package',
+        \ 'i:imports:1',
+        \ 'c:constants',
+        \ 'v:variables',
+        \ 't:types',
+        \ 'n:interfaces',
+        \ 'w:fields',
+        \ 'e:embedded',
+        \ 'm:methods',
+        \ 'r:constructor',
+        \ 'f:functions'
+    \ ],
+    \ 'sro' : '.',
+    \ 'kind2scope' : {
+        \ 't' : 'ctype',
+        \ 'n' : 'ntype'
+    \ },
+    \ 'scope2kind' : {
+        \ 'ctype' : 't',
+        \ 'ntype' : 'n'
+    \ },
+    \ 'ctagsbin'  : 'gotags',
+    \ 'ctagsargs' : '-sort -silent'
+    \ }
