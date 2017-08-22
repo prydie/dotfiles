@@ -3,6 +3,9 @@ call plug#begin('~/.vim/plugged')
 " Sensible defaullts
 Plug 'tpope/vim-sensible'
 
+" Misc
+Plug 'tpope/vim-dispatch'
+
 " Fuzzy File Finder
 Plug 'junegunn/fzf', { 'dir': '~/.fzf', 'do': './install --all' }
 Plug 'junegunn/fzf.vim'
@@ -99,15 +102,15 @@ autocmd FileType nerdtree setlocal nolist
 let NERDTreeIgnore = ['\.pyc$']
 
 
+" git commit
+""""""""""""
+autocmd Filetype gitcommit setlocal cc=72
+
+
 " Golang
 """"""""
 autocmd Filetype go setlocal nolist
 autocmd BufNewFile,BufRead *.go setlocal noexpandtab tabstop=4 shiftwidth=4
-
-
-" git commit
-""""""""""""
-autocmd Filetype gitcommit setlocal cc=72
 
 " settings
 let g:go_echo_go_info = 0
@@ -119,9 +122,19 @@ let g:go_highlight_types = 1
 let g:go_highlight_operators = 1
 let g:go_highlight_build_constraints = 1
 
+" run :GoBuild or :GoTestCompile based on the go file
+function! s:build_go_files()
+  let l:file = expand('%')
+  if l:file =~# '^\f\+_test\.go$'
+    call go#test#Test(0, 1)
+  elseif l:file =~# '^\f\+\.go$'
+    call go#cmd#Build(0)
+  endif
+endfunction
+
 " mappings
 au FileType go nmap <leader>r <Plug>(go-run)
-au FileType go nmap <leader>b <Plug>(go-build)
+au FileType go nmap <leader>b :<C-u>call <SID>build_go_files()<CR>
 au FileType go nmap <leader>t <Plug>(go-test)
 au FileType go nmap <leader>c <Plug>(go-coverage)
 
