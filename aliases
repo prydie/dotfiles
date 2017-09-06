@@ -1,3 +1,7 @@
 # vim: ft=sh
 
 alias clipboard="perl -pe 'chomp if eof' | xclip -sel clip"
+
+function rsa-fingerprint() {
+     openssl rsa -pubout -outform DER -in $1 2> /dev/null | openssl md5 -c
+}
