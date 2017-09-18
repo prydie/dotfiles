@@ -6,9 +6,10 @@ Plug 'tpope/vim-sensible'
 " Misc
 Plug 'tpope/vim-dispatch'
 
-" Fuzzy File Finder
+" Finding things
 Plug 'junegunn/fzf', { 'dir': '~/.fzf', 'do': './install --all' }
 Plug 'junegunn/fzf.vim'
+Plug 'mileszs/ack.vim'
 
 " Language support
 Plug 'fatih/vim-go', { 'do': ':GoInstallBinaries' }
@@ -166,6 +167,14 @@ let g:fzf_colors =
   \ 'header':  ['fg', 'Comment'] }
 
 
+" Ack.vim
+"""""""""
+if executable('ag')
+  let g:ackprg = 'ag --vimgrep'
+endif
+let g:ack_use_dispatch = 1
+
+
 " Airline configuration
 """""""""""""""""""""""
 let g:airline_powerline_fonts = 1
@@ -222,3 +231,10 @@ let g:tagbar_type_go = {
     \ 'ctagsbin'  : 'gotags',
     \ 'ctagsargs' : '-sort -silent'
     \ }
+"
+" vimrc auto-reload
+"""""""""""""""""""
+augroup myvimrc
+    au!
+    au BufWritePost .vimrc,_vimrc,vimrc,.gvimrc,_gvimrc,gvimrc so $MYVIMRC | if has('gui_running') | so $MYGVIMRC | endif
+augroup END
