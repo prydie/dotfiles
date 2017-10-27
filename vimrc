@@ -72,9 +72,11 @@ set mouse=a             " Scoll vim not tmux!
 set modeline            " Pickup conf from modeline comments.
 
 " temp files
-set undodir=~/.vim/undo//
-set backupdir=~/.vim/backup//
-set directory=~/.vim/swp//
+"set undodir=~/.vim/.undo//
+"set backupdir=~/.vim/.backup//
+"set directory=~/.vim/.swp//
+set nobackup
+set noswapfile
 
 " Highlight trailing whitespace
 set list listchars=tab:»·,trail:·,nbsp:·
@@ -107,6 +109,7 @@ let NERDTreeIgnore = ['\.pyc$']
 " git commit
 """"""""""""
 autocmd Filetype gitcommit setlocal cc=72
+autocmd Filetype gitcommit setlocal spell
 
 
 " Golang
