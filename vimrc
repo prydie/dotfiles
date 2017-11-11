@@ -96,7 +96,8 @@ autocmd InsertLeave * if pumvisible() == 0|pclose|endif
 set termguicolors
 let &t_8f = "\<Esc>[38;2;%lu;%lu;%lum"
 let &t_8b = "\<Esc>[48;2;%lu;%lu;%lum"
-:silent! colorscheme solarized8_dark
+set background=dark
+:silent! colorscheme solarized8
 
 
 " NERDTree
