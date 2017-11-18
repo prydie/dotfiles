@@ -15,7 +15,10 @@ Plug 'mileszs/ack.vim'
 Plug 'fatih/vim-go', { 'do': ':GoInstallBinaries' }
 Plug 'sheerun/vim-polyglot'
 Plug 'pangloss/vim-javascript'
-Plug 'fisadev/vim-isort'  " python import sorting
+
+" Python import sorting
+" NOTE: pip3 install --user isort
+Plug 'fisadev/vim-isort'
 
 " Omnicomplete
 function! BuildYCM(info)
@@ -40,6 +43,7 @@ Plug 'editorconfig/editorconfig-vim'
 " UI
 Plug 'vim-airline/vim-airline'
 Plug 'vim-airline/vim-airline-themes'
+Plug 'rakr/vim-one'
 
 Plug 'scrooloose/nerdtree'
 Plug 'ryanoasis/vim-devicons'
@@ -97,7 +101,7 @@ set termguicolors
 let &t_8f = "\<Esc>[38;2;%lu;%lu;%lum"
 let &t_8b = "\<Esc>[48;2;%lu;%lu;%lum"
 set background=dark
-:silent! colorscheme solarized8
+:silent! colorscheme one
 
 
 " NERDTree
@@ -182,7 +186,7 @@ let g:ack_use_dispatch = 1
 " Airline configuration
 """""""""""""""""""""""
 let g:airline_powerline_fonts = 1
-let g:airline_theme='papercolor'
+let g:airline_theme='one'
 
 
 " Ale linter
