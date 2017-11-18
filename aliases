@@ -1,8 +1,12 @@
 # vim: ft=sh
 
-alias clipboard="perl -pe 'chomp if eof' | pbcopy 2> /dev/null || xclip -sel clip"
 alias vimf='vim $(fzf)'
 
 function rsa-fingerprint() {
      openssl rsa -pubout -outform DER -in $1 2> /dev/null | openssl md5 -c
 }
+
+if [ ! $(uname -s) = "Darwin" ]; then
+    alias pbcopy='xclip -in -selection clipboard'
+    alias pbpaste='xclip -selection clipboard -o'
+fi
