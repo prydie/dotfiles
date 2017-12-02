@@ -43,7 +43,6 @@ Plug 'editorconfig/editorconfig-vim'
 " UI
 Plug 'vim-airline/vim-airline'
 Plug 'vim-airline/vim-airline-themes'
-Plug 'rakr/vim-one'
 
 Plug 'scrooloose/nerdtree'
 Plug 'ryanoasis/vim-devicons'
@@ -59,6 +58,7 @@ Plug 'scrooloose/nerdcommenter'
 
 " Themes
 Plug 'lifepillar/vim-solarized8'
+Plug 'rakr/vim-one'
 
 call plug#end()
 
@@ -102,6 +102,7 @@ let &t_8f = "\<Esc>[38;2;%lu;%lu;%lum"
 let &t_8b = "\<Esc>[48;2;%lu;%lu;%lum"
 set background=dark
 :silent! colorscheme one
+let g:one_allow_italics = 1
 
 
 " NERDTree

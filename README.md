@@ -4,10 +4,11 @@ A not particularly well thought through collection of dotfiles.
 
 ## Tools of the trade
 
+ - [vim][4]
+ - [tmux][3]
  - [zsh][1]
  - [zplug][2]
- - [tmux][3]
- - [vim][4]
+ - [`rcm`][7]
 
 ## Installation
 

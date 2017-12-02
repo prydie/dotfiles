@@ -82,9 +82,12 @@ _venvwrapper=$(which virtualenvwrapper.sh)
 # Completions
 #############
 
-_kubectl=$(which kubectl)
-if [ -x "${_kubectl}" ]; then
+if [ -x "$(command -v kubectl)" ]; then
     source <(kubectl completion zsh)
+fi
+
+if [ -x "$(command -v pipenv)" ]; then
+    eval $(_PIPENV_COMPLETE=source-zsh pipenv)
 fi
 
 
