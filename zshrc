@@ -90,6 +90,9 @@ if [ -x "$(command -v pipenv)" ]; then
     eval $(_PIPENV_COMPLETE=source-zsh pipenv)
 fi
 
+if [ -x "$(command -v gopass)" ]; then
+    source <(gopass completion zsh)
+fi
 
 # FZF
 #####
