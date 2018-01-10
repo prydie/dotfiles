@@ -5,6 +5,7 @@ Plug 'tpope/vim-sensible'
 
 " Misc
 Plug 'tpope/vim-dispatch'
+Plug 'ervandew/supertab'
 
 " Finding things
 Plug 'junegunn/fzf', { 'dir': '~/.fzf', 'do': './install --all' }
@@ -15,6 +16,7 @@ Plug 'mileszs/ack.vim'
 Plug 'fatih/vim-go', { 'do': ':GoInstallBinaries' }
 Plug 'sheerun/vim-polyglot'
 Plug 'pangloss/vim-javascript'
+Plug 'hashivim/vim-terraform'
 
 " Python import sorting
 " NOTE: pip3 install --user isort
@@ -31,7 +33,15 @@ function! BuildYCM(info)
   endif
 endfunction
 
-Plug 'Valloric/YouCompleteMe', { 'do': function('BuildYCM') }
+if has('nvim')
+  Plug 'Shougo/deoplete.nvim', { 'do': ':UpdateRemotePlugins' }
+  Plug 'nsf/gocode', { 'rtp': 'vim', 'do': '~/.vim/plugged/gocode/vim/symlink.sh' }
+  Plug 'zchee/deoplete-go', { 'do': 'make'}
+  Plug 'zchee/deoplete-jedi'
+else
+  Plug 'Valloric/YouCompleteMe', { 'do': function('BuildYCM') }
+endif
+
 Plug 'majutsushi/tagbar'
 
 " Linting
@@ -143,6 +153,22 @@ function! s:build_go_files()
   endif
 endfunction
 
+" gometalinter configuration
+let g:go_metalinter_command = ""
+let g:go_metalinter_deadline = "5s"
+let g:go_metalinter_enabled = [
+    \ 'deadcode',
+    \ 'errcheck',
+    \ 'gas',
+    \ 'goconst',
+    \ 'gocyclo',
+    \ 'golint',
+    \ 'gosimple',
+    \ 'ineffassign',
+    \ 'vet',
+    \ 'vetshadow'
+    \]
+
 " mappings
 au FileType go nmap <leader>r <Plug>(go-run)
 au FileType go nmap <leader>b :<C-u>call <SID>build_go_files()<CR>
@@ -209,6 +235,12 @@ let g:ycm_autoclose_preview_window_after_completion = 1
 let g:ycm_filetype_specific_completion_to_disable = {'javascript': 1}
 nnoremap <leader>g :YcmCompleter GoTo<CR>
 
+" Deoplete
+""""""""""
+if has('nvim')
+  let g:deoplete#enable_at_startup = 1
+endif
+
 " Tagbar
 """"""""
 
@@ -240,7 +272,7 @@ let g:tagbar_type_go = {
     \ 'ctagsbin'  : 'gotags',
     \ 'ctagsargs' : '-sort -silent'
     \ }
-"
+
 " vimrc auto-reload
 """""""""""""""""""
 augroup myvimrc

@@ -91,7 +91,7 @@ if [ -x "$(command -v pipenv)" ]; then
 fi
 
 if [ -x "$(command -v gopass)" ]; then
-    source <(gopass completion zsh)
+    source <(gopass completion bash)
 fi
 
 # FZF
