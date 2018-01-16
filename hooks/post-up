@@ -8,15 +8,27 @@ if [ ! -e "$HOME"/.vim/autoload/plug.vim ]; then
   curl -fLo "$HOME"/.vim/autoload/plug.vim --create-dirs \
       https://raw.githubusercontent.com/junegunn/vim-plug/master/plug.vim
 fi
-vim +PlugInstall +PlugClean! +qa
+nvim +PlugInstall +PlugClean! +qa
 
 # install zplug if not installed
-[[ -d ~/.zplug ]] || {
+if [ ! -d "~/.zplug" ]; then
   git clone https://github.com/zplug/zplug ~/.zplug
   source ~/.zplug/init.zsh
   zplug update --self
-}
+fi
 
 if [ ! -d "$HOME/.tmux/plugins/tpm" ]; then
     git clone https://github.com/tmux-plugins/tpm ~/.tmux/plugins/tpm && ~/.tmux/plugins/tpm/bin/install_plugins
 fi
+
+mkdir -p ${HOME}/.config/nvim
+
+if [ ! -d "${HOME}/.config/nvim/py2" ]; then
+    virtualenv --python=python2.7 ${HOME}/.config/nvim/py2
+fi
+${HOME}/.config/nvim/py2/bin/pip install --upgrade neovim
+
+if [ ! -d "${HOME}/.config/nvim/py3" ]; then
+    virtualenv --python=python3 ${HOME}/.config/nvim/py3
+fi
+${HOME}/.config/nvim/py3/bin/pip install --upgrade neovim

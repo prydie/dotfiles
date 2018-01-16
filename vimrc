@@ -21,6 +21,8 @@ Plug 'hashivim/vim-terraform'
 " Python import sorting
 " NOTE: pip3 install --user isort
 Plug 'fisadev/vim-isort'
+Plug 'hdima/python-syntax', { 'for': 'python' }
+Plug 'davidhalter/jedi-vim', { 'for': 'python' }
 
 " Omnicomplete
 function! BuildYCM(info)
@@ -37,7 +39,7 @@ if has('nvim')
   Plug 'Shougo/deoplete.nvim', { 'do': ':UpdateRemotePlugins' }
   Plug 'nsf/gocode', { 'rtp': 'vim', 'do': '~/.vim/plugged/gocode/vim/symlink.sh' }
   Plug 'zchee/deoplete-go', { 'do': 'make'}
-  Plug 'zchee/deoplete-jedi'
+  Plug 'zchee/deoplete-jedi', { 'for': 'python' }
 else
   Plug 'Valloric/YouCompleteMe', { 'do': function('BuildYCM') }
 endif
@@ -168,6 +170,22 @@ let g:go_metalinter_enabled = [
     \ 'vet',
     \ 'vetshadow'
     \]
+
+" Python
+""""""""
+
+let python_highlight_all=1
+let g:jedi#use_splits_not_buffers = 1
+let g:jedi#completions_enabled = 0
+
+if executable(glob('~/.config/nvim/py2/bin/python'))
+    let g:python_host_prog = glob('~/.config/nvim/py2/bin/python')
+endif
+
+if executable(glob('~/.config/nvim/py3/bin/python'))
+    let g:python3_host_prog = glob('~/.config/nvim/py3/bin/python')
+endif
+
 
 " mappings
 au FileType go nmap <leader>r <Plug>(go-run)
