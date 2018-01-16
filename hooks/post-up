@@ -11,7 +11,7 @@ fi
 nvim +PlugInstall +PlugClean! +qa
 
 # install zplug if not installed
-if [ ! -d "~/.zplug" ]; then
+if [ ! -d "$HOME/.zplug" ]; then
   git clone https://github.com/zplug/zplug ~/.zplug
   source ~/.zplug/init.zsh
   zplug update --self
