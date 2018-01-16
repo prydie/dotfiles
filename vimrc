@@ -87,6 +87,8 @@ set colorcolumn=80      " Keep an eye on our line length.
 set mouse=a             " Scoll vim not tmux!
 set modeline            " Pickup conf from modeline comments.
 
+map <leader><Space> :nohlsearch<cr> " Clear search highlights
+
 " temp files
 "set undodir=~/.vim/.undo//
 "set backupdir=~/.vim/.backup//
@@ -290,6 +292,10 @@ let g:tagbar_type_go = {
     \ 'ctagsbin'  : 'gotags',
     \ 'ctagsargs' : '-sort -silent'
     \ }
+
+" SuperTab
+""""""""""
+let g:SuperTabDefaultCompletionType = "<c-n>"
 
 " vimrc auto-reload
 """""""""""""""""""

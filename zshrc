@@ -39,7 +39,7 @@ colors
 setopt NO_BEEP
 
 # editor
-export VISUAL=vim
+export VISUAL=nvim
 export EDITOR=$VISUAL
 
 
@@ -81,6 +81,12 @@ _venvwrapper=$(which virtualenvwrapper.sh)
 
 # Completions
 #############
+
+fpath=(
+  /usr/local/share/zsh-completions
+  /usr/local/share/zsh/site-functions
+  $fpath
+)
 
 if [ -x "$(command -v kubectl)" ]; then
     source <(kubectl completion zsh)
