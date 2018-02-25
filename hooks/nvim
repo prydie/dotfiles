@@ -1,0 +1,36 @@
+#!/bin/bash
+# vim: set ft=sh:
+
+
+nvim::venvs() {
+  if [ ! -d "${HOME}/.config/nvim/py2" ]; then
+    virtualenv --python=python2.7 ${HOME}/.config/nvim/py2
+  fi
+  ${HOME}/.config/nvim/py2/bin/pip install --upgrade neovim
+
+  if [ ! -d "${HOME}/.config/nvim/py3" ]; then
+    virtualenv --python=python3 ${HOME}/.config/nvim/py3
+  fi
+  ${HOME}/.config/nvim/py3/bin/pip install --upgrade neovim
+}
+
+nvim::plug_installed() {
+  # install vim-plug if not installed
+  if [ ! -e "$HOME"/.vim/autoload/plug.vim ]; then
+    curl -fLo "$HOME"/.vim/autoload/plug.vim --create-dirs \
+      https://raw.githubusercontent.com/junegunn/vim-plug/master/plug.vim
+  fi
+}
+
+nvim::update_plugins() {
+  nvim +PlugInstall +PlugUpdate +PlugClean! +qa
+}
+
+nvim::ensure() {
+  mkdir -p ${HOME}/.config/nvim
+  nvim::venvs
+  nvim::plug_installed
+  nvim::update_plugins
+}
+
+nvim::ensure

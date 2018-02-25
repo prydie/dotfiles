@@ -77,30 +77,36 @@ call plug#end()
 
 " Basic config
 """"""""""""""
-set number              " Line numbers
-set ignorecase!         " Ignore case in search
-set hidden              " Hide instead of close bufffers to preserve history
-set splitbelow          " Horizontal split below current.
-set splitright          " Vertical split to right of current.
-set vb                  " No error bells!
-set colorcolumn=80      " Keep an eye on our line length.
-set mouse=a             " Scoll vim not tmux!
-set modeline            " Pickup conf from modeline comments.
+set number                      " Line numbers
+set ignorecase!                 " Ignore case in search
+set hidden                      " Hide instead of close bufffers to preserve history
+set splitbelow                  " Horizontal split below current.
+set splitright                  " Vertical split to right of current.
+set noerrorbells                " No error bells!
+set colorcolumn=80              " Keep an eye on our line length.
+set mouse=a                     " Scoll vim not tmux!
+set modeline                    " Pickup conf from modeline comments.
+set nobackup                    " No backup files
+set noswapfile                  " No swap files
+set completeopt+=noselect
+set nocursorcolumn           " speed up syntax highlighting
+set nocursorline
+set updatetime=300
+set pumheight=10             " Completion window max size
+set diffopt+=vertical                    " Always use vertical diffs
 
-map <leader><Space> :nohlsearch<cr> " Clear search highlights
+" highlight
+set list
+set listchars=tab:»\ ,extends:›,precedes:‹,nbsp:·,trail:·
 
-" temp files
-"set undodir=~/.vim/.undo//
-"set backupdir=~/.vim/.backup//
-"set directory=~/.vim/.swp//
-set nobackup
-set noswapfile
+" Better split switching
+map <C-j> <C-W>j
+map <C-k> <C-W>k
+map <C-h> <C-W>h
+map <C-l> <C-W>l
 
-" Highlight trailing whitespace
-set list listchars=tab:»·,trail:·,nbsp:·
-
-" Always use vertical diffs
-set diffopt+=vertical
+" Clear search highlights
+map <leader><Space> :nohlsearch<cr>
 
 " If you prefer the Omni-Completion tip window to close when a selection is
 " made, these lines close it on movement in insert mode or when leaving
@@ -117,7 +123,9 @@ let &t_8b = "\<Esc>[48;2;%lu;%lu;%lum"
 set background=dark
 :silent! colorscheme one
 let g:one_allow_italics = 1
-
+if !has('gui_running')
+  set t_Co=256
+endif
 
 " NERDTree
 """"""""""
@@ -203,7 +211,7 @@ autocmd Filetype gitcommit setlocal cc=72
 " FZF file finder plugin
 """"""""""""""""""""""""
 noremap <C-p> :FZF<CR>
-let g:fzf_height = '30%'
+let g:fzf_layout = { 'down': '~20%' }
 let g:fzf_command_prefix = 'Fzf'
 let g:fzf_tags_options = '-f .ctags"'
 let $FZF_DEFAULT_COMMAND = 'ag -l -g ""'
@@ -225,7 +233,7 @@ let g:fzf_colors =
 " Ack.vim
 """""""""
 if executable('ag')
-  let g:ackprg = 'ag --vimgrep'
+  let g:ackprg = 'ag --vimgrep --smart-case'
 endif
 let g:ack_use_dispatch = 1
 
@@ -259,6 +267,10 @@ nnoremap <leader>g :YcmCompleter GoTo<CR>
 """"""""""
 if has('nvim')
   let g:deoplete#enable_at_startup = 1
+
+  let g:deoplete#sources#go#auto_goos = 1
+  let g:deoplete#sources#go#gocode_binary = $GOPATH.'/bin/gocode'
+  let g:deoplete#sources#go#sort_class = ['func', 'type', 'var', 'const', 'package']
 endif
 
 " Tagbar

@@ -1,14 +1,9 @@
-#!/bin/sh
+#!/bin/bash
 # vim: set ft=sh:
 
-touch "$HOME"/.psqlrc.local
+_ROOT=$(dirname "${BASH_SOURCE}")/..
 
-# install vim-plug if not installed
-if [ ! -e "$HOME"/.vim/autoload/plug.vim ]; then
-  curl -fLo "$HOME"/.vim/autoload/plug.vim --create-dirs \
-      https://raw.githubusercontent.com/junegunn/vim-plug/master/plug.vim
-fi
-nvim +PlugInstall +PlugClean! +qa
+touch "$HOME"/.psqlrc.local
 
 # install zplug if not installed
 if [ ! -d "$HOME/.zplug" ]; then
@@ -18,17 +13,8 @@ if [ ! -d "$HOME/.zplug" ]; then
 fi
 
 if [ ! -d "$HOME/.tmux/plugins/tpm" ]; then
-    git clone https://github.com/tmux-plugins/tpm ~/.tmux/plugins/tpm && ~/.tmux/plugins/tpm/bin/install_plugins
+  git clone https://github.com/tmux-plugins/tpm ~/.tmux/plugins/tpm && ~/.tmux/plugins/tpm/bin/install_plugins
 fi
 
-mkdir -p ${HOME}/.config/nvim
 
-if [ ! -d "${HOME}/.config/nvim/py2" ]; then
-    virtualenv --python=python2.7 ${HOME}/.config/nvim/py2
-fi
-${HOME}/.config/nvim/py2/bin/pip install --upgrade neovim
-
-if [ ! -d "${HOME}/.config/nvim/py3" ]; then
-    virtualenv --python=python3 ${HOME}/.config/nvim/py3
-fi
-${HOME}/.config/nvim/py3/bin/pip install --upgrade neovim
+. ${_ROOT}/hooks/nvim
