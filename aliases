@@ -2,6 +2,9 @@
 
 alias vimf='vim $(fzf)'
 
+# git
+alias gp='git push'
+
 function rsa-fingerprint() {
      openssl rsa -pubout -outform DER -in $1 2> /dev/null | openssl md5 -c
 }
@@ -10,3 +13,12 @@ if [ ! $(uname -s) = "Darwin" ]; then
     alias pbcopy='xclip -in -selection clipboard'
     alias pbpaste='xclip -selection clipboard -o'
 fi
+
+function minikube-up {
+    minikube start \
+        --docker-env HTTP_PROXY=${HTTP_PROXY} \
+        --docker-env HTTPS_PROXY=${HTTPS_PROXY} \
+        --docker-env NO_PROXY=192.168.99.0/24,127.0.0.1 \
+        --extra-config=apiserver.Authorization.Mode=RBAC
+    export no_proxy=$no_proxy,$(minikube ip)
+}

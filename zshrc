@@ -6,7 +6,6 @@ zplug "zsh-users/zsh-syntax-highlighting", defer:2
 zplug "zsh-users/zsh-completions"
 
 zplug "plugins/common-aliases", from:oh-my-zsh
-zplug "plugins/git", from:oh-my-zsh
 
 zplug "junegunn/fzf-bin", as:command, from:gh-r, rename-to:fzf, use:"*${(L)$(uname -s)}*amd64*"
 zplug "junegunn/fzf", as:command, use:bin/fzf-tmux
@@ -65,14 +64,6 @@ setopt inc_append_history
 setopt share_history
 
 
-# Python
-########
-
-# Load virtualenvwrapper if present
-_venvwrapper=$(which virtualenvwrapper.sh)
-[[ -x "${_venvwrapper}" ]] && . "${_venvwrapper}"
-
-
 # Aliases
 #########
 
@@ -107,3 +98,5 @@ export FZF_DEFAULT_OPTS='--height 40% --reverse --border'
 
 
 [ -f ~/.fzf.zsh ] && source ~/.fzf.zsh
+
+[ -f ~/.zshrc.local ] && source ~/.zshrc.local
