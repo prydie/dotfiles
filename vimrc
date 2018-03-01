@@ -6,6 +6,7 @@ Plug 'tpope/vim-sensible'
 " Misc
 Plug 'tpope/vim-dispatch'
 Plug 'ervandew/supertab'
+Plug 'vimwiki/vimwiki'
 
 " Finding things
 Plug 'junegunn/fzf', { 'dir': '~/.fzf', 'do': './install --all' }
@@ -315,3 +316,6 @@ augroup myvimrc
     au!
     au BufWritePost .vimrc,_vimrc,vimrc,.gvimrc,_gvimrc,gvimrc so $MYVIMRC | if has('gui_running') | so $MYGVIMRC | endif
 augroup END
+
+" vimwiki
+let g:vimwiki_list = [{'path': '~/vimwiki/', 'syntax': 'markdown', 'ext': '.md'}]
