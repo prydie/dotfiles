@@ -26,23 +26,10 @@ Plug 'hdima/python-syntax', { 'for': 'python' }
 Plug 'davidhalter/jedi-vim', { 'for': 'python' }
 
 " Omnicomplete
-function! BuildYCM(info)
-  " info is a dictionary with 3 fields
-  " - name:   name of the plugin
-  " - status: 'installed', 'updated', or 'unchanged'
-  " - force:  set on PlugInstall! or PlugUpdate!
-  if a:info.status == 'installed' || a:info.force
-    !./install.py --clang-completer --gocode-completer --tern-completer
-  endif
-endfunction
-
 if has('nvim')
   Plug 'Shougo/deoplete.nvim', { 'do': ':UpdateRemotePlugins' }
-  Plug 'nsf/gocode', { 'rtp': 'vim', 'do': '~/.vim/plugged/gocode/vim/symlink.sh' }
   Plug 'zchee/deoplete-go', { 'do': 'make'}
   Plug 'zchee/deoplete-jedi', { 'for': 'python' }
-else
-  Plug 'Valloric/YouCompleteMe', { 'do': function('BuildYCM') }
 endif
 
 Plug 'majutsushi/tagbar'
@@ -90,11 +77,12 @@ set modeline                    " Pickup conf from modeline comments.
 set nobackup                    " No backup files
 set noswapfile                  " No swap files
 set completeopt+=noselect
+set completeopt-=preview
 set nocursorcolumn           " speed up syntax highlighting
 set nocursorline
 set updatetime=300
 set pumheight=10             " Completion window max size
-set diffopt+=vertical                    " Always use vertical diffs
+set diffopt+=vertical        " Always use vertical diffs
 
 " highlight
 set list
@@ -108,13 +96,6 @@ map <C-l> <C-W>l
 
 " Clear search highlights
 map <leader><Space> :nohlsearch<cr>
-
-" If you prefer the Omni-Completion tip window to close when a selection is
-" made, these lines close it on movement in insert mode or when leaving
-" insert mode
-autocmd CursorMovedI * if pumvisible() == 0|pclose|endif
-autocmd InsertLeave * if pumvisible() == 0|pclose|endif
-
 
 " Theme
 """""""
@@ -165,22 +146,6 @@ function! s:build_go_files()
     call go#cmd#Build(0)
   endif
 endfunction
-
-" gometalinter configuration
-let g:go_metalinter_command = ""
-let g:go_metalinter_deadline = "5s"
-let g:go_metalinter_enabled = [
-    \ 'deadcode',
-    \ 'errcheck',
-    \ 'gas',
-    \ 'goconst',
-    \ 'gocyclo',
-    \ 'golint',
-    \ 'gosimple',
-    \ 'ineffassign',
-    \ 'vet',
-    \ 'vetshadow'
-    \]
 
 " Python
 """"""""
@@ -255,14 +220,8 @@ let g:ale_lint_on_text_changed = 'never'
 let g:ale_linters = {
 \   'go': ['gometalinter'],
 \}
+let g:ale_go_gometalinter_options = '--tests --disable-all --aggregate --fast --sort=line --vendor --concurrency=16  --enable=gocyclo --enable=govet --enable=golint --enable=gotype --enable=deadcode'
 let g:ale_python_pylint_executable = ''
-
-" YouCompleteMe
-"""""""""""""""
-
-let g:ycm_autoclose_preview_window_after_completion = 1
-let g:ycm_filetype_specific_completion_to_disable = {'javascript': 1}
-nnoremap <leader>g :YcmCompleter GoTo<CR>
 
 " Deoplete
 """"""""""
