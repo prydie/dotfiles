@@ -5,6 +5,15 @@ _ROOT=$(dirname "${BASH_SOURCE}")/..
 
 touch "$HOME"/.psqlrc.local
 
+. ${_ROOT}/hooks/os
+
+os::get_distro
+
+if [[ "${DISTRO}" == "Ubuntu" ]]; then
+  os::ubuntu::ppas
+  os::ubuntu::install_packages
+fi
+
 # install zplug if not installed
 if [ ! -d "$HOME/.zplug" ]; then
   git clone https://github.com/zplug/zplug ~/.zplug

@@ -16,10 +16,10 @@ zplug sindresorhus/pure, use:pure.zsh, from:github, as:theme
 
 # Install plugins if there are plugins that have not been installed
 if ! zplug check --verbose; then
-    printf "Install? [y/N]: "
-    if read -q; then
-        echo; zplug install
-    fi
+  printf "Install? [y/N]: "
+  if read -q; then
+    echo; zplug install
+  fi
 fi
 
 zplug load
@@ -80,11 +80,11 @@ fpath=(
 )
 
 if [ -x "$(command -v kubectl)" ]; then
-    source <(kubectl completion zsh)
+  source <(kubectl completion zsh)
 fi
 
 if [ -x "$(command -v pipenv)" ]; then
-    eval $(_PIPENV_COMPLETE=source-zsh pipenv)
+  eval $(_PIPENV_COMPLETE=source-zsh pipenv)
 fi
 
 #if [ -x "$(command -v gopass)" ]; then
