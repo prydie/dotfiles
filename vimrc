@@ -269,6 +269,7 @@ let g:tagbar_type_go = {
 """"""""""
 let g:SuperTabDefaultCompletionType = "<c-n>"
 
+
 " vimrc auto-reload
 """""""""""""""""""
 augroup myvimrc
@@ -276,5 +277,13 @@ augroup myvimrc
     au BufWritePost .vimrc,_vimrc,vimrc,.gvimrc,_gvimrc,gvimrc so $MYVIMRC | if has('gui_running') | so $MYGVIMRC | endif
 augroup END
 
+
 " vimwiki
+"""""""""
 let g:vimwiki_list = [{'path': '~/vimwiki/', 'syntax': 'markdown', 'ext': '.md'}]
+
+
+" vim-terraform
+"""""""""""""""
+
+let g:terraform_align=1

@@ -14,14 +14,23 @@ if [ ! $(uname -s) = "Darwin" ]; then
   alias pbpaste='xclip -selection clipboard -o'
 fi
 
-function minikube-up {
-  minikube start \
-    --docker-env HTTP_PROXY=${HTTP_PROXY} \
-    --docker-env HTTPS_PROXY=${HTTPS_PROXY} \
-    --docker-env NO_PROXY=192.168.99.0/24,127.0.0.1 \
-    --extra-config=apiserver.Authorization.Mode=RBAC
-  export no_proxy=$no_proxy,$(minikube ip)
+function minikube-proxy {
+  local ip
+  ip="$(minikube ip)" || return
+  if [[ ! $no_proxy = *"${ip}"* ]]; then
+    export no_proxy=${no_proxy},${ip}
+  fi
+  export NO_PROXY=${no_proxy}
 }
+
+function minikube-up {
+  minikube start  \
+    --docker-env http_proxy=$http_proxy \
+    --docker-env https_proxy=$https_proxy \
+    --docker-env no_proxy=127.0.0.1
+  minikube-proxy
+}
+
 
 function proxy-off {
   unset HTTPS_PROXY HTTP_PROXY https_proxy http_proxy
