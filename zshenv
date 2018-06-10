@@ -1,4 +1,4 @@
-export PATH="${HOME}/.local/bin:${HOME}/.npm-global/bin:${PATH}"
+export PATH="${HOME}/.local/bin:${HOME}/.yarn/bin:${HOME}/.npm-global/bin:${PATH}"
 
 # Go
 ####

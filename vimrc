@@ -21,7 +21,7 @@ Plug 'hashivim/vim-terraform'
 
 " Python import sorting
 " NOTE: pip3 install --user isort
-Plug 'fisadev/vim-isort'
+Plug 'stsewd/isort.nvim', { 'do': ':UpdateRemotePlugins' }
 Plug 'hdima/python-syntax', { 'for': 'python' }
 Plug 'davidhalter/jedi-vim', { 'for': 'python' }
 
@@ -153,6 +153,7 @@ endfunction
 let python_highlight_all=1
 let g:jedi#use_splits_not_buffers = 1
 let g:jedi#completions_enabled = 0
+let g:jedi#goto_assignments_command = "gd"
 
 if executable(glob('~/.config/nvim/py2/bin/python'))
     let g:python_host_prog = glob('~/.config/nvim/py2/bin/python')
@@ -219,7 +220,10 @@ let g:ale_open_list = 0
 let g:ale_lint_on_text_changed = 'never'
 let g:ale_linters = {
 \   'go': ['gometalinter'],
+\   'js': ['eslint'],
 \}
+let g:ale_fixers = {'javascript': ['eslint']}
+let g:ale_javascript_prettier_options = '--single-quote'
 let g:ale_go_gometalinter_options = '--tests --disable-all --aggregate --fast --sort=line --vendor --concurrency=16  --enable=gocyclo --enable=govet --enable=golint --enable=gotype --enable=deadcode'
 let g:ale_python_pylint_executable = ''
 
@@ -287,3 +291,7 @@ let g:vimwiki_list = [{'path': '~/vimwiki/', 'syntax': 'markdown', 'ext': '.md'}
 """""""""""""""
 
 let g:terraform_align=1
+
+" vim-isort
+"""""""""""
+let g:vim_isort_python_version = 'python3'

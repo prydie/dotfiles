@@ -36,9 +36,11 @@ os::ubuntu::install_packages() {
     npm               \
     python-minimal    \
     python-pip        \
+    python3-pip       \
     ruby              \
     silversearcher-ag \
     tmux              \
     virtualenv        \
+    xclip             \
     zsh
 }
