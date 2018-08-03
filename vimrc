@@ -18,6 +18,9 @@ Plug 'fatih/vim-go', { 'do': ':GoInstallBinaries' }
 Plug 'sheerun/vim-polyglot'
 Plug 'pangloss/vim-javascript'
 Plug 'hashivim/vim-terraform'
+Plug 'godlygeek/tabular'
+Plug 'plasticboy/vim-markdown'
+Plug 'towolf/vim-helm'
 
 " Python import sorting
 " NOTE: pip3 install --user isort
@@ -50,6 +53,7 @@ Plug 'ryanoasis/vim-devicons'
 " Git
 Plug 'tpope/vim-fugitive'
 Plug 'tpope/vim-rhubarb'
+Plug 'tommcdo/vim-fubitive'
 Plug 'airblade/vim-gitgutter'
 
 " Text wrangling
