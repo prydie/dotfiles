@@ -21,6 +21,7 @@ Plug 'hashivim/vim-terraform'
 Plug 'godlygeek/tabular'
 Plug 'plasticboy/vim-markdown'
 Plug 'towolf/vim-helm'
+Plug 'chr4/nginx.vim'
 
 " Python import sorting
 " NOTE: pip3 install --user isort
