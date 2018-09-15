@@ -24,7 +24,6 @@ fi
 
 zplug load
 
-
 # Environment
 #############
 
@@ -33,6 +32,9 @@ bindkey -e  # emacs key bindings
 # colors!
 autoload -U colors
 colors
+
+eval "$(dircolors ~/.dir_colors)"
+alias ls='ls --color=auto'
 
 # shut it!
 setopt NO_BEEP
