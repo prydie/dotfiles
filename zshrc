@@ -33,8 +33,13 @@ bindkey -e  # emacs key bindings
 autoload -U colors
 colors
 
-eval "$(dircolors ~/.dir_colors)"
-alias ls='ls --color=auto'
+if whence dircolors >/dev/null; then
+  eval "$(dircolors ~/.dir_colors)"
+  zstyle ':completion:*:default' list-colors ${(s.:.)LS_COLORS}
+else
+  export CLICOLOR=1
+  zstyle ':completion:*:default' list-colors ''
+fi
 
 # shut it!
 setopt NO_BEEP
