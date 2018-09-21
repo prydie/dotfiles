@@ -42,6 +42,8 @@ else
   zstyle ':completion:*:default' list-colors ''
 fi
 
+alias ls="ls --color=auto"
+
 # shut it!
 setopt NO_BEEP
 
