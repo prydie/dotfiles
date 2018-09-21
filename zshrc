@@ -4,6 +4,7 @@ source ~/.zplug/init.zsh
 
 zplug "zsh-users/zsh-syntax-highlighting", defer:2
 zplug "zsh-users/zsh-completions"
+zplug "superbrothers/zsh-kubectl-prompt"
 
 zplug "plugins/common-aliases", from:oh-my-zsh
 
@@ -97,6 +98,11 @@ fi
 #if [ -x "$(command -v gopass)" ]; then
     #source <(gopass completion )
 #fi
+
+# kube
+######
+autoload -U colors; colors
+RPROMPT='%{$fg[blue]%}($ZSH_KUBECTL_PROMPT)%{$reset_color%}'
 
 # FZF
 #####
