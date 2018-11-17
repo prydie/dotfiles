@@ -1,3 +1,5 @@
+# zmodload zsh/zprof
+
 [[ $TMUX = "" ]] && export TERM="xterm-256color"
 
 source ~/.zplug/init.zsh
@@ -5,8 +7,6 @@ source ~/.zplug/init.zsh
 zplug "zsh-users/zsh-syntax-highlighting", defer:2
 zplug "zsh-users/zsh-completions"
 zplug "superbrothers/zsh-kubectl-prompt"
-
-zplug "plugins/common-aliases", from:oh-my-zsh
 
 zplug "junegunn/fzf-bin", as:command, from:gh-r, rename-to:fzf, use:"*${(L)$(uname -s)}*amd64*"
 zplug "junegunn/fzf", as:command, use:bin/fzf-tmux
@@ -115,3 +115,5 @@ export FZF_DEFAULT_OPTS='--height 40% --reverse --border'
 [ -f ~/.fzf.zsh ] && source ~/.fzf.zsh
 
 [ -f ~/.zshrc.local ] && source ~/.zshrc.local
+
+# zprof
