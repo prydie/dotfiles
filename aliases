@@ -5,6 +5,11 @@ alias vimf='vim $(fzf)'
 # git
 alias gp='git push'
 
+# Kubernetes
+
+alias k="kubectl"
+alias ks="k -n kube-system"
+
 function rsa-fingerprint() {
    openssl rsa -pubout -outform DER -in $1 2> /dev/null | openssl md5 -c
 }

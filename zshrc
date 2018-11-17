@@ -6,7 +6,6 @@ source ~/.zplug/init.zsh
 
 zplug "zsh-users/zsh-syntax-highlighting", defer:2
 zplug "zsh-users/zsh-completions"
-zplug "superbrothers/zsh-kubectl-prompt"
 
 zplug "junegunn/fzf-bin", as:command, from:gh-r, rename-to:fzf, use:"*${(L)$(uname -s)}*amd64*"
 zplug "junegunn/fzf", as:command, use:bin/fzf-tmux
@@ -104,7 +103,8 @@ fi
 # kube
 ######
 autoload -U colors; colors
-RPROMPT='%{$fg[blue]%}($ZSH_KUBECTL_PROMPT)%{$reset_color%}'
+source "${HOME}/.kube-ps1.sh"
+RPROMPT='$(kube_ps1)'
 
 # FZF
 #####
