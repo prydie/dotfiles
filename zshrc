@@ -15,12 +15,12 @@ zplug mafredri/zsh-async, from:github
 zplug sindresorhus/pure, use:pure.zsh, from:github, as:theme
 
 # Install plugins if there are plugins that have not been installed
-if ! zplug check --verbose; then
-  printf "Install? [y/N]: "
-  if read -q; then
-    echo; zplug install
-  fi
-fi
+#if ! zplug check --verbose; then
+  #printf "Install? [y/N]: "
+  #if read -q; then
+    #echo; zplug install
+  #fi
+#fi
 
 zplug load
 
@@ -102,15 +102,14 @@ fi
 
 # kube
 ######
-autoload -U colors; colors
-source "${HOME}/.kube-ps1.sh"
-RPROMPT='$(kube_ps1)'
+#autoload -U colors; colors
+#source "${HOME}/.kube-ps1.sh"
+#RPROMPT='$(kube_ps1)'
 
 # FZF
 #####
 export FZF_DEFAULT_COMMAND='ag -l -g ""'
 export FZF_DEFAULT_OPTS='--height 40% --reverse --border'
-
 
 [ -f ~/.fzf.zsh ] && source ~/.fzf.zsh
 
