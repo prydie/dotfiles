@@ -4,15 +4,19 @@
 
 source ~/.zplug/init.zsh
 
+export POWERLEVEL9K_MODE='nerdfont-complete'
+
 zplug "zsh-users/zsh-syntax-highlighting", defer:2
 zplug "zsh-users/zsh-completions"
 
 zplug "junegunn/fzf-bin", as:command, from:gh-r, rename-to:fzf, use:"*${(L)$(uname -s)}*amd64*"
 zplug "junegunn/fzf", as:command, use:bin/fzf-tmux
 
+zplug "plugins/vi-mode",   from:oh-my-zsh
+
 # Prompt
 zplug mafredri/zsh-async, from:github
-zplug sindresorhus/pure, use:pure.zsh, from:github, as:theme
+zplug romkatv/powerlevel10k, use:powerlevel10k.zsh-theme
 
 # Install plugins if there are plugins that have not been installed
 #if ! zplug check --verbose; then
@@ -41,7 +45,7 @@ else
   zstyle ':completion:*:default' list-colors ''
 fi
 
-alias ls="ls --color=auto"
+# alias ls="ls --color=auto"
 
 # shut it!
 setopt NO_BEEP
@@ -82,36 +86,24 @@ setopt share_history
 # Completions
 #############
 
-fpath=(
-  /usr/local/share/zsh-completions
-  /usr/local/share/zsh/site-functions
-  $fpath
-)
-
-if [ -x "$(command -v kubectl)" ]; then
-  source <(kubectl completion zsh)
-fi
-
-if [ -x "$(command -v pipenv)" ]; then
-  eval $(_PIPENV_COMPLETE=source-zsh pipenv)
-fi
-
-#if [ -x "$(command -v gopass)" ]; then
-    #source <(gopass completion )
-#fi
-
-# kube
-######
-#autoload -U colors; colors
-#source "${HOME}/.kube-ps1.sh"
-#RPROMPT='$(kube_ps1)'
-
 # FZF
 #####
 export FZF_DEFAULT_COMMAND='ag -l -g ""'
 export FZF_DEFAULT_OPTS='--height 40% --reverse --border'
 
 [ -f ~/.fzf.zsh ] && source ~/.fzf.zsh
+
+export PURE_POWER_MODE=fancy
+source ~/.purepower
+
+# kube
+######
+autoload -U colors; colors
+source "${HOME}/.kube-ps1.sh"
+RPROMPT='$()'
+function custom_rprompt() {
+    kube_ps1
+}
 
 [ -f ~/.zshrc.local ] && source ~/.zshrc.local
 

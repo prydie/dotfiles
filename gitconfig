@@ -18,3 +18,9 @@
 
 [include]
     path = ~/.gitconfig.local
+[url "ssh://git@bitbucket.oci.oraclecorp.com:7999"]
+	insteadOf = https://bitbucket.oci.oraclecorp.com/scm
+[url "ssh://git@bitbucket.aka.lgl.grungy.us:7999"]
+	insteadOf = https://bitbucket.aka.lgl.grungy.us/scm
+[url "ssh://git@bitbucket.oci.oraclecorp.com:7999"]
+	insteadOf = https://bitbucket.oci.oraclecorp.com

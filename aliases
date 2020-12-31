@@ -10,6 +10,10 @@ alias gp='git push'
 alias k="kubectl"
 alias ks="k -n kube-system"
 
+function kill-anyconnect() {
+  sudo pgrep -fi '[a]nyconnect' | sudo xargs kill -9
+}
+
 function rsa-fingerprint() {
    openssl rsa -pubout -outform DER -in $1 2> /dev/null | openssl md5 -c
 }
