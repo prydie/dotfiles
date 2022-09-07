@@ -9,14 +9,14 @@ export POWERLEVEL9K_MODE='nerdfont-complete'
 zplug "zsh-users/zsh-syntax-highlighting", defer:2
 zplug "zsh-users/zsh-completions"
 
-zplug "junegunn/fzf-bin", as:command, from:gh-r, rename-to:fzf, use:"*${(L)$(uname -s)}*amd64*"
 zplug "junegunn/fzf", as:command, use:bin/fzf-tmux
 
 zplug "plugins/vi-mode",   from:oh-my-zsh
 
 # Prompt
 zplug mafredri/zsh-async, from:github
-zplug romkatv/powerlevel10k, use:powerlevel10k.zsh-theme
+#zplug romkatv/powerlevel10k, use:powerlevel10k.zsh-theme
+eval "$(starship init zsh)"
 
 # Install plugins if there are plugins that have not been installed
 #if ! zplug check --verbose; then
@@ -93,8 +93,8 @@ export FZF_DEFAULT_OPTS='--height 40% --reverse --border'
 
 [ -f ~/.fzf.zsh ] && source ~/.fzf.zsh
 
-export PURE_POWER_MODE=fancy
-source ~/.purepower
+#export PURE_POWER_MODE=fancy
+#source ~/.purepower
 
 # kube
 ######

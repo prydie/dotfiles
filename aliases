@@ -23,24 +23,6 @@ if [ ! $(uname -s) = "Darwin" ]; then
   alias pbpaste='xclip -selection clipboard -o'
 fi
 
-function minikube-proxy {
-  local ip
-  ip="$(minikube ip)" || return
-  if [[ ! $no_proxy = *"${ip}"* ]]; then
-    export no_proxy=${no_proxy},${ip}
-  fi
-  export NO_PROXY=${no_proxy}
-}
-
-function minikube-up {
-  minikube start  \
-    --docker-env http_proxy=$http_proxy \
-    --docker-env https_proxy=$https_proxy \
-    --docker-env no_proxy=127.0.0.1
-  minikube-proxy
-}
-
-
 function proxy-off {
   unset HTTPS_PROXY HTTP_PROXY https_proxy http_proxy
 }
@@ -97,7 +79,7 @@ alias mv='mv -i'
 
 # zsh is able to auto-do some kungfoo
 # depends on the SUFFIX :)
-if is-at-least 4.2.0; then
+#if is-at-least 4.2.0; then
   # open browser on urls
   if [[ -n "$BROWSER" ]]; then
     _browser_fts=(htm html de org net com at cx nl se dk)
@@ -128,7 +110,11 @@ if is-at-least 4.2.0; then
   alias -s tar="tar tf"
   alias -s tar.gz="echo "
   alias -s ace="unace l"
-fi
+# fi
+
+alias ls='ls --color=auto'
+
+alias mvnv='mvn verify && notify-send "Maven verify" "Succeeded" || notify-send "Maven verify" "FAILED!"'
 
 # Make zsh know about hosts already accessed by SSH
 zstyle -e ':completion:*:(ssh|scp|sftp|rsh|rsync):hosts' hosts 'reply=(${=${${(f)"$(cat {/etc/ssh_,~/.ssh/known_}hosts(|2)(N) /dev/null)"}%%[# ]*}//,/ })'

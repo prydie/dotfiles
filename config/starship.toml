@@ -1,0 +1,16 @@
+[kubernetes]
+format = '[$symbol$context( \($namespace\))]($style) in '
+disabled = false
+[kubernetes.context_aliases]
+
+[java]
+disabled = true
+
+[package]
+disabled = true
+
+[custom.mapi]
+symbol = "🗺️"
+command = """ echo "$(echo $MAPI_ENDPOINT | cut -d'-' -f 2 | sed 's/mapi/prod/') $(echo $MAPI_ENDPOINT | cut -d'.' -f 2)" """
+when = """ [ ! -z "$MAPI_ENDPOINT" ] """
+format = " [\\($symbol  $output\\) ]($style)"
