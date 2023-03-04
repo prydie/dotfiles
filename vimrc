@@ -34,12 +34,12 @@ Plug 'davidhalter/jedi-vim', { 'for': 'python' }
 
 " Omnicomplete
 if has('nvim')
-  "Plug 'Shougo/deoplete.nvim', { 'do': ':UpdateRemotePlugins' }
-  "Plug 'zchee/deoplete-jedi', { 'for': 'python' }
-  "Plug 'autozimu/LanguageClient-neovim', {
-    "\ 'branch': 'next',
-    "\ 'do': 'bash install.sh',
-    "\ }
+  Plug 'Shougo/deoplete.nvim', { 'do': ':UpdateRemotePlugins' }
+  Plug 'zchee/deoplete-jedi', { 'for': 'python' }
+  Plug 'autozimu/LanguageClient-neovim', {
+    \ 'branch': 'next',
+    \ 'do': 'bash install.sh',
+    \ }
   Plug 'neoclide/coc.nvim', {'branch': 'release'}
 endif
 

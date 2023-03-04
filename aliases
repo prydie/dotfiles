@@ -1,4 +1,4 @@
-# vim: ft=sh sw=2 ts=2
+# vim: ft=zsh sw=2 ts=2
 
 alias vimf='vim $(fzf)'
 
@@ -75,7 +75,7 @@ alias mv='mv -i'
 
 # zsh is able to auto-do some kungfoo
 # depends on the SUFFIX :)
-#if is-at-least 4.2.0; then
+if [ $0 = zsh ] && is-at-least 4.2.0; then
   # open browser on urls
   if [[ -n "$BROWSER" ]]; then
     _browser_fts=(htm html de org net com at cx nl se dk)
@@ -106,7 +106,7 @@ alias mv='mv -i'
   alias -s tar="tar tf"
   alias -s tar.gz="echo "
   alias -s ace="unace l"
-# fi
+fi
 
 alias ls='ls --color=auto'
 
@@ -116,6 +116,8 @@ alias mvnv='mvn verify && notify-send "Maven verify" "Succeeded" || notify-send 
 function vpn::kill-anyconnect() {
   sudo pgrep -fi '[a]nyconnect' | sudo xargs kill -9
 }
+
+alias open-spotify="/snap/bin/spotify --force-device-scale-factor=1.75"
 
 # Make zsh know about hosts already accessed by SSH
 zstyle -e ':completion:*:(ssh|scp|sftp|rsh|rsync):hosts' hosts 'reply=(${=${${(f)"$(cat {/etc/ssh_,~/.ssh/known_}hosts(|2)(N) /dev/null)"}%%[# ]*}//,/ })'

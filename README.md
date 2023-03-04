@@ -1,4 +1,4 @@
-# Prydie's dotfiles
+# Andrew Pryde's dotfiles
 
 A not particularly well thought through collection of dotfiles.
 
@@ -14,20 +14,6 @@ A not particularly well thought through collection of dotfiles.
 
  1. Install [`rcm`][7]
  2. `env RCRC=$HOME/.dotfiles/rcrc rcup`
-
-## Additional requirements
-
-There are a number of requirements I haven't bothered automating their
-installation. These include:
-
- - `curl`
- - `git`
- - `npm`
- - `pip`
- - `python3`
- - `python`
- - `ruby`
- - `tmux`
 
 ### Mac OS X
 

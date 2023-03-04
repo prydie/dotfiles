@@ -1,2 +1,4 @@
-EXCLUDES="README.md LICENSE"
+#!/usr/bin/env make
+
+EXCLUDES="README.md LICENSE requirements.txt"
 DOTFILES_DIRS="$HOME/.dotfiles"
