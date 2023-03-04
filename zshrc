@@ -16,6 +16,11 @@ export POWERLEVEL9K_MODE='nerdfont-complete'
 zplug "zsh-users/zsh-syntax-highlighting", defer:2
 zplug "zsh-users/zsh-completions"
 
+export NVM_LAZY_LOAD=true
+export NVM_COMPLETION=true
+zplug "lukechilds/zsh-nvm"
+
+zplug "junegunn/fzf-bin", as:command, from:gh-r, rename-to:fzf, use:"*${(L)$(uname -s)}*amd64*"
 zplug "junegunn/fzf", as:command, use:bin/fzf-tmux
 
 zplug "plugins/vi-mode",   from:oh-my-zsh
@@ -98,7 +103,6 @@ setopt share_history
 export FZF_DEFAULT_COMMAND='ag -l -g ""'
 export FZF_DEFAULT_OPTS='--height 40% --reverse --border'
 
-[ -f ~/.fzf.zsh ] && source ~/.fzf.zsh
 
 #export PURE_POWER_MODE=fancy
 #source ~/.purepower
