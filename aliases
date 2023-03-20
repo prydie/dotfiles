@@ -14,6 +14,56 @@ function crypto::rsa-fingerprint() {
    openssl rsa -pubout -outform DER -in $1 2> /dev/null | openssl md5 -c
 }
 
+# -------------------------------------------------------------------
+# VPN
+# -------------------------------------------------------------------
+#
+vpn::connect() {
+    local endpoint=$1
+    sudo openconnect -b -u andrew.pryde \
+      --csd-user=$(id -un) \
+      --csd-wrapper=/usr/libexec/openconnect/csd-wrapper.sh \
+      --useragent="AnyConnect Linux_64 4.10.99999" \
+      "${endpoint}"
+}
+
+# -------------------------------------------------------------------
+# ssh agent
+# -------------------------------------------------------------------
+
+ssh-agent::clean() {
+    echo "Cleaning identities from ssh-agent.."
+    ssh-add -D
+    ssh-add -s /usr/lib/x86_64-linux-gnu/opensc-pkcs11.so
+    echo "Reloading gpg agent.."
+    gpg-connect-agent reloadagent /bye
+}
+
+ssh-agent::keys() {
+    if [ -z "${SSH_AUTH_SOCK}" ]; then
+        eval `ssh-agent -s`
+    fi
+    ssh-add -k -t 600
+    ssh-add -l
+}
+
+ssh-agent::stop() {
+    pkill -I -f '/usr/bin/ssh-agent -l'
+}
+
+ssh-agent::pkcs11() {
+    if [ -z "${SSH_AUTH_SOCK}" ]; then
+        eval `ssh-agent -s`
+    fi
+    if [[ $(ssh-add -l | grep opensc-pkcs11.so | wc -l) -eq 0 ]]; then
+        ssh-add -e /usr/lib/x86_64-linux-gnu/opensc-pkcs11.so || true
+        ssh-add -t 43200 -s /usr/lib/x86_64-linux-gnu/opensc-pkcs11.so
+    fi
+    ssh-add -l
+}
+
+alias mvnf='mvn clean install -DskipTests -Dpmd.skip=true -Dspotbugs.skip=true -Dcheckstyle.skip -Dcpd.skip=true'
+
 if [ ! $(uname -s) = "Darwin" ]; then
   alias pbcopy='xclip -in -selection clipboard'
   alias pbpaste='xclip -selection clipboard -o'
@@ -106,7 +156,7 @@ if [ $0 = zsh ] && is-at-least 4.2.0; then
   alias -s tar="tar tf"
   alias -s tar.gz="echo "
   alias -s ace="unace l"
-# fi
+fi
 
 alias ls='ls --color=auto'
 
@@ -116,6 +166,8 @@ alias mvnv='mvn verify && notify-send "Maven verify" "Succeeded" || notify-send 
 function vpn::kill-anyconnect() {
   sudo pgrep -fi '[a]nyconnect' | sudo xargs kill -9
 }
+
+alias open-spotify="/snap/bin/spotify --force-device-scale-factor=1.75"
 
 # Make zsh know about hosts already accessed by SSH
 zstyle -e ':completion:*:(ssh|scp|sftp|rsh|rsync):hosts' hosts 'reply=(${=${${(f)"$(cat {/etc/ssh_,~/.ssh/known_}hosts(|2)(N) /dev/null)"}%%[# ]*}//,/ })'

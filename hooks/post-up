@@ -10,9 +10,12 @@ touch "$HOME"/.psqlrc.local
 os::get_distro
 
 if [[ "${DISTRO}" == "Ubuntu" ]]; then
+  log::f "Ubuntu detected, installing packages"
   os::ubuntu::ppas
   os::ubuntu::install_packages
 fi
+
+# os::install_pip
 
 # install zplug if not installed
 if [ ! -d "$HOME/.zplug" ]; then
@@ -25,5 +28,6 @@ if [ ! -d "$HOME/.tmux/plugins/tpm" ]; then
   git clone https://github.com/tmux-plugins/tpm ~/.tmux/plugins/tpm && ~/.tmux/plugins/tpm/bin/install_plugins
 fi
 
+os::set_zoom_scaling_factor
 
 . ${_ROOT}/hooks/nvim

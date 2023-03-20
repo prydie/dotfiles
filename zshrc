@@ -1,6 +1,9 @@
+export GOPATH=${HOME}/go
+
 # Enable Powerlevel10k instant prompt. Should stay close to the top of ~/.zshrc.
 # Initialization code that may require console input (password prompts, [y/n]
 # confirmations, etc.) must go above this block; everything else may go below.
+
 if [[ -r "${XDG_CACHE_HOME:-$HOME/.cache}/p10k-instant-prompt-${(%):-%n}.zsh" ]]; then
   source "${XDG_CACHE_HOME:-$HOME/.cache}/p10k-instant-prompt-${(%):-%n}.zsh"
 fi
@@ -20,23 +23,23 @@ export NVM_LAZY_LOAD=true
 export NVM_COMPLETION=true
 zplug "lukechilds/zsh-nvm"
 
-zplug "junegunn/fzf-bin", as:command, from:gh-r, rename-to:fzf, use:"*${(L)$(uname -s)}*amd64*"
+# zplug "junegunn/fzf-bin", as:command, from:gh-r, rename-to:fzf, use:"*${(L)$(uname -s)}*amd64*"
 zplug "junegunn/fzf", as:command, use:bin/fzf-tmux
 
 zplug "plugins/vi-mode",   from:oh-my-zsh
 
 # Prompt
 zplug mafredri/zsh-async, from:github
-#zplug romkatv/powerlevel10k, use:powerlevel10k.zsh-theme
+zplug romkatv/powerlevel10k, as:theme, depth:1
 eval "$(starship init zsh)"
 
 # Install plugins if there are plugins that have not been installed
-#if ! zplug check --verbose; then
-  #printf "Install? [y/N]: "
-  #if read -q; then
-    #echo; zplug install
-  #fi
-#fi
+if ! zplug check --verbose; then
+  printf "Install? [y/N]: "
+  if read -q; then
+    echo; zplug install
+  fi
+fi
 
 zplug load
 
@@ -116,7 +119,6 @@ function custom_rprompt() {
     kube_ps1
 }
 
-source ~/powerlevel10k/powerlevel10k.zsh-theme
 [ -f ~/.zshrc.local ] && source ~/.zshrc.local
 
 # zprof

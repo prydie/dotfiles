@@ -1,2 +1,4 @@
-EXCLUDES="README.md LICENSE"
+#!/usr/bin/env make
+
+EXCLUDES="README.md LICENSE requirements.txt pyvenv.cfg kube-ps1.sh headphones.py *.log"
 DOTFILES_DIRS="$HOME/.dotfiles"
