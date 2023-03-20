@@ -1,5 +1,4 @@
 #!/usr/bin/env make
 
-
-export PATH=$(which "$(make not found /home/apryde/.dotfiles/mvn not found build not found)")
-echo $PATH > ~/.rcrc
+EXCLUDES="README.md LICENSE requirements.txt"
+DOTFILES_DIRS="$HOME/.dotfiles"

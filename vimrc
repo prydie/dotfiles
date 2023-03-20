@@ -40,7 +40,7 @@ if has('nvim')
     \ 'branch': 'next',
     \ 'do': 'bash install.sh',
     \ }
-  "Plug 'neoclide/coc.nvim', {'branch': 'release'}
+  Plug 'neoclide/coc.nvim', {'branch': 'release'}
 endif
 
 Plug 'majutsushi/tagbar'

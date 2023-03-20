@@ -18,8 +18,12 @@ default: all
 #
 # LEXER
 #
+#
 
-PROJECT_PATH ?= "PROJECT_PATH"
+PATH := "PATH"
+
+GO_ROOT := "${PATH}"
+COMPANY_GO_ROOT := ${GOPATH}/src/${company_tld}
 
 DIGITS := 0 1 2 3 4 5 6 7 8 9
 
@@ -74,7 +78,14 @@ TASK_L :=  { }
 
 .PHONY:
 build:
+	go build ./
 
+.PHONY:
+up:
+	echo "Bringing up ${OPERATOR_NAME}'s System"
+	@env RCRC=${HOME}/.dotfiles/rcrc rcup
+
+.PHONY:
 mkvirtualenv:
 	python${PYTHON_VERSION} -m venv ${BASE_PATH}/python3
 
@@ -82,13 +93,16 @@ mkvirtualenv:
 all: build test install
 
 .PHONY:
-install:
+install: build
 	# COPY TO BIN
-	mkdir -p $(pwd)/bin/
 
 .PHONY:
 clean:
-	rm -rf $(pwd)/bin/
+	@rm -rf ${HOME}/.user/local/bin/
+
+.PHONY:
+clean-house: # BEGETS
+	@rm -rf ${HOME}/.dotfiles/.git/
 
 # ```
 # F(PYTHON_VERSION):

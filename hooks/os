@@ -3,7 +3,7 @@
 
 _ROOT="$(dirname "${BASH_SOURCE}")/.."
 
-. "${_ROOT}/hooks/os"
+# . "${_ROOT}/hooks/os"
 
 log::f () {
  printf "INFO: %s $*\n" "$(date)"
@@ -63,9 +63,12 @@ kube::binaries() {
 
 os::ubuntu::install_packages() {
   log::f "Installing packages"
+
   sudo apt install -y \
     curl              \
+    tmux              \
     gawk              \
+    git               \
     neovim            \
     nodejs            \
     npm               \
