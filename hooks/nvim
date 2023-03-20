@@ -3,15 +3,20 @@
 
 
 nvim::venvs() {
-  if [ ! -d "${HOME}/.config/nvim/py2" ]; then
-    virtualenv --python=python2.7 ${HOME}/.config/nvim/py2
+  if [ ! -x "$(which python2)" ] ; then
+    log::e "Python 2 not found"
+    exit 1
   fi
-  ${HOME}/.config/nvim/py2/bin/pip install --upgrade neovim
+
+  if [ ! -d "${HOME}/.config/nvim/py2" ]; then
+    virtualenv --python="$(which python2)" "${HOME}/.config/nvim/py2"
+  fi
+  "${HOME}/.config/nvim/py2/bin/pip" install --upgrade pip neovim
 
   if [ ! -d "${HOME}/.config/nvim/py3" ]; then
-    virtualenv --python=python3 ${HOME}/.config/nvim/py3
+    python3 -m venv "${HOME}/.config/nvim/py3"
   fi
-  ${HOME}/.config/nvim/py3/bin/pip install --upgrade neovim
+  "${HOME}/.config/nvim/py3/bin/pip" install --upgrade pip neovim
 }
 
 nvim::plug_installed() {
@@ -27,7 +32,7 @@ nvim::update_plugins() {
 }
 
 nvim::ensure() {
-  mkdir -p ${HOME}/.config/nvim
+  mkdir -p "${HOME}/.config/nvim"
   nvim::venvs
   nvim::plug_installed
   nvim::update_plugins

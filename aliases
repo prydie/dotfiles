@@ -106,7 +106,7 @@ if [ $0 = zsh ] && is-at-least 4.2.0; then
   alias -s tar="tar tf"
   alias -s tar.gz="echo "
   alias -s ace="unace l"
-# fi
+fi
 
 alias ls='ls --color=auto'
 

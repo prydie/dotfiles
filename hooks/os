@@ -1,17 +1,29 @@
 #!/bin/bash
-# vim: set ft=sh:
+# vim: set ft=sh sw=2:
+
+_ROOT="$(dirname "${BASH_SOURCE}")/.."
+
+. "${_ROOT}/hooks/os"
 
 log::f () {
-  printf "INFO: $(date) $*\n"
+ printf "INFO: %s $*\n" "$(date)"
 }
 
 log::e () {
-  printf "ERROR: $(date) $*\n"
+  printf "ERROR: %s  $*\n" "$(date)"
 }
 
 os::install_pip() {
+local _path
+ _path=$1
+
+ local out
+ out="$(mktemp)"
+
  log::f "Installing Pip"
- curl -L https://bootstrap.pypa.io/get-pip.py && yes | bash
+
+ curl -LO "$out" https://bootstrap.pypa.io/get-pip.py
+ python "$out"
 }
 
 os::get_distro() {
@@ -57,8 +69,9 @@ os::ubuntu::install_packages() {
     neovim            \
     nodejs            \
     npm               \
-    # python-pip      \
-    # python3-pip     \
+    python-pip        \
+    python3-pip       \
+    gir1.2-gda-5.0    \ gir1.2-gsound-1.0 \ # Pano
     ppa-purge         \
     ruby              \
     silversearcher-ag \
@@ -66,4 +79,8 @@ os::ubuntu::install_packages() {
     virtualenv        \
     xclip             \
     zsh
+}
+
+os::set_zoom_scaling_factor () {
+  perl -i -pe 's/scaleFactor=2/scaleFactor=1/' ~/.config/zoomus.conf
 }

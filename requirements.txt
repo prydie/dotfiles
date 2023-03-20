@@ -1,0 +1,2 @@
+pybluez
+setuptools<58
