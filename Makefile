@@ -25,6 +25,7 @@ default: all
 # CI_PLATFORM_NAMES := "${bitbucket:~gitlab}"
 
 GO_ROOT := ${HOME}/go
+
 COMPANY_GO_ROOT := ${GOPATH}/src/${company_tld}
 
 DIGITS := 0 1 2 3 4 5 6 7 8 9
@@ -84,8 +85,12 @@ build:
 
 .PHONY:
 up:
+<<<<<<< HEAD
 	@echo "Bringing up ${OPERATOR_NAME}'s System"
 	@env RCRC=${HOME}/.dotfiles/rcrc rcup
+=======
+	env RCRC=${HOME}/.dotfiles/rcrc rcup
+>>>>>>> b58458be (Checkpoint)
 
 .PHONY:
 mkvirtualenv:
