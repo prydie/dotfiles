@@ -25,13 +25,12 @@ PKG_MGR := "apt"
 #
 #
 
-UNAME := apryde
+# PATH := "PATH"
 
-SRC_CONTROL_PLATFORM := bitbucket
+# CI_PLATFORM_NAMES := "${bitbucket:~gitlab}"
 
 GO_ROOT := ${HOME}/go
-
-COMPANY_GO_ROOT := ${GO_ROOT}/src/${SRC_CONTROL_PLATFORM}.${company_tld}
+COMPANY_GO_ROOT := ${GOPATH}/src/${company_tld}
 
 DIGITS := 0 1 2 3 4 5 6 7 8 9
 
