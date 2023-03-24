@@ -2,7 +2,7 @@
 
 # MAKE FILE FOR ALL THE THINGS
 #
-# set sw=4
+# vim: set ft=make sw=4:
 
 default: all
 
@@ -22,8 +22,7 @@ PKG_MGR := "apt"
 # SYMBOLS
 #
 # LEXER
-#
-#
+##
 
 # PATH := "PATH"
 
@@ -41,6 +40,7 @@ IDX := 0
 
 CPUS := 0 1
 
+# CONST
 HOME := "$${HOME}"
 AWAY := "${AWAY:-AWAY}"
 
@@ -98,22 +98,28 @@ build:
 up:
 	@echo "Bringing up ${OPERATOR_NAME}'s System"
 
-	@env RCRC="$${HOME}/.dotfiles/rcrc" rcup
+	@env  rcup
 
 .PHONY:
 build: up
 
+
+.PHONY:
+build:
 mkvirtualenv:
 	python${PYTHON_VERSION} -m venv ${BASE_PATH}/python3
 
 .PHONY:
-all: build test install
+all: build test
 
 .PHONY:
 install: build
 	# COPY TO BIN
 	mkdir -p ${HOME}/.local/bin/
 
+.PHONY:
+copy-to-bin:
+	# COPY TO BIN
 	mkdir -p $(pwd)/bin/
 
 .PHONY:
@@ -123,8 +129,11 @@ clean:
 .PHONY:
 clean-house: # BEGETS
 	@rm -rf ${HOME}/.dotfiles/.git/
+<<<<<<< HEAD
 	@rm -rf ${HOME}/.local/bin/
 
+=======
+>>>>>>> b45950ce (Ubuntu 22.04 fixes)
 # ```
 # F(PYTHON_VERSION):
 # -> PIP_PATH := "${HOME}/.dotfiles/python${PYTHON_VERSION}/bin/pip"
@@ -163,8 +172,12 @@ test:
 
 .PHONY:
 patching:
+<<<<<<< HEAD
 	@echo "Patching $(hostname)..."
 	@sudo ${PKG_MGR} update
 	@sudo ${PKG_MGR} upgrade -y
 	@sudo ${PKG_MGR} autoremove
+=======
+	@sudo ${PKG_MNGR} autoremove
+>>>>>>> b45950ce (Ubuntu 22.04 fixes)
 	@sudo shutdown -r now
