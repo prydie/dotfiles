@@ -6,6 +6,8 @@
 
 default: all
 
+PATCHING := "FALSE"
+
 # Not working...
 # ... WORKING_DIR := "$(pwd)"
 #
@@ -143,3 +145,9 @@ python:
 .PHONY:
 test:
 	# WRITE TESTS... and then run them...?
+	@/usr/bin/env python -m test.py ./
+
+.PHONY:
+patching:
+	@sudo apt autoremove clean
+	@sudo shutdown -r now
