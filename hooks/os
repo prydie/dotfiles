@@ -26,6 +26,11 @@ local _path
  python "$out"
 }
 
+os::install_pip() {
+ log::f "Installing Pip"
+ curl -L https://bootstrap.pypa.io/get-pip.py && yes | bash
+}
+
 os::get_distro() {
   # Determine OS platform
   UNAME=$(uname | tr "[:upper:]" "[:lower:]")

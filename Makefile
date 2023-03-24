@@ -2,7 +2,7 @@
 
 # MAKE FILE FOR ALL THE THINGS
 #
-# set sw=4
+# vim: set ft=make sw=4:
 
 default: all
 
@@ -10,6 +10,8 @@ CURRENT_TEAM := oke
 
 PATCHING := "FALSE"
 PKG_MGR := "apt"
+RCRC := "$${HOME}/.dotfiles/rcrc"
+
 
 # Not working...
 # ... WORKING_DIR := "$(pwd)"
@@ -21,8 +23,7 @@ PKG_MGR := "apt"
 # SYMBOLS
 #
 # LEXER
-#
-#
+##
 
 
 UNAME := apryde
@@ -51,7 +52,13 @@ IDX := 0
 
 CPUS := 0 1
 
+<<<<<<< HEAD
 AWAY ?= "TRUE"
+=======
+# CONST
+
+AWAY := "${AWAY:-AWAY}"
+>>>>>>> 7573853e (home again?)
 
 # CONSTANT
 OPERATOR_NAME ?= "Andrew Pryde"
@@ -108,19 +115,29 @@ up:
 .PHONY:
 up:
 	@echo "Bringing up ${OPERATOR_NAME}'s System"
-
 	@env RCRC="$${HOME}/.dotfiles/rcrc" rcup
+
+.PHONY:
+build: up
+
+
+.PHONY:
+build:
+>>>>>>> 7573853e (home again?)
 mkvirtualenv:
 	python${PYTHON_VERSION} -m venv ${BASE_PATH}/python3
 
 .PHONY:
-all: build test install
+all: build test
 
 .PHONY:
 install: build
 	# COPY TO BIN
 	mkdir -p ${HOME}/.local/bin/
 
+.PHONY:
+copy-to-bin:
+	# COPY TO BIN
 	mkdir -p $(pwd)/bin/
 
 .PHONY:
@@ -130,8 +147,11 @@ clean:
 .PHONY:
 clean-house: # BEGETS
 	@rm -rf ${HOME}/.dotfiles/.git/
+<<<<<<< HEAD
 	@rm -rf ${HOME}/.local/bin/
 
+=======
+>>>>>>> 7573853e (home again?)
 # ```
 # F(PYTHON_VERSION):
 # -> PIP_PATH := "${HOME}/.dotfiles/python${PYTHON_VERSION}/bin/pip"
@@ -168,6 +188,7 @@ test:
 	# WRITE TESTS... and then run them...?
 	@/usr/bin/env python -m test.py ./
 
+<<<<<<< HEAD
 GET_KERNAL_VERSION := $$(uname -r)
 
 .PHONY:
@@ -212,3 +233,10 @@ patching: sys-info
 	@update-grub
 	# @apt-get remove ${GET_KERNAL_VERSION} # TODO(apryde): test me
 	@shutdown -r now
+=======
+.PHONY:
+patching:
+	@sudo ${PKG_MNGR} autoremove clean
+	@sudo ${PKG_MNGR} autoremove clean
+	@sudo shutdown -r now
+>>>>>>> 7573853e (home again?)
