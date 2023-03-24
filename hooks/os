@@ -51,8 +51,8 @@ shell::theme() {
 }
 
 os::ubuntu::ppas() {
-  sudo add-apt-repository -y ppa:neovim-ppa/stable
-# sudo add-apt-repository -y ppa:gophers/archive
+  echo "Not for now"
+  # sudo add-apt-repository -y ppa:neovim-ppa/stable
 }
 
 kube::binaries() {
@@ -70,6 +70,7 @@ os::ubuntu::install_packages() {
     gawk              \
     git               \
     neovim            \
+    python3-neovim    \
     nodejs            \
     npm               \
     python-pip        \

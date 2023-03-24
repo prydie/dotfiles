@@ -14,6 +14,43 @@ function crypto::rsa-fingerprint() {
    openssl rsa -pubout -outform DER -in $1 2> /dev/null | openssl md5 -c
 }
 
+# -------------------------------------------------------------------
+# ssh agent
+# -------------------------------------------------------------------
+
+ssh-agent::clean() {
+    echo "Cleaning identities from ssh-agent.."
+    ssh-add -D
+    ssh-add -s /usr/lib/x86_64-linux-gnu/opensc-pkcs11.so
+    echo "Reloading gpg agent.."
+    gpg-connect-agent reloadagent /bye
+}
+
+ssh-agent::keys() {
+    if [ -z "${SSH_AUTH_SOCK}" ]; then
+        eval `ssh-agent -s`
+    fi
+    ssh-add -k -t 600
+    ssh-add -l
+}
+
+ssh-agent::stop() {
+    pkill -I -f '/usr/bin/ssh-agent -l'
+}
+
+ssh-agent::pkcs11() {
+    if [ -z "${SSH_AUTH_SOCK}" ]; then
+        eval `ssh-agent -s`
+    fi
+    if [[ $(ssh-add -l | grep opensc-pkcs11.so | wc -l) -eq 0 ]]; then
+        ssh-add -e /usr/lib/x86_64-linux-gnu/opensc-pkcs11.so || true
+        ssh-add -t 43200 -s /usr/lib/x86_64-linux-gnu/opensc-pkcs11.so
+    fi
+    ssh-add -l
+}
+
+alias mvnf='mvn clean install -DskipTests -Dpmd.skip=true -Dspotbugs.skip=true -Dcheckstyle.skip -Dcpd.skip=true'
+
 if [ ! $(uname -s) = "Darwin" ]; then
   alias pbcopy='xclip -in -selection clipboard'
   alias pbpaste='xclip -selection clipboard -o'

@@ -6,6 +6,11 @@
 
 default: all
 
+CURRENT_TEAM := oke
+
+PATCHING := "FALSE"
+PKG_MGR := "apt"
+
 # Not working...
 # ... WORKING_DIR := "$(pwd)"
 #
@@ -20,10 +25,13 @@ default: all
 #
 #
 
-PATH := "PATH"
+UNAME := apryde
 
-GO_ROOT := "${PATH}"
-COMPANY_GO_ROOT := ${GOPATH}/src/${company_tld}
+SRC_CONTROL_PLATFORM := bitbucket
+
+GO_ROOT := ${HOME}/go
+
+COMPANY_GO_ROOT := ${GO_ROOT}/src/${SRC_CONTROL_PLATFORM}.${company_tld}
 
 DIGITS := 0 1 2 3 4 5 6 7 8 9
 
@@ -32,7 +40,7 @@ IDX := 0
 CPUS := 0 1
 
 # CONST
-HOME := "${HOME}"
+## HOME := "${HOME}"
 AWAY := "${AWAY:-AWAY}"
 
 # CONSTANT
@@ -64,6 +72,8 @@ LANGS := PYTHON | PYTHON_2 | PYTHON_3
 ## VARS
 STORE_NAME := $(env | grep -i (${DB_NAME}))
 
+LOCAL_BIN_PATH := ${HOME}/.local/bin
+
 TASK_L :=  { }
 
 # SQL STORED_PROCEDURES
@@ -75,17 +85,19 @@ TASK_L :=  { }
 #
 #
 
-
 .PHONY:
 build:
-	go build ./
+	go build "./cmd/*" -C ${COMPANY_GO_ROOT}/${UNAME}/${CURRENT_TEAM}-tools/cmd/*  -o $(basename ${LOCAL_BIN_PATH})
+	source "${GOPATH}/src/bitbucket.${company_tld}/$(whoami)/${CURRENT_TEAM}-tools/env.sh"
 
 .PHONY:
 up:
-	echo "Bringing up ${OPERATOR_NAME}'s System"
+	@echo "Bringing up ${OPERATOR_NAME}'s System"
 	@env RCRC=${HOME}/.dotfiles/rcrc rcup
 
 .PHONY:
+build: up
+
 mkvirtualenv:
 	python${PYTHON_VERSION} -m venv ${BASE_PATH}/python3
 
@@ -95,14 +107,16 @@ all: build test install
 .PHONY:
 install: build
 	# COPY TO BIN
+	mkdir -p ${HOME}/.local/bin/
 
 .PHONY:
 clean:
-	@rm -rf ${HOME}/.user/local/bin/
+	@rm -rf ${HOME}/.local/bin/
 
 .PHONY:
 clean-house: # BEGETS
 	@rm -rf ${HOME}/.dotfiles/.git/
+	@rm -rf ${HOME}/.local/bin/
 
 # ```
 # F(PYTHON_VERSION):
@@ -138,3 +152,12 @@ python:
 .PHONY:
 test:
 	# WRITE TESTS... and then run them...?
+	@/usr/bin/env python -m test.py ./
+
+.PHONY:
+patching:
+	@echo "Patching $(hostname)..."
+	@sudo ${PKG_MGR} update
+	@sudo ${PKG_MGR} upgrade -y
+	@sudo ${PKG_MGR} autoremove
+	@sudo shutdown -r now
