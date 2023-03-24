@@ -2,11 +2,13 @@
 
 # MAKE FILE FOR ALL THE THINGS
 #
-# set sw=4
+# vim: set ft=make sw=4:
 
 default: all
 
 PATCHING := "FALSE"
+PKG_MNGR := apt
+
 # Not working...
 # ... WORKING_DIR := "$(pwd)"
 #
@@ -151,5 +153,6 @@ test:
 
 .PHONY:
 patching:
-	@sudo apt autoremove clean
+	@sudo ${PKG_MNGR} autoremove clean
+	@sudo ${PKG_MNGR} autoremove clean
 	@sudo shutdown -r now
