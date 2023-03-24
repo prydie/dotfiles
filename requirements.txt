@@ -1,2 +1,2 @@
 pybluez
-setuptools<58
+setuptools>=65.5.1

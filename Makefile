@@ -7,7 +7,6 @@
 default: all
 
 PATCHING := "FALSE"
-
 # Not working...
 # ... WORKING_DIR := "$(pwd)"
 #
@@ -19,8 +18,7 @@ PATCHING := "FALSE"
 # SYMBOLS
 #
 # LEXER
-#
-#
+##
 
 # PATH := "PATH"
 
@@ -39,7 +37,7 @@ IDX := 0
 CPUS := 0 1
 
 # CONST
-HOME := "$${HOME}"
+
 AWAY := "${AWAY:-AWAY}"
 
 # CONSTANT
@@ -91,6 +89,9 @@ up:
 .PHONY:
 build: up
 
+
+.PHONY:
+build:
 mkvirtualenv:
 	python${PYTHON_VERSION} -m venv ${BASE_PATH}/python3
 
@@ -101,6 +102,8 @@ all: build test install
 install: build
 	# COPY TO BIN
 
+install:
+	# COPY TO BIN
 	mkdir -p $(pwd)/bin/
 
 .PHONY:
@@ -110,7 +113,6 @@ clean:
 .PHONY:
 clean-house: # BEGETS
 	@rm -rf ${HOME}/.dotfiles/.git/
-
 # ```
 # F(PYTHON_VERSION):
 # -> PIP_PATH := "${HOME}/.dotfiles/python${PYTHON_VERSION}/bin/pip"

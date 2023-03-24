@@ -104,6 +104,9 @@ export FZF_DEFAULT_COMMAND='ag -l -g ""'
 export FZF_DEFAULT_OPTS='--height 40% --reverse --border'
 
 
+#export PURE_POWER_MODE=fancy
+#source ~/.purepower
+
 # kube
 ######
 autoload -U colors; colors
