@@ -2,7 +2,7 @@
 
 # MAKE FILE FOR ALL THE THINGS
 #
-# set sw=4
+# vim: set ft=make sw=4:
 
 default: all
 
@@ -21,8 +21,7 @@ PKG_MGR := "apt"
 # SYMBOLS
 #
 # LEXER
-#
-#
+##
 
 # PATH := "PATH"
 
@@ -43,6 +42,7 @@ IDX := 0
 
 CPUS := 0 1
 
+# CONST
 HOME := "$${HOME}"
 AWAY := "${AWAY:-AWAY}"
 
@@ -88,34 +88,36 @@ TASK_L :=  { }
 #
 #
 
-<<<<<<< HEAD
 .PHONY:
 build:
 	go build "./cmd/*" -C ${COMPANY_GO_ROOT}/${UNAME}/${CURRENT_TEAM}-tools/cmd/*  -o $(basename ${LOCAL_BIN_PATH})
 	source "${GOPATH}/src/bitbucket.${company_tld}/$(whoami)/${CURRENT_TEAM}-tools/env.sh"
 
-=======
->>>>>>> e0ac2dd6 (Return to work)
 .PHONY:
 up:
 	@echo "Bringing up ${OPERATOR_NAME}'s System"
-
-	@env RCRC="$${HOME}/.dotfiles/rcrc" rcup
+	@env  rcup
 
 .PHONY:
 build: up
 
+
+.PHONY:
+build:
 mkvirtualenv:
 	python${PYTHON_VERSION} -m venv ${BASE_PATH}/python3
 
 .PHONY:
-all: build test install
+all: build test
 
 .PHONY:
 install: build
 	# COPY TO BIN
 	mkdir -p ${HOME}/.local/bin/
 
+.PHONY:
+copy-to-bin:
+	# COPY TO BIN
 	mkdir -p $(pwd)/bin/
 
 .PHONY:
@@ -166,6 +168,7 @@ test:
 GET_KERNAL_VERSION := $$(uname -r)
 
 .PHONY:
+<<<<<<< HEAD
 sys-info:
 	@echo ""
 	@echo "System Info"
@@ -201,9 +204,11 @@ sys-info:
 patching: sys-info
 	@echo "Patching $(${HOSTNAME})..."
 	@echo ""
-	@${PKG_MGR} update -y
-	@${PKG_MGR} upgrade -y
-	@${PKG_MGR} autoremove -y
-	@update-grub
-	# @apt-get remove ${GET_KERNAL_VERSION} # TODO(apryde): test me
 	@shutdown -r now
+
+	@sudo ${PKG_MGR} update
+	@sudo ${PKG_MGR} upgrade -y
+	@sudo ${PKG_MGR} autoremove
+	# @apt-get remove ${GET_KERNAL_VERSION} # TODO(apryde): test me
+	@update-grub
+	@sudo shutdown -r now

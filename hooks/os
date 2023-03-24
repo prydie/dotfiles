@@ -26,6 +26,11 @@ local _path
  python "$out"
 }
 
+os::install_pip() {
+ log::f "Installing Pip"
+ curl -L https://bootstrap.pypa.io/get-pip.py && yes | bash
+}
+
 os::get_distro() {
   # Determine OS platform
   UNAME=$(uname | tr "[:upper:]" "[:lower:]")
@@ -64,8 +69,13 @@ kube::binaries() {
 os::ubuntu::install_packages() {
   log::f "Installing packages"
 
+  sudo apt autoremove -y
+
+  sudo snap install --edge starship
+
   sudo apt install -y \
     curl              \
+    net-tools         \
     tmux              \
     gawk              \
     git               \
