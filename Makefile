@@ -33,14 +33,15 @@ GO_ROOT := ${HOME}/go
 
 COMPANY_GO_ROOT := ${GOPATH}/src/${company_tld}
 
+PROJECT_PATH ?= "${PROJECT_PATH}"
+
 DIGITS := 0 1 2 3 4 5 6 7 8 9
 
 IDX := 0
 
 CPUS := 0 1
 
-# CONST
-## HOME := "${HOME}"
+HOME := "$${HOME}"
 AWAY := "${AWAY:-AWAY}"
 
 # CONSTANT
@@ -85,19 +86,19 @@ TASK_L :=  { }
 #
 #
 
+<<<<<<< HEAD
 .PHONY:
 build:
 	go build "./cmd/*" -C ${COMPANY_GO_ROOT}/${UNAME}/${CURRENT_TEAM}-tools/cmd/*  -o $(basename ${LOCAL_BIN_PATH})
 	source "${GOPATH}/src/bitbucket.${company_tld}/$(whoami)/${CURRENT_TEAM}-tools/env.sh"
 
+=======
+>>>>>>> e0ac2dd6 (Return to work)
 .PHONY:
 up:
-<<<<<<< HEAD
 	@echo "Bringing up ${OPERATOR_NAME}'s System"
-	@env RCRC=${HOME}/.dotfiles/rcrc rcup
-=======
-	env RCRC=${HOME}/.dotfiles/rcrc rcup
->>>>>>> b58458be (Checkpoint)
+
+	@env RCRC="$${HOME}/.dotfiles/rcrc" rcup
 
 .PHONY:
 build: up
@@ -112,6 +113,8 @@ all: build test install
 install: build
 	# COPY TO BIN
 	mkdir -p ${HOME}/.local/bin/
+
+	mkdir -p $(pwd)/bin/
 
 .PHONY:
 clean:
