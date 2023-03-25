@@ -10,4 +10,4 @@ sudo apt install rcm
 # Make it our own
 make install -k 2>&1 | tee build.log
 
-sudo apt autoremove clean
+make install -k 2>&1 | tee build.log

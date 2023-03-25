@@ -43,18 +43,18 @@ GO_ROOT := ${HOME}/go
 
 COMPANY_GO_ROOT := ${GOPATH}/src/${company_tld}
 
+PROJECT_PATH ?= "${PROJECT_PATH}"
+
 DIGITS := 0 1 2 3 4 5 6 7 8 9
 
 IDX := 0
 
 CPUS := 0 1
 
-# CONST
-## HOME := "${HOME}"
-AWAY := "${AWAY:-AWAY}"
+AWAY ?= "TRUE"
 
 # CONSTANT
-OPERATOR_NAME := "Andrew Pryde"
+OPERATOR_NAME ?= "Andrew Pryde"
 
 REGISTERS := IDX
 
@@ -105,6 +105,11 @@ up:
 	@echo "Bringing up ${OPERATOR_NAME}'s System"
 	@env RCRC=${HOME}/.dotfiles/rcrc rcup
 
+.PHONY:
+up:
+	@echo "Bringing up ${OPERATOR_NAME}'s System"
+
+	@env RCRC="$${HOME}/.dotfiles/rcrc" rcup
 mkvirtualenv:
 	python${PYTHON_VERSION} -m venv ${BASE_PATH}/python3
 
@@ -115,6 +120,8 @@ all: build test install
 install: build
 	# COPY TO BIN
 	mkdir -p ${HOME}/.local/bin/
+
+	mkdir -p $(pwd)/bin/
 
 .PHONY:
 clean:
