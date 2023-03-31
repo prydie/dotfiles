@@ -86,14 +86,11 @@ TASK_L :=  { }
 #
 #
 
-<<<<<<< HEAD
 .PHONY:
 build:
 	go build "./cmd/*" -C ${COMPANY_GO_ROOT}/${UNAME}/${CURRENT_TEAM}-tools/cmd/*  -o $(basename ${LOCAL_BIN_PATH})
 	source "${GOPATH}/src/bitbucket.${company_tld}/$(whoami)/${CURRENT_TEAM}-tools/env.sh"
 
-=======
->>>>>>> e0ac2dd6 (Return to work)
 .PHONY:
 up:
 	@echo "Bringing up ${OPERATOR_NAME}'s System"
@@ -129,11 +126,8 @@ clean:
 .PHONY:
 clean-house: # BEGETS
 	@rm -rf ${HOME}/.dotfiles/.git/
-<<<<<<< HEAD
 	@rm -rf ${HOME}/.local/bin/
 
-=======
->>>>>>> b45950ce (Ubuntu 22.04 fixes)
 # ```
 # F(PYTHON_VERSION):
 # -> PIP_PATH := "${HOME}/.dotfiles/python${PYTHON_VERSION}/bin/pip"
@@ -172,12 +166,8 @@ test:
 
 .PHONY:
 patching:
-<<<<<<< HEAD
 	@echo "Patching $(hostname)..."
 	@sudo ${PKG_MGR} update
 	@sudo ${PKG_MGR} upgrade -y
 	@sudo ${PKG_MGR} autoremove
-=======
-	@sudo ${PKG_MNGR} autoremove
->>>>>>> b45950ce (Ubuntu 22.04 fixes)
 	@sudo shutdown -r now
