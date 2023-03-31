@@ -92,6 +92,8 @@ os::ubuntu::install_packages() {
     tmux              \
     virtualenv        \
     xclip             \
+    net-tools         \
+    nmap              \
     zsh
 }
 

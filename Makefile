@@ -168,7 +168,6 @@ test:
 GET_KERNAL_VERSION := $$(uname -r)
 
 .PHONY:
-<<<<<<< HEAD
 sys-info:
 	@echo ""
 	@echo "System Info"
@@ -211,4 +210,8 @@ patching: sys-info
 	@sudo ${PKG_MGR} autoremove
 	# @apt-get remove ${GET_KERNAL_VERSION} # TODO(apryde): test me
 	@update-grub
+	@echo "Patching $(hostname)..."
+	@sudo ${PKG_MGR} update
+	@sudo ${PKG_MGR} upgrade -y
+	@sudo ${PKG_MGR} autoremove
 	@sudo shutdown -r now
