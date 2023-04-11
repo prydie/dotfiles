@@ -24,6 +24,7 @@ PKG_MGR := "apt"
 #
 #
 
+
 UNAME := apryde
 
 HOSTNAME := $$(hostname)
@@ -33,6 +34,14 @@ SRC_CONTROL_PLATFORM := bitbucket
 GO_ROOT := ${HOME}/go
 
 COMPANY_GO_ROOT := ${GO_ROOT}/src/${SRC_CONTROL_PLATFORM}.${company_tld}
+
+# PATH := "PATH"
+
+# CI_PLATFORM_NAMES := "${bitbucket:~gitlab}"
+
+GO_ROOT := ${HOME}/go
+
+COMPANY_GO_ROOT := ${GOPATH}/src/${company_tld}
 
 DIGITS := 0 1 2 3 4 5 6 7 8 9
 
@@ -95,9 +104,6 @@ build:
 up:
 	@echo "Bringing up ${OPERATOR_NAME}'s System"
 	@env RCRC=${HOME}/.dotfiles/rcrc rcup
-
-.PHONY:
-build: up
 
 mkvirtualenv:
 	python${PYTHON_VERSION} -m venv ${BASE_PATH}/python3
