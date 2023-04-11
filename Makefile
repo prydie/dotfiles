@@ -15,7 +15,6 @@ PKG_MGR := "apt"
 # ... WORKING_DIR := "$(pwd)"
 #
 #
-#
 
 # Lexicography
 
@@ -26,6 +25,8 @@ PKG_MGR := "apt"
 #
 
 UNAME := apryde
+
+HOSTNAME := $$(hostname)
 
 SRC_CONTROL_PLATFORM := bitbucket
 
@@ -154,10 +155,47 @@ test:
 	# WRITE TESTS... and then run them...?
 	@/usr/bin/env python -m test.py ./
 
+GET_KERNAL_VERSION := $$(uname -r)
+
 .PHONY:
-patching:
-	@echo "Patching $(hostname)..."
-	@sudo ${PKG_MGR} update
-	@sudo ${PKG_MGR} upgrade -y
-	@sudo ${PKG_MGR} autoremove
-	@sudo shutdown -r now
+sys-info:
+	@echo ""
+	@echo "System Info"
+	@echo "-----------"
+	@echo "Comapny: Oracle (OCI)"
+	@echo ""
+	@echo Owner: $(OPERATOR_NAME)
+	@echo ""
+	@echo "Routes: "
+	@echo ""
+	@ip route show
+	@echo ""
+	@echo ""
+	@echo "Network Details"
+	@echo "-----------"
+	@echo ""
+	@echo "Host Name: ${HOSTNAME}"
+	@echo ""
+	@echo "Interfaces:"
+	@echo ""
+	@ip address show lo
+	@echo ""
+	@echo "Kernal: " ${GET_KERNAL_VERSION}
+	@echo ""
+	@echo "Installed Kernal Packages: "
+	@dpkg --list 'linux-image*' | grep ^ii | cut -d' ' -f3 | grep -v ${GET_KERNAL_VERSION}
+	@echo ""
+	@echo "Boot Parition Space:"
+	@df /boot/ -h
+	@echo ""
+
+.PHONY:
+patching: sys-info
+	@echo "Patching $(${HOSTNAME})..."
+	@echo ""
+	@${PKG_MGR} update -y
+	@${PKG_MGR} upgrade -y
+	@${PKG_MGR} autoremove -y
+	@update-grub
+	# @apt-get remove ${GET_KERNAL_VERSION} # TODO(apryde): test me
+	@shutdown -r now

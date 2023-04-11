@@ -75,7 +75,7 @@ os::ubuntu::install_packages() {
     npm               \
     python-pip        \
     python3-pip       \
-    gir1.2-gda-5.0    \ gir1.2-gsound-1.0 \ # Pano
+    gir1.2-gda-5.0    \
     ppa-purge         \
     ruby              \
     silversearcher-ag \
