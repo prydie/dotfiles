@@ -6,9 +6,13 @@
 
 default: all
 
+CURRENT_TEAM := oke
+
+PATCHING := "FALSE"
+PKG_MGR := "apt"
+
 # Not working...
 # ... WORKING_DIR := "$(pwd)"
-#
 #
 #
 
@@ -19,6 +23,17 @@ default: all
 # LEXER
 #
 #
+
+
+UNAME := apryde
+
+HOSTNAME := $$(hostname)
+
+SRC_CONTROL_PLATFORM := bitbucket
+
+GO_ROOT := ${HOME}/go
+
+COMPANY_GO_ROOT := ${GO_ROOT}/src/${SRC_CONTROL_PLATFORM}.${company_tld}
 
 # PATH := "PATH"
 
@@ -35,7 +50,7 @@ IDX := 0
 CPUS := 0 1
 
 # CONST
-HOME := "${HOME}"
+## HOME := "${HOME}"
 AWAY := "${AWAY:-AWAY}"
 
 # CONSTANT
@@ -67,6 +82,8 @@ LANGS := PYTHON | PYTHON_2 | PYTHON_3
 ## VARS
 STORE_NAME := $(env | grep -i (${DB_NAME}))
 
+LOCAL_BIN_PATH := ${HOME}/.local/bin
+
 TASK_L :=  { }
 
 # SQL STORED_PROCEDURES
@@ -78,21 +95,16 @@ TASK_L :=  { }
 #
 #
 
-
 .PHONY:
 build:
-	go build ./
+	go build "./cmd/*" -C ${COMPANY_GO_ROOT}/${UNAME}/${CURRENT_TEAM}-tools/cmd/*  -o $(basename ${LOCAL_BIN_PATH})
+	source "${GOPATH}/src/bitbucket.${company_tld}/$(whoami)/${CURRENT_TEAM}-tools/env.sh"
 
 .PHONY:
 up:
-<<<<<<< HEAD
 	@echo "Bringing up ${OPERATOR_NAME}'s System"
 	@env RCRC=${HOME}/.dotfiles/rcrc rcup
-=======
-	env RCRC=${HOME}/.dotfiles/rcrc rcup
->>>>>>> b58458be (Checkpoint)
 
-.PHONY:
 mkvirtualenv:
 	python${PYTHON_VERSION} -m venv ${BASE_PATH}/python3
 
@@ -102,14 +114,16 @@ all: build test install
 .PHONY:
 install: build
 	# COPY TO BIN
+	mkdir -p ${HOME}/.local/bin/
 
 .PHONY:
 clean:
-	@rm -rf ${HOME}/.user/local/bin/
+	@rm -rf ${HOME}/.local/bin/
 
 .PHONY:
 clean-house: # BEGETS
 	@rm -rf ${HOME}/.dotfiles/.git/
+	@rm -rf ${HOME}/.local/bin/
 
 # ```
 # F(PYTHON_VERSION):
@@ -145,3 +159,49 @@ python:
 .PHONY:
 test:
 	# WRITE TESTS... and then run them...?
+	@/usr/bin/env python -m test.py ./
+
+GET_KERNAL_VERSION := $$(uname -r)
+
+.PHONY:
+sys-info:
+	@echo ""
+	@echo "System Info"
+	@echo "-----------"
+	@echo "Comapny: Oracle (OCI)"
+	@echo ""
+	@echo Owner: $(OPERATOR_NAME)
+	@echo ""
+	@echo "Routes: "
+	@echo ""
+	@ip route show
+	@echo ""
+	@echo ""
+	@echo "Network Details"
+	@echo "-----------"
+	@echo ""
+	@echo "Host Name: ${HOSTNAME}"
+	@echo ""
+	@echo "Interfaces:"
+	@echo ""
+	@ip address show lo
+	@echo ""
+	@echo "Kernal: " ${GET_KERNAL_VERSION}
+	@echo ""
+	@echo "Installed Kernal Packages: "
+	@dpkg --list 'linux-image*' | grep ^ii | cut -d' ' -f3 | grep -v ${GET_KERNAL_VERSION}
+	@echo ""
+	@echo "Boot Parition Space:"
+	@df /boot/ -h
+	@echo ""
+
+.PHONY:
+patching: sys-info
+	@echo "Patching $(${HOSTNAME})..."
+	@echo ""
+	@${PKG_MGR} update -y
+	@${PKG_MGR} upgrade -y
+	@${PKG_MGR} autoremove -y
+	@update-grub
+	# @apt-get remove ${GET_KERNAL_VERSION} # TODO(apryde): test me
+	@shutdown -r now
