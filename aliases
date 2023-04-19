@@ -15,6 +15,19 @@ function crypto::rsa-fingerprint() {
 }
 
 # -------------------------------------------------------------------
+# VPN
+# -------------------------------------------------------------------
+#
+vpn::connect() {
+    local endpoint=$1
+    sudo openconnect -b -u andrew.pryde \
+      --csd-user=$(id -un) \
+      --csd-wrapper=/usr/libexec/openconnect/csd-wrapper.sh \
+      --useragent="AnyConnect Linux_64 4.10.99999" \
+      "${endpoint}"
+}
+
+# -------------------------------------------------------------------
 # ssh agent
 # -------------------------------------------------------------------
 

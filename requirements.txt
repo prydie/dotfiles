@@ -1,2 +1,5 @@
 pybluez
 setuptools<58
+matplotlib
+isort
+pandas
