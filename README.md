@@ -21,6 +21,12 @@ A not particularly well thought through collection of dotfiles.
    `/usr/bin/ruby -e "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/master/install)"`
  - Install pip https://pip.pypa.io/en/stable/installing/
 
+## TODO
+
+ - OL BASE
+ - OL 7 -> 8
+ - Ubuntu <-> livepatch <-kernal ?
+
 ## Inspiration / plagiarism
 
 As with dotfiles everywhere I've begged, borrowed, and stolen snippets from too

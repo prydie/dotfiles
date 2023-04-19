@@ -93,3 +93,7 @@ os::ubuntu::install_packages() {
 os::set_zoom_scaling_factor () {
   perl -i -pe 's/scaleFactor=2/scaleFactor=1/' ~/.config/zoomus.conf
 }
+
+# TOOLS TODO:
+# - Wireshark
+# - SSLScan (https://github.com/ioerror/sslscan)

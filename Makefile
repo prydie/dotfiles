@@ -145,10 +145,12 @@ clean:
 	@rm -rf ${HOME}/.local/bin/
 
 .PHONY:
-clean-house: # BEGETS
+clean-house: # BEGETS CLEAN MIND
 	@rm -rf ${HOME}/.dotfiles/.git/
 <<<<<<< HEAD
 	@rm -rf ${HOME}/.local/bin/
+	@rm -rf ${HOME}/.local/bin/
+	@rm -rf /etc/NetworkManager/system-connections/*.nmconnection
 
 =======
 >>>>>>> 7573853e (home again?)
@@ -231,12 +233,12 @@ patching: sys-info
 	@${PKG_MGR} upgrade -y
 	@${PKG_MGR} autoremove -y
 	@update-grub
-	# @apt-get remove ${GET_KERNAL_VERSION} # TODO(apryde): test me
+	@apt-get remove ${GET_KERNAL_VERSION} # TODO(apryde): test me
 	@shutdown -r now
-=======
+
 .PHONY:
-patching:
-	@sudo ${PKG_MNGR} autoremove clean
-	@sudo ${PKG_MNGR} autoremove clean
-	@sudo shutdown -r now
->>>>>>> 7573853e (home again?)
+ol-migration:
+	# TODO(apryde):
+	#  - Kernal
+	#  - Package name translation
+	#  - Testing
