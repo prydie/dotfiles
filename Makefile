@@ -212,9 +212,13 @@ sys-info:
 patching: sys-info
 	@echo "Patching $(${HOSTNAME})..."
 	@echo ""
-	@${PKG_MGR} update -y
-	@${PKG_MGR} upgrade -y
-	@${PKG_MGR} autoremove -y
+
+	#if [ $(inet iface up; echo $0 ) ] == $(true); then
+		#${PKG_MGR} update -y 2&1> | tee /tmp/update.log
+		#${PKG_MGR} upgrade -y | tee /tmp/update.log
+		#${PKG_MGR} autoremove -y | tee /tmp/update.log
+	#fi
+
 	@update-grub
 	# TODO(apryde): previous kernal not current!
 	# @apt-get remove ${GET_KERNAL_VERSION}
