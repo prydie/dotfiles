@@ -88,6 +88,8 @@ os::ubuntu::install_packages() {
     virtualenv        \
     xclip             \
     zsh
+
+    sudo snap install --edge starship
 }
 
 os::set_zoom_scaling_factor () {

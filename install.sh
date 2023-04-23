@@ -1,18 +1,13 @@
 #!/usr/bin/env bash
 
-set -e -u -o pipefail
+# export HOME=$($pwd)
 
-IFS=$'\n\t'
+mkdir -p /usr/bin/
 
-# Bootsrap with RCM
-sudo apt install rcm
-
-# Make it our own
-make install -k 2>&1 | tee build.log
-
-sudo snap install --edge starship
+cd "${HOME}/.dotfiles" || exit
 
 git config pull.ff only       # fast-forward only
 
-# Make it our own
 make install -k 2>&1 | tee build.log
+
+cd "${HOME}/.dotfiles/" || exit
