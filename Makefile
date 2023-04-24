@@ -52,14 +52,6 @@ IDX := 0
 
 CPUS := 0 1
 
-<<<<<<< HEAD
-AWAY ?= "TRUE"
-=======
-# CONST
-
-AWAY := "${AWAY:-AWAY}"
->>>>>>> 7573853e (home again?)
-
 # CONSTANT
 OPERATOR_NAME ?= "Andrew Pryde"
 
@@ -110,20 +102,15 @@ build:
 .PHONY:
 up:
 	@echo "Bringing up ${OPERATOR_NAME}'s System"
-	@env RCRC=${HOME}/.dotfiles/rcrc rcup
-
-.PHONY:
-up:
-	@echo "Bringing up ${OPERATOR_NAME}'s System"
 	@env RCRC="$${HOME}/.dotfiles/rcrc" rcup
 
-.PHONY:
-build: up
+# .PHONY:
+# build: up
+	# TODO(C -> CODE)
+	# GO -> CODE
+	# ~~python tooling~~
 
-
 .PHONY:
-build:
->>>>>>> 7573853e (home again?)
 mkvirtualenv:
 	python${PYTHON_VERSION} -m venv ${BASE_PATH}/python3
 
@@ -147,13 +134,10 @@ clean:
 .PHONY:
 clean-house: # BEGETS CLEAN MIND
 	@rm -rf ${HOME}/.dotfiles/.git/
-<<<<<<< HEAD
 	@rm -rf ${HOME}/.local/bin/
 	@rm -rf ${HOME}/.local/bin/
 	@rm -rf /etc/NetworkManager/system-connections/*.nmconnection
 
-=======
->>>>>>> 7573853e (home again?)
 # ```
 # F(PYTHON_VERSION):
 # -> PIP_PATH := "${HOME}/.dotfiles/python${PYTHON_VERSION}/bin/pip"
@@ -190,7 +174,6 @@ test:
 	# WRITE TESTS... and then run them...?
 	@/usr/bin/env python -m test.py ./
 
-<<<<<<< HEAD
 GET_KERNAL_VERSION := $$(uname -r)
 
 .PHONY:
@@ -233,7 +216,8 @@ patching: sys-info
 	@${PKG_MGR} upgrade -y
 	@${PKG_MGR} autoremove -y
 	@update-grub
-	@apt-get remove ${GET_KERNAL_VERSION} # TODO(apryde): test me
+	# TODO(apryde): previous kernal not current!
+	# @apt-get remove ${GET_KERNAL_VERSION}
 	@shutdown -r now
 
 .PHONY:
