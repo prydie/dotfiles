@@ -10,8 +10,6 @@ sudo apt install rcm
 # Make it our own
 make install -k 2>&1 | tee build.log
 
-sudo snap install --edge starship
-
 git config pull.ff only       # fast-forward only
 
 # Make it our own

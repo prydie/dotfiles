@@ -11,9 +11,19 @@ os::get_distro
 
 if [[ "${DISTRO}" == "Ubuntu" ]]; then
   log::f "Ubuntu detected, installing packages"
-  os::ubuntu::ppas
+
   os::ubuntu::install_packages
 fi
+
+#
+# Dev Tooling
+#############
+
+go::install_developer_tools() {
+  go get -u github.com/goware/modvendor
+}
+
+go::install_developer_tools
 
 # os::install_pip
 

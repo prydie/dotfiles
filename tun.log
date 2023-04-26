@@ -1,6 +1,0 @@
-Got CONNECT response: HTTP/1.1 200 OK
-
-Established DTLS connection (using GnuTLS).
-Ciphersuite (DTLS1.2)-(ECDHE-RSA)-(AES-256-GCM).
-
-Configured as $(ip address) + $(IPV6)/64, with SSL connected and DTLS connected

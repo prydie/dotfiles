@@ -1,20 +1,10 @@
 export GOPATH=${HOME}/go
 
-# Enable Powerlevel10k instant prompt. Should stay close to the top of ~/.zshrc.
-# Initialization code that may require console input (password prompts, [y/n]
-# confirmations, etc.) must go above this block; everything else may go below.
-
-if [[ -r "${XDG_CACHE_HOME:-$HOME/.cache}/p10k-instant-prompt-${(%):-%n}.zsh" ]]; then
-  source "${XDG_CACHE_HOME:-$HOME/.cache}/p10k-instant-prompt-${(%):-%n}.zsh"
-fi
-
 # zmodload zsh/zprof
 
 [[ $TMUX = "" ]] && export TERM="xterm-256color"
 
 source ~/.zplug/init.zsh
-
-export POWERLEVEL9K_MODE='nerdfont-complete'
 
 zplug "zsh-users/zsh-syntax-highlighting", defer:2
 zplug "zsh-users/zsh-completions"
@@ -30,7 +20,8 @@ zplug "plugins/vi-mode",   from:oh-my-zsh
 
 # Prompt
 zplug mafredri/zsh-async, from:github
-zplug romkatv/powerlevel10k, as:theme, depth:1
+# zplug romkatv/powerlevel10k, as:theme, depth:1
+
 eval "$(starship init zsh)"
 
 # Install plugins if there are plugins that have not been installed
@@ -107,14 +98,13 @@ export FZF_DEFAULT_COMMAND='ag -l -g ""'
 export FZF_DEFAULT_OPTS='--height 40% --reverse --border'
 
 
-#export PURE_POWER_MODE=fancy
-#source ~/.purepower
 
 # kube
 ######
 autoload -U colors; colors
 source "${HOME}/.kube-ps1.sh"
 RPROMPT='$()'
+
 function custom_rprompt() {
     kube_ps1
 }
@@ -122,6 +112,3 @@ function custom_rprompt() {
 [ -f ~/.zshrc.local ] && source ~/.zshrc.local
 
 # zprof
-
-# To customize prompt, run `p10k configure` or edit ~/.p10k.zsh.
-[[ ! -f ~/.p10k.zsh ]] || source ~/.p10k.zsh

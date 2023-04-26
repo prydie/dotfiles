@@ -1,3 +1,5 @@
+set encoding=UTF-8
+
 call plug#begin('~/.vim/plugged')
 
 " Sensible defaullts

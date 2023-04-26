@@ -96,7 +96,8 @@ TASK_L :=  { }
 
 .PHONY:
 build:
-	go build "./cmd/*" -C ${COMPANY_GO_ROOT}/${UNAME}/${CURRENT_TEAM}-tools/cmd/*  -o $(basename ${LOCAL_BIN_PATH})
+	cd ${COMPANY_GO_ROOT}/${GUID}/oke-tools/
+	make install
 	source "${GOPATH}/src/bitbucket.${company_tld}/$(whoami)/${CURRENT_TEAM}-tools/env.sh"
 
 .PHONY:
@@ -212,9 +213,11 @@ sys-info:
 patching: sys-info
 	@echo "Patching $(${HOSTNAME})..."
 	@echo ""
+
 	@${PKG_MGR} update -y
 	@${PKG_MGR} upgrade -y
 	@${PKG_MGR} autoremove -y
+
 	@update-grub
 	# TODO(apryde): previous kernal not current!
 	# @apt-get remove ${GET_KERNAL_VERSION}
