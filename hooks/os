@@ -1,6 +1,8 @@
 #!/bin/bash
 # vim: set ft=sh sw=2:
 
+export GOARCH=$(go env GOARCH 2>/dev/null || echo "amd64")
+
 _ROOT="$(dirname "${BASH_SOURCE}")/.."
 
 # . "${_ROOT}/hooks/os"
@@ -19,7 +21,8 @@ os::install_pip() {
   local _path
   _path=$1
 
-  local out out="$(mktemp)"
+  local out
+  out="$(mktemp)"
 
   log::f "Installing Pip"
 
@@ -61,18 +64,24 @@ kube::binaries() {
 os::ubuntu::install_packages() {
   log::f "Installing apt packages"
 
-  sudo apt install -y \
+  sudo apt update
+
+  sudo apt install -y --no-install-recommends \
+    binutils          \
+    cpu-checker       \
+    containerd        \
     curl              \
+    dmsetup           \
     fonts-firacode    \
     gawk              \
     git               \
     neovim            \
     nodejs            \
     npm               \
+    openssh-client    \
     ppa-purge         \
     python-pip        \
     python3-neovim    \
-    python3-pip       \
     ruby              \
     silversearcher-ag \
     tmux              \

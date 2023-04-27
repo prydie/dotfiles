@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+# vim: set ft=sh sw=2 et
+
+set -euf -o pipefail
+
+export GOARCH
+GOARCH=$(go env GOARCH 2>/dev/null || echo "amd64")
+
+export CNI_PATH=/opt/cni/bin
+
+gh::download() {
+  local repo version artifact output
+  repo=$1
+  version=$2
+  artifact=$3
+  output=$4
+
+  echo "Downloading release ${version} of ${artifact} from ${repo}"
+
+  curl -sfLo "${output}" "https://github.com/${repo}/releases/download/${version}/${artifact}"
+}
+
+kube::install_cni_plugins() {
+  local CNI_VERSION=v0.9.1
+  local ARCH
+  ARCH=$([ "$(uname -m)" = "x86_64" ] && echo amd64 || echo arm64)
+
+  sudo mkdir -p ${CNI_PATH}
+
+  local out
+  out="$(mktemp)"
+
+  gh::download "containernetworking/plugins" "${CNI_VERSION}" "cni-plugins-linux-${ARCH}-${CNI_VERSION}.tgz" "${out}"
+
+  sudo tar -xzf "${out}" -C ${CNI_PATH}
+}
+
+
+os::install_ignite() {
+  local VERSION=v0.10.0
+
+  kube::install_cni_plugins
+
+  gh::download "weaveworks/ignite" "${VERSION}" "ignite-${GOARCH}" "/usr/local/bin/ignite"
+  gh::download "weaveworks/ignite" "${VERSION}" "ignited-${GOARCH}" "/usr/local/bin/ignited"
+}
+
+os::install_ignite
