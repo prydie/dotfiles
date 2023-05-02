@@ -68,11 +68,12 @@ os::ubuntu::install_packages() {
 
   sudo apt install -y --no-install-recommends \
     binutils          \
-    cpu-checker       \
     containerd        \
+    cpu-checker       \
     curl              \
     dmsetup           \
     fonts-firacode    \
+    fzf               \
     gawk              \
     git               \
     neovim            \
@@ -80,7 +81,6 @@ os::ubuntu::install_packages() {
     npm               \
     openssh-client    \
     ppa-purge         \
-    python-pip        \
     python3-neovim    \
     ruby              \
     silversearcher-ag \
@@ -99,6 +99,7 @@ os::set_zoom_scaling_factor () {
 
 go::install_developer_toos() {
   go get -u github.com/goware/modvendor
+  go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.52.2
 }
 
 # TOOLS TODO:
