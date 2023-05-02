@@ -101,7 +101,10 @@ os::ubuntu::install_packages() {
     npm                        \
     openssh-client             \
     ppa-purge                  \
+    python2                    \
+    python2-setuptools-whl     \
     python3-neovim             \
+    python3-venv               \
     ruby                       \
     silversearcher-ag          \
     software-properties-common \
@@ -119,6 +122,7 @@ os::set_zoom_scaling_factor () {
 }
 
 go::install_developer_tools() {
+  sudo snap install go --classic
   go get -u github.com/goware/modvendor
   go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.52.2
 }
