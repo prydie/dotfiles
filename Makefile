@@ -34,15 +34,14 @@ SRC_CONTROL_PLATFORM := bitbucket
 
 GO_ROOT := ${HOME}/go
 
-COMPANY_GO_ROOT := ${GO_ROOT}/src/${SRC_CONTROL_PLATFORM}.${company_tld}
+COMPANY_GO_ROOT ?= ${GO_ROOT}/src/${SRC_CONTROL_PLATFORM}.${OCI_INTERNAL_TLD}
+CURRENT_TEAM ?= oke
 
 # PATH := "PATH"
 
 # CI_PLATFORM_NAMES := "${bitbucket:~gitlab}"
 
 GO_ROOT := ${HOME}/go
-
-COMPANY_GO_ROOT := ${GOPATH}/src/${company_tld}
 
 PROJECT_PATH ?= "${PROJECT_PATH}"
 
@@ -95,21 +94,9 @@ TASK_L :=  { }
 #
 
 .PHONY:
-build:
-	cd ${COMPANY_GO_ROOT}/${GUID}/oke-tools/
-	make install
-	source "${GOPATH}/src/bitbucket.${company_tld}/$(whoami)/${CURRENT_TEAM}-tools/env.sh"
-
-.PHONY:
 up:
 	@echo "Bringing up ${OPERATOR_NAME}'s System"
 	@env RCRC="$${HOME}/.dotfiles/rcrc" rcup
-
-# .PHONY:
-# build: up
-	# TODO(C -> CODE)
-	# GO -> CODE
-	# ~~python tooling~~
 
 .PHONY:
 mkvirtualenv:

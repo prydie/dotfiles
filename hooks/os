@@ -59,6 +59,7 @@ kube::binaries() {
   curl -L -o "$HOME/bin/kubectl" "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
   ## TODO: Secure me
   curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+  curl -s https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh | bash
 }
 
 os::ubuntu::install_packages() {
@@ -97,7 +98,7 @@ os::set_zoom_scaling_factor () {
   perl -i -pe 's/scaleFactor=2/scaleFactor=1/' ~/.config/zoomus.conf
 }
 
-go::install_developer_toos() {
+go::install_developer_tools() {
   go get -u github.com/goware/modvendor
   go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.52.2
 }
