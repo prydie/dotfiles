@@ -1,4 +1,5 @@
 #!/bin/bash
+
 # vim: set ft=sh sw=2:
 
 export GOARCH=$(go env GOARCH 2>/dev/null || echo "amd64")
@@ -127,6 +128,13 @@ go::install_developer_tools() {
   go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.52.2
 }
 
-# TOOLS TODO:
+
+# Tools
+#######
+
+tools::install_terraform
+tools::install_ansible
+
+# TODO:
 # - Wireshark
 # - SSLScan (https://github.com/ioerror/sslscan)
