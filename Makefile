@@ -123,7 +123,6 @@ clean:
 clean-house: # BEGETS CLEAN MIND
 	@rm -rf ${HOME}/.dotfiles/.git/
 	@rm -rf ${HOME}/.local/bin/
-	@rm -rf ${HOME}/.local/bin/
 	@rm -rf /etc/NetworkManager/system-connections/*.nmconnection
 
 # ```

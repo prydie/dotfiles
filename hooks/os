@@ -19,9 +19,6 @@ log::e () {
 os::install_pip() {
   log::f "Installing pip"
 
-  local _path
-  _path=$1
-
   local out
   out="$(mktemp)"
 
@@ -29,11 +26,6 @@ os::install_pip() {
 
   curl -LO "$out" https://bootstrap.pypa.io/get-pip.py
   python "$out"
-}
-
-os::install_pip() {
- log::f "Installing Pip"
- curl -L https://bootstrap.pypa.io/get-pip.py && yes | bash
 }
 
 os::get_distro() {
@@ -61,24 +53,6 @@ kube::binaries() {
   ## TODO: Secure me
   curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
   curl -s https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh | bash
-}
-
-tools::install_terraform() {
-  wget -O- https://apt.releases.hashicorp.com/gpg | \
-  gpg --dearmor | \
-  sudo tee /usr/share/keyrings/hashicorp-archive-keyring.gpg
-
-  echo "deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] \
-https://apt.releases.hashicorp.com $(lsb_release -cs) main" | \
-  sudo tee /etc/apt/sources.list.d/hashicorp.list
-  sudo apt update
-  sudo apt install -y terraform
-}
-
-tools::install_ansible() {
-  sudo apt-add-repository -y ppa:ansible/ansible
-  sudo apt update
-  sudo apt install -y ansible
 }
 
 os::ubuntu::install_packages() {
@@ -128,13 +102,40 @@ go::install_developer_tools() {
   go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.52.2
 }
 
+os::install_pip
+pip install --user -r "${_ROOT}/requirements.txt"
+
 
 # Tools
 #######
 
+tools::install_terraform() {
+  wget -O- https://apt.releases.hashicorp.com/gpg | \
+  gpg --dearmor | \
+  sudo tee /usr/share/keyrings/hashicorp-archive-keyring.gpg
+
+  echo "deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] \
+https://apt.releases.hashicorp.com $(lsb_release -cs) main" | \
+  sudo tee /etc/apt/sources.list.d/hashicorp.list
+  sudo apt update
+  sudo apt install -y terraform
+}
+
+tools::install_ansible() {
+  sudo apt-add-repository -y ppa:ansible/ansible
+  sudo apt update
+  sudo apt install -y ansible
+}
+
+tools::install_vegeta() {
+  go install github.com/tsenart/vegeta@latest
+}
+
 tools::install_terraform
 tools::install_ansible
+tools::install_vegeta
 
 # TODO:
 # - Wireshark
 # - SSLScan (https://github.com/ioerror/sslscan)
+

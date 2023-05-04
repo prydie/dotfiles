@@ -1,5 +1,4 @@
-pybluez
+# pybluez
 matplotlib
 isort
 pandas
-setuptools>=65.5.1
