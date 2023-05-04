@@ -16,7 +16,9 @@ nvim::venvs() {
   if [ ! -d "${HOME}/.config/nvim/py3" ]; then
     python3 -m venv "${HOME}/.config/nvim/py3"
   fi
-  "${HOME}/.config/nvim/py3/bin/pip" install --upgrade pip neovim
+
+  "${HOME}/.config/nvim/py3/bin/python" -m ensurepip --upgrade
+  "${HOME}/.config/nvim/py3/bin/pip3" install --upgrade pip neovim
 }
 
 nvim::plug_installed() {
