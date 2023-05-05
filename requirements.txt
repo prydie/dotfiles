@@ -2,3 +2,4 @@
 matplotlib
 isort
 pandas
+autopep8

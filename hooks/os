@@ -103,12 +103,13 @@ go::install_developer_tools() {
 }
 
 os::install_pip
-pip install --user -r "${_ROOT}/requirements.txt"
+pip3 install --user -r "${_ROOT}/requirements.txt"
 
 
 # Tools
 #######
 
+go::install_developer_tools
 tools::install_terraform() {
   wget -O- https://apt.releases.hashicorp.com/gpg | \
   gpg --dearmor | \

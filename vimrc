@@ -145,6 +145,7 @@ autocmd Filetype gitcommit setlocal spell
 """"""""
 autocmd Filetype go setlocal nolist
 autocmd BufNewFile,BufRead *.go setlocal noexpandtab tabstop=4 shiftwidth=4
+autocmd BufWritePre *.go :silent call CocAction('runCommand', 'editor.action.organizeImport')
 
 " settings
 let g:go_echo_go_info = 0
@@ -325,6 +326,8 @@ let g:vim_isort_python_version = 'python3'
 
 " coc
 """""
+
+let g:coc_global_extensions = ['coc-pyright', 'coc-go']
 
 " Always show the signcolumn, otherwise it would shift the text each time
 " diagnostics appear/become resolved
