@@ -16,6 +16,18 @@ log::e () {
   printf "ERROR: %s  $*\n" "$(date)"
 }
 
+gh::download() {
+  local repo version artifact output
+  repo=$1
+  version=$2
+  artifact=$3
+  output=$4
+
+  echo "Downloading release ${version} of ${artifact} from ${repo}"
+
+  curl -sfLo "${output}" "https://github.com/${repo}/releases/download/${version}/${artifact}"
+}
+
 os::install_pip() {
   log::f "Installing pip"
 
@@ -110,6 +122,7 @@ pip3 install --user -r "${_ROOT}/requirements.txt"
 #######
 
 go::install_developer_tools
+
 tools::install_terraform() {
   wget -O- https://apt.releases.hashicorp.com/gpg | \
   gpg --dearmor | \
@@ -132,11 +145,44 @@ tools::install_vegeta() {
   go install github.com/tsenart/vegeta@latest
 }
 
+tools::wireshark() {
+  sudo add-apt-repository ppa:wireshark-dev/stable -y
+  sudo apt update
+  sudo apt install wireshark
+}
+
+tools::nerdctl() {
+  local VERSION=v1.3.1
+  local ARCH
+  ARCH=$([ "$(uname -m)" = "x86_64" ] && echo amd64 || echo arm64)
+
+  local out
+  out="$(mktemp)"
+
+  gh::download "containerd/nerdctl" "${VERSION}" "nerdctl-${VERSION:1}-linux-${ARCH}.tar.gz" "${out}"
+
+  sudo tar Cxzvvf /usr/local/bin "${out}"
+}
+
+tools::dive() {
+  local VERSION=v0.10.0
+  local ARCH
+  ARCH=$([ "$(uname -m)" = "x86_64" ] && echo amd64 || echo arm64)
+
+  local out
+  out="$(mktemp)"
+
+  gh::download "wagoodman/dive" "${VERSION}" "dive_${VERSION:1}_linux_${ARCH}.deb" "${out}"
+
+  sudo dpkg -i "${out}"
+}
+
 tools::install_terraform
 tools::install_ansible
 tools::install_vegeta
+tools::wireshark
+tools::nerdctl
+tools::dive
 
 # TODO:
-# - Wireshark
 # - SSLScan (https://github.com/ioerror/sslscan)
-

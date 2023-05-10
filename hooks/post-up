@@ -15,14 +15,6 @@ if [[ "${DISTRO}" == "Ubuntu" ]]; then
   os::ubuntu::install_packages
 fi
 
-#
-# Dev Tooling
-#############
-
-go::install_developer_tools
-
-# os::install_pip
-
 # install zplug if not installed
 if [ ! -d "$HOME/.zplug" ]; then
   git clone https://github.com/zplug/zplug ~/.zplug

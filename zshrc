@@ -6,8 +6,8 @@ export GOPATH=${HOME}/go
 
 source ~/.zplug/init.zsh
 
-zplug "zsh-users/zsh-history-substring-search"
 zplug "zsh-users/zsh-syntax-highlighting", defer:2
+zplug "zsh-users/zsh-history-substring-search"
 zplug "zsh-users/zsh-completions"
 
 export NVM_LAZY_LOAD=true
@@ -20,7 +20,6 @@ zplug "plugins/vi-mode",   from:oh-my-zsh
 
 # Prompt
 zplug mafredri/zsh-async, from:github
-# zplug romkatv/powerlevel10k, as:theme, depth:1
 
 eval "$(starship init zsh)"
 
@@ -96,7 +95,6 @@ setopt share_history
 #####
 export FZF_DEFAULT_COMMAND='ag -l -g ""'
 export FZF_DEFAULT_OPTS='--height 40% --reverse --border'
-
 
 
 # kube
