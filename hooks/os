@@ -177,12 +177,26 @@ tools::dive() {
   sudo dpkg -i "${out}"
 }
 
+tools::buildkit() {
+  local VERSION=v0.11.6
+  local ARCH
+  ARCH=$([ "$(uname -m)" = "x86_64" ] && echo amd64 || echo arm64)
+
+  local out
+  out="$(mktemp)"
+
+  gh::download "moby/buildkit" "${VERSION}" "buildkit-${VERSION}.linux-${ARCH}.tar.gz" "${out}"
+
+  sudo tar -C /usr/local/bin -xzvv --strip-components 1 -f "${out}"
+}
+
 tools::install_terraform
 tools::install_ansible
 tools::install_vegeta
 tools::wireshark
 tools::nerdctl
 tools::dive
+tools::buildkit
 
 # TODO:
 # - SSLScan (https://github.com/ioerror/sslscan)

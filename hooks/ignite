@@ -8,18 +8,6 @@ GOARCH=$(go env GOARCH 2>/dev/null || echo "amd64")
 
 export CNI_PATH=/opt/cni/bin
 
-gh::download() {
-  local repo version artifact output
-  repo=$1
-  version=$2
-  artifact=$3
-  output=$4
-
-  echo "Downloading release ${version} of ${artifact} from ${repo}"
-
-  curl -sfLo "${output}" "https://github.com/${repo}/releases/download/${version}/${artifact}"
-}
-
 kube::install_cni_plugins() {
   local CNI_VERSION=v0.9.1
   local ARCH
