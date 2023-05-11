@@ -134,7 +134,7 @@ tools::install_vegeta() {
 tools::wireshark() {
   # sudo add-apt-repository ppa:wireshark-dev/stable -y
   sudo apt update
-  sudo apt install wireshark
+  sudo apt install -y wireshark
 }
 
 tools::nerdctl() {
