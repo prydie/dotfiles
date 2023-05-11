@@ -6,8 +6,6 @@ export GOARCH=$(go env GOARCH 2>/dev/null || echo "amd64")
 
 _ROOT="$(dirname "${BASH_SOURCE}")/.."
 
-# . "${_ROOT}/hooks/os"
-
 log::f () {
  printf "INFO: %s $*\n" "$(date)"
 }
@@ -26,18 +24,6 @@ gh::download() {
   echo "Downloading release ${version} of ${artifact} from ${repo}"
 
   curl -sfLo "${output}" "https://github.com/${repo}/releases/download/${version}/${artifact}"
-}
-
-os::install_pip() {
-  log::f "Installing pip"
-
-  local out
-  out="$(mktemp)"
-
-  log::f "Installing Pip"
-
-  curl -LO "$out" https://bootstrap.pypa.io/get-pip.py
-  python "$out"
 }
 
 os::get_distro() {
@@ -87,9 +73,11 @@ os::ubuntu::install_packages() {
     nodejs                     \
     npm                        \
     openssh-client             \
+    pipx                       \
     ppa-purge                  \
     python2                    \
     python2-setuptools-whl     \
+    python3-full               \
     python3-neovim             \
     python3-venv               \
     ruby                       \
@@ -114,8 +102,6 @@ go::install_developer_tools() {
   go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.52.2
 }
 
-os::install_pip
-pip3 install --user -r "${_ROOT}/requirements.txt"
 
 
 # Tools
@@ -136,7 +122,7 @@ https://apt.releases.hashicorp.com $(lsb_release -cs) main" | \
 }
 
 tools::install_ansible() {
-  sudo apt-add-repository -y ppa:ansible/ansible
+  # sudo apt-add-repository -y ppa:ansible/ansible
   sudo apt update
   sudo apt install -y ansible
 }
@@ -146,7 +132,7 @@ tools::install_vegeta() {
 }
 
 tools::wireshark() {
-  sudo add-apt-repository ppa:wireshark-dev/stable -y
+  # sudo add-apt-repository ppa:wireshark-dev/stable -y
   sudo apt update
   sudo apt install wireshark
 }
@@ -190,13 +176,32 @@ tools::buildkit() {
   sudo tar -C /usr/local/bin -xzvv --strip-components 1 -f "${out}"
 }
 
-tools::install_terraform
+tools::regctl() {
+  local VERSION=v0.4.8
+  local ARCH
+  ARCH=$([ "$(uname -m)" = "x86_64" ] && echo amd64 || echo arm64)
+
+  local out
+  out="$(mktemp)"
+
+  gh::download "regclient/regclient" "${VERSION}" "regctl-linux-${ARCH}" "${out}"
+
+  chmod +x "${out}"
+  sudo mv "${out}" /usr/local/bin/regctl
+}
+
+# tools::install_terraform # TODO(apryde): No PPA for lunar
 tools::install_ansible
 tools::install_vegeta
 tools::wireshark
 tools::nerdctl
 tools::dive
 tools::buildkit
+tools::regctl
+
+pipx install oci-cli
+pipx install isort
+pipx install autopep8
 
 # TODO:
 # - SSLScan (https://github.com/ioerror/sslscan)

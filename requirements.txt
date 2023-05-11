@@ -1,5 +1,3 @@
 # pybluez
 matplotlib
-isort
 pandas
-autopep8

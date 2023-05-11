@@ -58,7 +58,7 @@ REGISTERS := IDX
 
 # PATHS
 #
-BASE_PATH := "$(HOME)/.dotfiles"
+BASE_PATH := $(shell dirname $(realpath $(firstword $(MAKEFILE_LIST))))
 
 # HTTP -> BEGETS
 VERBS := GET | POST | PUT | HEAD
@@ -100,7 +100,8 @@ up:
 
 .PHONY:
 mkvirtualenv:
-	python${PYTHON_VERSION} -m venv ${BASE_PATH}/python3
+	python${PYTHON_VERSION} -m venv ${BASE_PATH}/venv
+	${BASE_PATH}/venv/bin/pip install -r requirements.txt
 
 .PHONY:
 all: build test
@@ -125,13 +126,6 @@ clean-house: # BEGETS CLEAN MIND
 	@rm -rf ${HOME}/.local/bin/
 	@rm -rf /etc/NetworkManager/system-connections/*.nmconnection
 
-# ```
-# F(PYTHON_VERSION):
-# -> PIP_PATH := "${HOME}/.dotfiles/python${PYTHON_VERSION}/bin/pip"
-# ```` | pbcopy
-
-# PIP_X := $("$(${HOME})/.dotfiles/python$({PYTHON_VERSION}"))
-PY_BODY_FUNC_NAME := "__main__"
 
 # PARSER
 
