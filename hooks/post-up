@@ -9,11 +9,15 @@ touch "$HOME"/.psqlrc.local
 
 os::get_distro
 
-if [[ "${DISTRO}" == "Ubuntu" ]]; then
-  log::f "Ubuntu detected, installing packages"
+if [[ $DISTRO =~ ^(Ubuntu|debian) ]]; then
+      log::f "Ubuntu detected, installing packages"
 
-  os::ubuntu::install_packages
+      os::ubuntu::install_packages
+else
+    log::e "Unspported distribution ${DISTRO}"
+    exit 1
 fi
+
 
 # install zplug if not installed
 if [ ! -d "$HOME/.zplug" ]; then
