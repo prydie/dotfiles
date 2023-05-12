@@ -76,9 +76,7 @@ os::ubuntu::install_packages() {
     npm                        \
     openssh-client             \
     pipx                       \
-    ppa-purge                  \
     python2                    \
-    python2-setuptools-whl     \
     python3-full               \
     python3-neovim             \
     python3-venv               \
