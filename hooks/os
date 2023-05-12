@@ -71,10 +71,12 @@ os::ubuntu::install_packages() {
     gawk                       \
     git                        \
     gnupg                      \
+    libpcsclite-dev            \
     neovim                     \
     nodejs                     \
     npm                        \
     openssh-client             \
+    pcsd                       \
     pipx                       \
     python2                    \
     python3-full               \
@@ -83,6 +85,7 @@ os::ubuntu::install_packages() {
     ruby                       \
     silversearcher-ag          \
     software-properties-common \
+    swig                       \
     tmux                       \
     virtualenv                 \
     xclip                      \
@@ -116,15 +119,15 @@ go::install_developer_tools() {
 go::install_developer_tools
 
 tools::install_terraform() {
-  wget -O- https://apt.releases.hashicorp.com/gpg | \
-  gpg --dearmor | \
-  sudo tee /usr/share/keyrings/hashicorp-archive-keyring.gpg
+  local VERSION=v1.4.6
+  local ARCH
+  ARCH=$([ "$(uname -m)" = "x86_64" ] && echo amd64 || echo arm64)
 
-  echo "deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] \
-https://apt.releases.hashicorp.com $(lsb_release -cs) main" | \
-  sudo tee /etc/apt/sources.list.d/hashicorp.list
-  sudo apt update
-  sudo apt install -y terraform
+
+  local out
+  out="$(mktemp)"
+  curl -sfLo "${out}" "https://releases.hashicorp.com/terraform/${VERSION:1}/terraform_${VERSION:1}_linux_${ARCH}.zip"
+  sudo unzip "${out}" -d /usr/local/bin/
 }
 
 tools::install_ansible() {
@@ -140,7 +143,8 @@ tools::install_vegeta() {
 tools::wireshark() {
   # sudo add-apt-repository ppa:wireshark-dev/stable -y
   sudo apt update
-  sudo apt install -y wireshark
+  echo "wireshark-common wireshark-common/install-setuid boolean true" | sudo debconf-set-selections
+  DEBIAN_FRONTEND=noninteractive sudo apt install -y wireshark
 }
 
 tools::nerdctl() {
@@ -152,6 +156,19 @@ tools::nerdctl() {
   out="$(mktemp)"
 
   gh::download "containerd/nerdctl" "${VERSION}" "nerdctl-${VERSION:1}-linux-${ARCH}.tar.gz" "${out}"
+
+  sudo tar Cxzvvf /usr/local/bin "${out}"
+}
+
+tools::doctl() {
+  local VERSION=v1.94.0
+  local ARCH
+  ARCH=$([ "$(uname -m)" = "x86_64" ] && echo amd64 || echo arm64)
+
+  local out
+  out="$(mktemp)"
+
+  gh::download "digitalocean/doctl" "${VERSION}" "doctl-${VERSION:1}-linux-${ARCH}.tar.gz" "${out}"
 
   sudo tar Cxzvvf /usr/local/bin "${out}"
 }
@@ -196,7 +213,20 @@ tools::regctl() {
   sudo mv "${out}" /usr/local/bin/regctl
 }
 
-# tools::install_terraform # TODO(apryde): No PPA for lunar
+tools::cf-terraforming() {
+  local VERSION=v0.12.0
+  local ARCH
+  ARCH=$([ "$(uname -m)" = "x86_64" ] && echo amd64 || echo arm64)
+
+  local out
+  out="$(mktemp)"
+
+  gh::download "cloudflare/cf-terraforming" "${VERSION}" "cf-terraforming_${VERSION:1}_linux_${ARCH}.tar.gz" "${out}"
+
+  sudo tar Cxzvvf /usr/local/bin "${out}"
+}
+
+tools::install_terraform
 tools::install_ansible
 tools::install_vegeta
 tools::wireshark
@@ -204,6 +234,9 @@ tools::nerdctl
 # tools::dive # FIXME(apryde): dive only supports docker and that's verboten
 tools::buildkit
 tools::regctl
+
+tools::doctl
+tools::cf-terraforming
 
 pipx install oci-cli
 pipx install yubikey-manager # ykman
