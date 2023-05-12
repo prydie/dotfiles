@@ -44,6 +44,8 @@ os::get_distro() {
   # For everything else (or if above failed), just use generic identifier
   [ "$DISTRO" == "" ] && export DISTRO=$UNAME
   unset UNAME
+
+  log::f "Detected Linux distrubtion: ${DISTRO}"
 }
 
 kube::binaries() {
@@ -201,7 +203,7 @@ tools::install_ansible
 tools::install_vegeta
 tools::wireshark
 tools::nerdctl
-tools::dive
+# tools::dive # FIXME(apryde): dive only supports docker and that's verboten
 tools::buildkit
 tools::regctl
 
