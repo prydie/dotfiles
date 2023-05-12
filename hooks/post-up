@@ -28,6 +28,8 @@ if [ ! -d "$HOME/.tmux/plugins/tpm" ]; then
   git clone https://github.com/tmux-plugins/tpm ~/.tmux/plugins/tpm && ~/.tmux/plugins/tpm/bin/install_plugins
 fi
 
-os::set_zoom_scaling_factor
+if [ -f "$HOME/.config/zoomus.conf" ]; then
+    os::set_zoom_scaling_factor
+fi
 
 . ${_ROOT}/hooks/nvim
