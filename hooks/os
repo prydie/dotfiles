@@ -88,8 +88,15 @@ os::ubuntu::install_packages() {
     xclip                      \
     zsh
 
-  log::f "Installing snap packages"
-  sudo snap install --edge starship
+    if [ -x "$(which snap)" ] ; then
+      log::f "Installing snap packages"
+
+      sudo snap install go --classic
+      sudo snap install --edge starship
+
+      sudo snap install firefox
+      sudo snap connect firefox:u2f-devices # Yubikey support
+    fi
 }
 
 os::set_zoom_scaling_factor () {
@@ -97,7 +104,6 @@ os::set_zoom_scaling_factor () {
 }
 
 go::install_developer_tools() {
-  sudo snap install go --classic
   go get -u github.com/goware/modvendor
   go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.52.2
 }
@@ -200,6 +206,8 @@ tools::buildkit
 tools::regctl
 
 pipx install oci-cli
+pipx install yubikey-manager # ykman
+
 pipx install isort
 pipx install autopep8
 
