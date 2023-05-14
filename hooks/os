@@ -1,5 +1,4 @@
 #!/bin/bash
-
 # vim: set ft=sh sw=2:
 
 export GOARCH=$(go env GOARCH 2>/dev/null || echo "amd64")
@@ -72,16 +71,20 @@ os::ubuntu::install_packages() {
     git                        \
     gnupg                      \
     libpcsclite-dev            \
+    libpq-dev                  \
     neovim                     \
+    net-tools                  \
     nodejs                     \
     npm                        \
     openssh-client             \
-    pcsd                       \
     pipx                       \
     python2                    \
+    python3-dev                \
+    python3-distutils          \
     python3-full               \
     python3-neovim             \
     python3-venv               \
+    restic                     \
     ruby                       \
     silversearcher-ag          \
     software-properties-common \
