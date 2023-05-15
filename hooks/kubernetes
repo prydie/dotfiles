@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# vim: set ft=sh sw=2 et
+
+set -euf -o pipefail
+
+BIN_DIR="${BUILD_DIR:-/usr/local/bin}"
+
+export GOARCH
+GOARCH=$(go env GOARCH 2>/dev/null || echo "amd64")
+
+kube::install_cni_plugins() {
+  local CNI_VERSION=v0.9.1
+  local ARCH
+  ARCH=$([ "$(uname -m)" = "x86_64" ] && echo amd64 || echo arm64)
+
+  sudo mkdir -p "${CNI_PATH}"
+
+  local out
+  out="$(mktemp)"
+
+  gh::download "containernetworking/plugins" "${CNI_VERSION}" "cni-plugins-linux-${ARCH}-${CNI_VERSION}.tgz" "${out}"
+
+  sudo tar -xzf "${out}" -C "${CNI_PATH}"
+}
+
+
+kube::install_kubectl() {
+  local out
+  out="$(mktemp)"
+  curl -L -o "${out}" "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+  chmod +x "${out}"
+  sudo mv "${out}" "${BIN_DIR}"
+}
+
+## TODO: Secure me
+curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+curl -s https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh | bash
+
