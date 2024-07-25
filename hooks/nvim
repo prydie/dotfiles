@@ -3,16 +3,6 @@
 
 
 nvim::venvs() {
-  if [ ! -x "$(which python2)" ] ; then
-    log::e "Python 2 not found"
-    exit 1
-  fi
-
-  if [ ! -d "${HOME}/.config/nvim/py2" ]; then
-    virtualenv --python="$(which python2)" "${HOME}/.config/nvim/py2"
-  fi
-  "${HOME}/.config/nvim/py2/bin/pip" install --upgrade pip neovim
-
   if [ ! -d "${HOME}/.config/nvim/py3" ]; then
     python3 -m venv "${HOME}/.config/nvim/py3"
   fi

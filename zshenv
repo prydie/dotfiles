@@ -2,4 +2,4 @@
 
 export PATH=$PATH:$HOME/go/bin
 
-alias docker="nerdctl"
+# alias docker="nerdctl"
