@@ -6,5 +6,8 @@
       "trace.server": "verbose",
       "filetypes": ["go"]
     }
+  },
+  "diagnostic" {
+      "displayByAle": true
   }
 }

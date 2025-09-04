@@ -7,9 +7,10 @@ Plug 'tpope/vim-sensible'
 
 " Misc
 Plug 'tpope/vim-dispatch'
-Plug 'ervandew/supertab' "Plug 'metalelf0/supertab'
+"Plug 'ervandew/supertab' "Plug 'metalelf0/supertab'
 Plug 'vimwiki/vimwiki'
 Plug 'Shougo/denite.nvim'
+Plug 'liuchengxu/graphviz.vim'
 
 " Finding things
 Plug 'junegunn/fzf', { 'do': { -> fzf#install() } }
@@ -26,22 +27,23 @@ Plug 'plasticboy/vim-markdown'
 Plug 'towolf/vim-helm'
 Plug 'chr4/nginx.vim'
 Plug 'HerringtonDarkholme/yats.vim'
-Plug 'mhartington/nvim-typescript', {'do': './install.sh'}
+Plug 'nvim-treesitter/nvim-treesitter', {'do': ':TSUpdate'}
 
 " Python import sorting
 " NOTE: pip3 install --user isort
 Plug 'stsewd/isort.nvim', { 'do': ':UpdateRemotePlugins' }
 Plug 'hdima/python-syntax', { 'for': 'python' }
-Plug 'davidhalter/jedi-vim', { 'for': 'python' }
+"Plug 'davidhalter/jedi-vim', { 'for': 'python' }
+Plug 'kkoomen/vim-doge', { 'do': { -> doge#install() } }
 
 " Omnicomplete
 if has('nvim')
   Plug 'Shougo/deoplete.nvim', { 'do': ':UpdateRemotePlugins' }
   Plug 'zchee/deoplete-jedi', { 'for': 'python' }
-  Plug 'autozimu/LanguageClient-neovim', {
-    \ 'branch': 'next',
-    \ 'do': 'bash install.sh',
-    \ }
+  "Plug 'autozimu/LanguageClient-neovim', {
+    "\ 'branch': 'next',
+    "\ 'do': 'bash install.sh',
+    "\ }
   Plug 'neoclide/coc.nvim', {'branch': 'release'}
 endif
 
@@ -73,6 +75,7 @@ Plug 'scrooloose/nerdcommenter'
 " Themes
 Plug 'lifepillar/vim-solarized8'
 Plug 'rakr/vim-one'
+Plug 'projekt0n/github-nvim-theme'
 
 call plug#end()
 
@@ -189,6 +192,9 @@ endif
 if executable(glob('~/.config/nvim/py3/bin/python'))
     let g:python3_host_prog = glob('~/.config/nvim/py3/bin/python')
 endif
+
+let g:doge_doc_standard_python = 'google'
+nmap <silent> <Leader>ds <Plug>(doge-generate)
 
 
 " mappings
@@ -478,3 +484,16 @@ nnoremap <silent><nowait> <space>j  :<C-u>CocNext<CR>
 nnoremap <silent><nowait> <space>k  :<C-u>CocPrev<CR>
 " Resume latest coc list
 nnoremap <silent><nowait> <space>p  :<C-u>CocListResume<CR>
+
+" nvim-treesitter
+
+lua << EOF
+require("nvim-treesitter.configs").setup({
+    ensure_installed = { "javascript", "vim", "python" },
+    sync_install = false,
+    auto_install = true,
+    highlight = {
+        enable = true,
+    },
+})
+EOF

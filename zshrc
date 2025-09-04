@@ -97,15 +97,12 @@ export FZF_DEFAULT_COMMAND='ag -l -g ""'
 export FZF_DEFAULT_OPTS='--height 40% --reverse --border'
 
 
-# kube
-######
-autoload -U colors; colors
-source "${HOME}/.kube-ps1.sh"
-RPROMPT='$()'
-
-function custom_rprompt() {
-    kube_ps1
-}
+# pyenv
+#######
+#
+export PYENV_ROOT="$HOME/.pyenv"
+[[ -d $PYENV_ROOT/bin ]] && export PATH="$PYENV_ROOT/bin:$PATH"
+eval "$(pyenv init -)"
 
 [ -f ~/.zshrc.local ] && source ~/.zshrc.local
 

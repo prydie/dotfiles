@@ -11,10 +11,6 @@ HOSTNAME := $$(hostname)
 
 GO_ROOT := ${HOME}/go
 
-SRC_CONTROL_PLATFORM := bitbucket
-COMPANY_GO_ROOT ?= ${GO_ROOT}/src/${SRC_CONTROL_PLATFORM}.${OCI_INTERNAL_TLD}
-CURRENT_TEAM ?= oke
-
 # CONSTANT
 OPERATOR_NAME ?= "Andrew Pryde"
 
