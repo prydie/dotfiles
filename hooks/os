@@ -63,7 +63,7 @@ os::ubuntu::install_packages() {
 
   sudo apt install -y --no-install-recommends \
     binutils                   \
-    containerd                 \
+    # containerd                 \
     cpu-checker                \
     curl                       \
     dmsetup                    \

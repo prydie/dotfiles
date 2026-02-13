@@ -1,0 +1,10 @@
+[project]
+name = ""
+version = "0.0.1"
+dependencies = [
+    "matplotlib",
+    "pandas",
+]
+
+[tool.uv]
+package = false

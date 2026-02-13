@@ -1,5 +1,5 @@
 [user]
-    email = andrew.pryde@oracle.com
+    email = andrew@rocketpod.co.uk
     name = Andrew Pryde
 [push]
     default = simple
@@ -8,6 +8,7 @@
 [core]
     excludesfile = /home/andrew/.gitignore
     abbrev = 8
+	editor = nvim
 
 [url "git@github.com:"]
     insteadOf = "gh:"
