@@ -161,9 +161,7 @@ os::ubuntu::ensure_cloudflared_repo() {
   keyring="/usr/share/keyrings/cloudflare-main.gpg"
   listfile="/etc/apt/sources.list.d/cloudflared.list"
 
-  if [ ! -f "${keyring}" ]; then
-    curl -fsSL https://pkg.cloudflare.com/cloudflare-main.gpg | sudo gpg --dearmor -o "${keyring}"
-  fi
+  curl -fsSL https://pkg.cloudflare.com/cloudflare-main.gpg | sudo tee "${keyring}" >/dev/null
 
   if [ ! -f "${listfile}" ] || ! grep -q 'pkg.cloudflare.com/cloudflared' "${listfile}" 2>/dev/null; then
     echo "deb [signed-by=${keyring}] https://pkg.cloudflare.com/cloudflared any main" | sudo tee "${listfile}" >/dev/null
