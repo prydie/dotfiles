@@ -444,7 +444,7 @@ terminal::configure_gnome_terminal_font() {
     return 0
   fi
 
-  if ! gsettings list-schemas | grep -q '^org\.gnome\.Terminal\.ProfilesList$'; then
+  if ! gsettings describe org.gnome.Terminal.ProfilesList default >/dev/null 2>&1; then
     log::f "Skipping GNOME Terminal font config: terminal schema unavailable"
     return 0
   fi
