@@ -205,6 +205,44 @@ desktop::install_clipboard_and_caffeine() {
     gnome-shell-extension-clipboard-indicator \
     gnome-shell-extension-caffeine \
     caffeine
+
+  # If distro packages are unavailable, attempt installation from extensions.gnome.org
+  # via GNOME Shell DBus (requires an active GNOME user session).
+  desktop::install_gnome_extension_remote "clipboard-indicator@tudmotu.com"
+  desktop::install_gnome_extension_remote "caffeine@patapon.info"
+}
+
+desktop::install_gnome_extension_remote() {
+  local extension_id desktop_hint install_result
+  extension_id="$1"
+  desktop_hint="${XDG_CURRENT_DESKTOP:-}${DESKTOP_SESSION:-}"
+
+  if command -v gnome-extensions >/dev/null 2>&1 && gnome-extensions list 2>/dev/null | grep -Fxq "${extension_id}"; then
+    return 0
+  fi
+
+  if ! grep -qi "gnome" <<<"${desktop_hint}"; then
+    return 0
+  fi
+
+  if ! command -v gdbus >/dev/null 2>&1; then
+    log::f "Cannot auto-install GNOME extension (${extension_id}): gdbus not available"
+    return 0
+  fi
+
+  install_result="$(gdbus call --session \
+    --dest org.gnome.Shell.Extensions \
+    --object-path /org/gnome/Shell/Extensions \
+    --method org.gnome.Shell.Extensions.InstallRemoteExtension \
+    "${extension_id}" 2>/dev/null || true)"
+
+  if command -v gnome-extensions >/dev/null 2>&1 && gnome-extensions list 2>/dev/null | grep -Fxq "${extension_id}"; then
+    log::f "Installed GNOME extension: ${extension_id}"
+  elif [ -n "${install_result}" ]; then
+    log::f "GNOME extension install requested for ${extension_id}; relog may be required"
+  else
+    log::f "Could not auto-install GNOME extension: ${extension_id}"
+  fi
 }
 
 desktop::ensure_gnome_extension_enabled() {
