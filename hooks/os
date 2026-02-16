@@ -146,6 +146,47 @@ apt::install_if_available() {
   fi
 }
 
+desktop::status_one() {
+  local label cmd
+  label="$1"
+  cmd="$2"
+
+  if command -v "${cmd}" >/dev/null 2>&1; then
+    log::f "${label}: installed (${cmd})"
+  else
+    log::f "${label}: not installed"
+  fi
+}
+
+desktop::install_clipboard_and_caffeine() {
+  # Install a practical clipboard toolset and caffeine app when available.
+  apt::install_if_available wl-clipboard xsel gpaste gnome-shell-extension-gpaste caffeine
+}
+
+desktop::status_clipboard_and_caffeine() {
+  desktop::status_one "xclip" "xclip"
+  desktop::status_one "xsel" "xsel"
+  desktop::status_one "wl-clipboard" "wl-paste"
+  desktop::status_one "GPaste" "gpaste-client"
+  desktop::status_one "Caffeine" "caffeine"
+
+  if command -v gpaste-client >/dev/null 2>&1; then
+    if pgrep -x gpaste-daemon >/dev/null 2>&1; then
+      log::f "GPaste daemon: running"
+    else
+      log::f "GPaste daemon: not running"
+    fi
+  fi
+
+  if command -v caffeine >/dev/null 2>&1; then
+    if pgrep -fa 'caffeine|caffeine-indicator' >/dev/null 2>&1; then
+      log::f "Caffeine process: running"
+    else
+      log::f "Caffeine process: not running"
+    fi
+  fi
+}
+
 os::debian_codename() {
   if command -v lsb_release >/dev/null 2>&1; then
     lsb_release -cs
@@ -418,6 +459,7 @@ os::ubuntu::install_packages_core() {
   sudo apt update
   apt::install_if_available "${core_packages[@]}"
   apt::install_if_available cloudflared tailscale
+  desktop::install_clipboard_and_caffeine
 
   uv::ensure_installed
   tools::install_starship
@@ -439,6 +481,7 @@ os::ubuntu::install_packages_core() {
     log::f "Docker already installed; skipping docker.io package install"
   fi
   docker::ensure_compose
+  desktop::status_clipboard_and_caffeine
 
   if command -v snap >/dev/null 2>&1; then
     log::f "Installing snap packages"
