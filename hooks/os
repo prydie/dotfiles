@@ -197,6 +197,22 @@ os::ubuntu::ensure_tailscale_repo() {
   fi
 }
 
+os::ubuntu::ensure_opentofu_repo() {
+  local keyring listfile
+  keyring="/usr/share/keyrings/opentofu-archive-keyring.gpg"
+  listfile="/etc/apt/sources.list.d/opentofu.list"
+
+  if [ ! -f "${keyring}" ]; then
+    curl -fsSL https://packages.opentofu.org/opentofu/tofu/gpgkey | sudo gpg --dearmor -o "${keyring}"
+  fi
+
+  if [ ! -f "${listfile}" ] || ! grep -q 'packages.opentofu.org/opentofu/tofu' "${listfile}" 2>/dev/null; then
+    curl -fsSL https://packages.opentofu.org/opentofu/tofu/any/any/deb.txt | \
+      sed "s#signed-by=/etc/apt/keyrings/opentofu.gpg#signed-by=${keyring}#g" | \
+      sudo tee "${listfile}" >/dev/null
+  fi
+}
+
 os::ubuntu::apt_repo_hygiene() {
   # Clean up stale Docker source entries that point to Ubuntu focal.
   # These trigger apt warnings on noble and can conflict with the canonical repo config.
@@ -570,6 +586,7 @@ tools::install_opentofu() {
   fi
 
   log::f "Installing OpenTofu from apt"
+  os::ubuntu::ensure_opentofu_repo
   sudo apt update
   sudo apt install -y --no-install-recommends tofu
 }
