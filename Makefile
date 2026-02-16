@@ -82,3 +82,36 @@ patching: sys-info ## Run apt patch cycle and reboot
 	@sudo apt autoremove -y
 	@sudo update-grub
 	@sudo shutdown -r now
+
+.PHONY: refresh-dev
+refresh-dev: ## Refresh user-level tooling/plugins (zplug, tmux TPM, Neovim lazy)
+	@if [ -s "$(HOME)/.zplug/init.zsh" ] && command -v zsh >/dev/null 2>&1; then \
+		echo "Updating zplug plugins..."; \
+		zsh -lc 'source "$(HOME)/.zplug/init.zsh"; zplug update --self || true; zplug update || true'; \
+	else \
+		echo "Skipping zplug update (zplug/zsh not available)"; \
+	fi
+	@if [ -x "$(HOME)/.tmux/plugins/tpm/bin/update_plugins" ]; then \
+		echo "Updating tmux TPM plugins..."; \
+		"$(HOME)/.tmux/plugins/tpm/bin/update_plugins" all || true; \
+	elif [ -x "$(HOME)/.tmux/plugins/tpm/bin/install_plugins" ]; then \
+		echo "Installing tmux TPM plugins..."; \
+		"$(HOME)/.tmux/plugins/tpm/bin/install_plugins" || true; \
+	else \
+		echo "Skipping tmux TPM update (TPM not installed)"; \
+	fi
+	@if command -v nvim >/dev/null 2>&1; then \
+		echo "Syncing Neovim plugins with lazy.nvim..."; \
+		nvim --headless "+Lazy! sync" +qa || true; \
+	else \
+		echo "Skipping Neovim plugin sync (nvim not installed)"; \
+	fi
+
+.PHONY: patching-full
+patching-full: refresh-dev sys-info ## Refresh user plugins, patch apt packages, and reboot
+	@echo "Refreshing dev tools completed; now patching host..."
+	@sudo apt update -y
+	@sudo apt upgrade -y
+	@sudo apt autoremove -y
+	@sudo update-grub
+	@sudo shutdown -r now

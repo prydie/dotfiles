@@ -47,6 +47,9 @@ make up
 make bootstrap-all
 make bootstrap-full
 make post-up
+make refresh-dev
+make patching
+make patching-full
 ```
 
 ## Post-up flags
