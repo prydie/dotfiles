@@ -716,16 +716,17 @@ tools::install_ansible() {
 }
 
 tools::install_vegeta() {
-  local vegeta_version fallback_version
+  local vegeta_version fallback_version fallback_module
   vegeta_version="${VEGETA_VERSION:-latest}"
   fallback_version="${VEGETA_FALLBACK_VERSION:-v12.11.1}"
+  fallback_module="${VEGETA_FALLBACK_MODULE:-github.com/tsenart/vegeta/v12}"
 
   if go install "github.com/tsenart/vegeta@${vegeta_version}"; then
     return 0
   fi
 
-  log::f "vegeta@${vegeta_version} install failed; retrying ${fallback_version} for older Go toolchains"
-  if ! go install "github.com/tsenart/vegeta@${fallback_version}"; then
+  log::f "vegeta@${vegeta_version} install failed; retrying ${fallback_module}@${fallback_version} for older Go toolchains"
+  if ! go install "${fallback_module}@${fallback_version}"; then
     log::f "Skipping vegeta install: compatible version could not be installed with current Go toolchain"
   fi
 }
