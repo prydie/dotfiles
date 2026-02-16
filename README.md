@@ -20,7 +20,7 @@ This repo contains shell/editor/tmux/git config and optional host bootstrap hook
 One-line bootstrap (fresh Ubuntu):
 
 ```bash
-sudo apt-get update && sudo apt-get install -y git make && git clone https://github.com/prydie/dotfiles.git ~/.dotfiles && cd ~/.dotfiles && ./install.sh
+sudo apt-get update && sudo apt-get install -y git make && git clone https://github.com/prydie/dotfiles.git ~/.dotfiles && cd ~/.dotfiles && make bootstrap-full
 ```
 
 If you prefer SSH auth (recommended when you will push changes):
