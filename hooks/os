@@ -159,20 +159,80 @@ desktop::status_one() {
   fi
 }
 
+desktop::ensure_universe_repo() {
+  local candidate candidate2
+  if [ "${DISTRO:-}" != "Ubuntu" ]; then
+    return 0
+  fi
+
+  if ! command -v add-apt-repository >/dev/null 2>&1; then
+    return 0
+  fi
+
+  candidate="$(apt-cache policy gpaste 2>/dev/null | awk '/Candidate:/ {print $2; exit}')"
+  candidate2="$(apt-cache policy gpaste-2 2>/dev/null | awk '/Candidate:/ {print $2; exit}')"
+  if { [ -n "${candidate}" ] && [ "${candidate}" != "(none)" ]; } || { [ -n "${candidate2}" ] && [ "${candidate2}" != "(none)" ]; }; then
+    return 0
+  fi
+
+  log::f "Enabling Ubuntu universe repository for desktop packages (gpaste)"
+  sudo add-apt-repository -y universe
+  sudo apt update
+}
+
 desktop::install_clipboard_and_caffeine() {
   # Install a practical clipboard toolset and caffeine app when available.
-  apt::install_if_available wl-clipboard xsel gpaste gnome-shell-extension-gpaste caffeine
+  desktop::ensure_universe_repo
+  apt::install_if_available wl-clipboard xsel gpaste-2 gpaste gpaste-ui gnome-shell-extension-gpaste caffeine
+}
+
+desktop::ensure_gpaste_running() {
+  local daemon_bin
+  daemon_bin=""
+  if command -v gpaste-daemon >/dev/null 2>&1; then
+    daemon_bin="gpaste-daemon"
+  elif command -v gpaste-daemon-2 >/dev/null 2>&1; then
+    daemon_bin="gpaste-daemon-2"
+  fi
+
+  if [ -z "${daemon_bin}" ]; then
+    log::f "GPaste daemon binary not found; skipping auto-start"
+    return 0
+  fi
+
+  if pgrep -x "${daemon_bin}" >/dev/null 2>&1; then
+    return 0
+  fi
+
+  if command -v systemctl >/dev/null 2>&1 && systemctl --user status gpaste-daemon.service >/dev/null 2>&1; then
+    systemctl --user enable --now gpaste-daemon.service >/dev/null 2>&1 || true
+  fi
+
+  if ! pgrep -x "${daemon_bin}" >/dev/null 2>&1; then
+    nohup "${daemon_bin}" >/dev/null 2>&1 &
+    sleep 1
+  fi
+
+  if pgrep -x "${daemon_bin}" >/dev/null 2>&1; then
+    log::f "GPaste daemon started"
+  else
+    log::f "GPaste daemon not running; launch manually with: ${daemon_bin}"
+  fi
 }
 
 desktop::status_clipboard_and_caffeine() {
   desktop::status_one "xclip" "xclip"
   desktop::status_one "xsel" "xsel"
   desktop::status_one "wl-clipboard" "wl-paste"
-  desktop::status_one "GPaste" "gpaste-client"
+  if command -v gpaste-client >/dev/null 2>&1; then
+    desktop::status_one "GPaste" "gpaste-client"
+  else
+    desktop::status_one "GPaste" "gpaste-client-2"
+  fi
   desktop::status_one "Caffeine" "caffeine"
 
-  if command -v gpaste-client >/dev/null 2>&1; then
-    if pgrep -x gpaste-daemon >/dev/null 2>&1; then
+  if command -v gpaste-client >/dev/null 2>&1 || command -v gpaste-client-2 >/dev/null 2>&1; then
+    if pgrep -x gpaste-daemon >/dev/null 2>&1 || pgrep -x gpaste-daemon-2 >/dev/null 2>&1; then
       log::f "GPaste daemon: running"
     else
       log::f "GPaste daemon: not running"
@@ -489,6 +549,7 @@ os::ubuntu::install_packages_core() {
   apt::install_if_available "${core_packages[@]}"
   apt::install_if_available cloudflared tailscale
   desktop::install_clipboard_and_caffeine
+  desktop::ensure_gpaste_running
 
   uv::ensure_installed
   tools::install_starship
