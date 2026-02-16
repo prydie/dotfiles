@@ -311,18 +311,29 @@ os::ubuntu::ensure_tailscale_repo() {
 }
 
 os::ubuntu::ensure_opentofu_repo() {
-  local keyring listfile
-  keyring="/usr/share/keyrings/opentofu-archive-keyring.gpg"
+  local keyring_main keyring_repo listfile
+  keyring_main="/etc/apt/keyrings/opentofu.gpg"
+  keyring_repo="/etc/apt/keyrings/opentofu-repo.gpg"
   listfile="/etc/apt/sources.list.d/opentofu.list"
 
-  if [ ! -f "${keyring}" ]; then
-    curl -fsSL https://packages.opentofu.org/opentofu/tofu/gpgkey | sudo gpg --dearmor -o "${keyring}"
+  sudo install -m 0755 -d /etc/apt/keyrings
+
+  if [ ! -f "${keyring_main}" ]; then
+    curl -fsSL https://get.opentofu.org/opentofu.gpg | sudo tee "${keyring_main}" >/dev/null
+    sudo chmod a+r "${keyring_main}"
+  fi
+
+  if [ ! -f "${keyring_repo}" ]; then
+    curl -fsSL https://packages.opentofu.org/opentofu/tofu/gpgkey | \
+      sudo gpg --no-tty --batch --dearmor -o "${keyring_repo}" >/dev/null
+    sudo chmod a+r "${keyring_repo}"
   fi
 
   if [ ! -f "${listfile}" ] || ! grep -q 'packages.opentofu.org/opentofu/tofu' "${listfile}" 2>/dev/null; then
-    curl -fsSL https://packages.opentofu.org/opentofu/tofu/any/any/deb.txt | \
-      sed "s#signed-by=/etc/apt/keyrings/opentofu.gpg#signed-by=${keyring}#g" | \
-      sudo tee "${listfile}" >/dev/null
+    cat <<EOF | sudo tee "${listfile}" >/dev/null
+deb [signed-by=${keyring_main},${keyring_repo}] https://packages.opentofu.org/opentofu/tofu/any/ any main
+deb-src [signed-by=${keyring_main},${keyring_repo}] https://packages.opentofu.org/opentofu/tofu/any/ any main
+EOF
   fi
 }
 
