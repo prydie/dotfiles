@@ -87,7 +87,7 @@ patching: sys-info ## Run apt patch cycle and reboot
 refresh-dev: ## Refresh user-level tooling/plugins (zplug, tmux TPM, Neovim lazy)
 	@if [ -s "$(HOME)/.zplug/init.zsh" ] && command -v zsh >/dev/null 2>&1; then \
 		echo "Updating zplug plugins..."; \
-		zsh -lc 'source "$(HOME)/.zplug/init.zsh"; zplug update --self || true; zplug update || true'; \
+		zsh -lc 'source "$(HOME)/.zplug/init.zsh"; zplug update || true'; \
 	else \
 		echo "Skipping zplug update (zplug/zsh not available)"; \
 	fi
@@ -100,7 +100,10 @@ refresh-dev: ## Refresh user-level tooling/plugins (zplug, tmux TPM, Neovim lazy
 	else \
 		echo "Skipping tmux TPM update (TPM not installed)"; \
 	fi
-	@if command -v nvim >/dev/null 2>&1; then \
+	@if [ -x "$(HOME)/.local/bin/nvim" ]; then \
+		echo "Syncing Neovim plugins with lazy.nvim using $(HOME)/.local/bin/nvim..."; \
+		"$(HOME)/.local/bin/nvim" --headless "+Lazy! sync" +qa || true; \
+	elif command -v nvim >/dev/null 2>&1; then \
 		echo "Syncing Neovim plugins with lazy.nvim..."; \
 		nvim --headless "+Lazy! sync" +qa || true; \
 	else \
