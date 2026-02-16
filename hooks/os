@@ -151,7 +151,7 @@ os::ensure_zsh() {
 
 fonts::install_nerd_font() {
   local font_name version fonts_dir font_dir tmpdir tarball zipball
-  font_name="${NERD_FONT_NAME:-JetBrainsMono}"
+  font_name="${NERD_FONT_NAME:-FiraCode}"
   version="${NERD_FONT_VERSION:-v3.4.0}"
   fonts_dir="${HOME}/.local/share/fonts"
   font_dir="${fonts_dir}/NerdFonts/${font_name}"
@@ -183,6 +183,38 @@ fonts::install_nerd_font() {
 
   rm -rf "${tmpdir}"
   log::f "Installed ${font_name} Nerd Font (${version}) to ${font_dir}"
+}
+
+terminal::configure_gnome_terminal_font() {
+  local font_name font_spec profile_id profile_path
+  font_name="${NERD_FONT_NAME:-FiraCode}"
+  font_spec="${TERMINAL_FONT_SPEC:-${font_name} Nerd Font Mono 11}"
+
+  if ! command -v gsettings >/dev/null 2>&1; then
+    log::f "Skipping GNOME Terminal font config: gsettings not found"
+    return 0
+  fi
+
+  if ! gsettings list-schemas | grep -q '^org\.gnome\.Terminal\.ProfilesList$'; then
+    log::f "Skipping GNOME Terminal font config: terminal schema unavailable"
+    return 0
+  fi
+
+  profile_id="$(gsettings get org.gnome.Terminal.ProfilesList default 2>/dev/null | tr -d "'")"
+  if [ -z "${profile_id}" ]; then
+    log::f "Skipping GNOME Terminal font config: no default profile detected"
+    return 0
+  fi
+
+  profile_path="/org/gnome/terminal/legacy/profiles:/:${profile_id}/"
+  if ! gsettings writable "org.gnome.Terminal.Legacy.Profile:${profile_path}" font >/dev/null 2>&1; then
+    log::f "Skipping GNOME Terminal font config: no writable settings session"
+    return 0
+  fi
+
+  gsettings set "org.gnome.Terminal.Legacy.Profile:${profile_path}" use-system-font false || true
+  gsettings set "org.gnome.Terminal.Legacy.Profile:${profile_path}" font "${font_spec}" || true
+  log::f "Configured GNOME Terminal default profile font: ${font_spec}"
 }
 
 kube::binaries() {
@@ -267,6 +299,7 @@ os::ubuntu::install_packages_core() {
   uv::ensure_installed
   tools::install_starship
   fonts::install_nerd_font
+  terminal::configure_gnome_terminal_font
   nvm::install_node_default
   sudo apt install -y --no-install-recommends python3-neovim || true
 
