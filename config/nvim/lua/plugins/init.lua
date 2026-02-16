@@ -180,7 +180,9 @@ return {
   -- Syntax / language
   {
     "nvim-treesitter/nvim-treesitter",
-    build = ":TSUpdate",
+    build = function()
+      pcall(vim.cmd, "TSUpdate")
+    end,
     config = function()
       require "plugins.configs.treesitter"
     end,
@@ -205,7 +207,9 @@ return {
   }, -- coc/deoplete replacement
   {
     "williamboman/mason.nvim",
-    build = ":MasonUpdate",
+    build = function()
+      pcall(vim.cmd, "MasonUpdate")
+    end,
     cmd = { "Mason", "MasonInstall" },
     opts = {},
   },
