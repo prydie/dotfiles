@@ -102,6 +102,19 @@ docker::ensure_compose() {
   sudo apt install -y --no-install-recommends docker-compose-v2
 }
 
+os::ubuntu::ensure_bootstrap_tools() {
+  local bootstrap_pkgs=()
+
+  command -v curl >/dev/null 2>&1 || bootstrap_pkgs+=(curl)
+  command -v gpg >/dev/null 2>&1 || bootstrap_pkgs+=(gnupg)
+
+  if [ "${#bootstrap_pkgs[@]}" -gt 0 ]; then
+    log::f "Installing bootstrap tools: ${bootstrap_pkgs[*]}"
+    sudo apt update
+    sudo apt install -y --no-install-recommends "${bootstrap_pkgs[@]}"
+  fi
+}
+
 apt::install_if_available() {
   local packages=("$@")
   local available=()
@@ -329,6 +342,7 @@ os::ubuntu::install_packages() {
 os::ubuntu::install_packages_core() {
   log::f "Installing core apt packages"
 
+  os::ubuntu::ensure_bootstrap_tools
   os::ubuntu::apt_repo_hygiene
   os::ubuntu::ensure_cloudflared_repo
   os::ubuntu::ensure_tailscale_repo
