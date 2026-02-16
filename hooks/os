@@ -127,10 +127,11 @@ apt::install_if_available() {
   local packages=("$@")
   local available=()
   local skipped=()
-  local pkg candidate
+  local pkg candidate policy_output
 
   for pkg in "${packages[@]}"; do
-    candidate="$(apt-cache policy "${pkg}" 2>/dev/null | awk '/Candidate:/ {print $2; exit}')"
+    policy_output="$(apt-cache policy "${pkg}" 2>/dev/null || true)"
+    candidate="$(awk '/Candidate:/ {print $2; exit}' <<<"${policy_output}")"
     if [ -n "${candidate}" ] && [ "${candidate}" != "(none)" ]; then
       available+=("${pkg}")
     else
@@ -160,7 +161,7 @@ desktop::status_one() {
 }
 
 desktop::ensure_universe_repo() {
-  local candidate candidate2
+  local candidate candidate2 policy_output
   if [ "${DISTRO:-}" != "Ubuntu" ]; then
     return 0
   fi
@@ -169,8 +170,10 @@ desktop::ensure_universe_repo() {
     return 0
   fi
 
-  candidate="$(apt-cache policy gpaste 2>/dev/null | awk '/Candidate:/ {print $2; exit}')"
-  candidate2="$(apt-cache policy gpaste-2 2>/dev/null | awk '/Candidate:/ {print $2; exit}')"
+  policy_output="$(apt-cache policy gpaste 2>/dev/null || true)"
+  candidate="$(awk '/Candidate:/ {print $2; exit}' <<<"${policy_output}")"
+  policy_output="$(apt-cache policy gpaste-2 2>/dev/null || true)"
+  candidate2="$(awk '/Candidate:/ {print $2; exit}' <<<"${policy_output}")"
   if { [ -n "${candidate}" ] && [ "${candidate}" != "(none)" ]; } || { [ -n "${candidate2}" ] && [ "${candidate2}" != "(none)" ]; }; then
     return 0
   fi
