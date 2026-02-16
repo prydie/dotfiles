@@ -1,6 +1,6 @@
 return {
   install = {
-    missing = false,
+    missing = true,
     colorscheme = { "nightfox" },
   },
 }

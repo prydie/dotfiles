@@ -83,7 +83,21 @@ nvim::venvs() {
 }
 
 nvim::update_plugins() {
-  nvim --headless "+Lazy! sync" +qa
+  local nvim_bin treesitter_dir
+  nvim_bin="$(nvim::resolve_bin)"
+  treesitter_dir="${HOME}/.local/share/nvim/lazy/nvim-treesitter"
+
+  "${nvim_bin}" --headless "+Lazy! sync" +qa
+
+  if [ ! -d "${treesitter_dir}" ]; then
+    echo "nvim-treesitter missing after sync; retrying install once" >&2
+    "${nvim_bin}" --headless "+Lazy! install nvim-treesitter" "+Lazy! sync" +qa || true
+  fi
+
+  if [ ! -d "${treesitter_dir}" ]; then
+    echo "nvim-treesitter still missing after retry." >&2
+    return 1
+  fi
 }
 
 nvim::ensure() {
