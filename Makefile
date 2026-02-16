@@ -1,168 +1,79 @@
 #!/usr/bin/env make
 
-# MAKE FILE FOR ALL THE THINGS
-#
-# vim: set ft=make sw=4:
+SHELL := /usr/bin/env bash
+.DEFAULT_GOAL := help
 
-default: all
+DOTFILES_DIR ?= $(HOME)/.dotfiles
+RCRC ?= $(DOTFILES_DIR)/rcrc
+OPERATOR_NAME ?= Andrew Pryde
+ALLOW_DESTRUCTIVE ?= 0
 
-UNAME := apryde
-HOSTNAME := $$(hostname)
+.PHONY: help
+help: ## Show available targets
+	@grep -E '^[a-zA-Z0-9_-]+:.*## ' $(MAKEFILE_LIST) | \
+		sort | \
+		awk 'BEGIN {FS = ":.*## "}; {printf "  %-20s %s\n", $$1, $$2}'
 
-GO_ROOT := ${HOME}/go
+.PHONY: all
+all: up ## Alias for up
 
-# CONSTANT
-OPERATOR_NAME ?= "Andrew Pryde"
+.PHONY: up
+up: ## Symlink dotfiles with rcm (rcup)
+	@echo "Bringing up $(OPERATOR_NAME)'s dotfiles"
+	@command -v rcup >/dev/null || { echo "rcup not found. Install rcm first."; exit 1; }
+	@env RCRC="$(RCRC)" rcup
 
+.PHONY: post-up
+post-up: ## Run post-up host setup tasks
+	@bash hooks/post-up
 
-# PATHS
-#
-BASE_PATH := $(shell dirname $(realpath $(firstword $(MAKEFILE_LIST))))
+.PHONY: bootstrap
+bootstrap: ## Install rcm and run up
+	@bash install.sh
 
-# VERSIONS
-PYTHON_VERSION := 3
+.PHONY: bootstrap-full
+bootstrap-full: ## Install bootstrap deps, link dotfiles, install core packages, and bootstrap Neovim
+	@bash install.sh
+	@INSTALL_PACKAGES=1 PACKAGE_PROFILE=core INSTALL_NVIM=1 make post-up
 
-# TOOL URLS
+.PHONY: clean-local-bin
+clean-local-bin: ## Remove ~/.local/bin
+	@rm -rf "$(HOME)/.local/bin"
 
-JIRA_INSTANCE := $("env | grep -i "^jira_*$")
+.PHONY: clean-house
+clean-house: ## Destructive cleanup. Requires ALLOW_DESTRUCTIVE=1
+	@if [ "$(ALLOW_DESTRUCTIVE)" != "1" ]; then \
+		echo "Refusing destructive cleanup. Re-run with ALLOW_DESTRUCTIVE=1"; \
+		exit 1; \
+	fi
+	@rm -rf "$(HOME)/.local/bin"
 
-## VARS
-
-DB_NAME := "${SOURCE_DB}"
-STORE_NAME := $(env | grep -i (${DB_NAME}))
-TASK_L :=  { }
-
-# SQL STORED_PROCEDURES
-
-# VALUE := LOOKUP(${DATA_SOURCE})
-
-RCRC := "$${HOME}/.dotfiles/rcrc"
-.PHONY:
-up:
-	@echo "Bringing up ${OPERATOR_NAME}'s System"
-	@env RCRC="$${HOME}/.dotfiles/rcrc" rcup
-
-.PHONY:
-mkvirtualenv:
-	python${PYTHON_VERSION} -m venv ${BASE_PATH}/venv
-	${BASE_PATH}/venv/bin/pip install -r requirements.txt
-
-.PHONY:
-all: up
-
-.PHONY:
-clean:
-	@rm -rf ${HOME}/.local/bin/
-
-.PHONY:
-clean-house: # BEGETS CLEAN MIND
-	@rm -rf ${HOME}/.dotfiles/.git/
-	@rm -rf ${HOME}/.local/bin/
-	@rm -rf /etc/NetworkManager/system-connections/*.nmconnection
-
-
-.PHONY:
-python:
-	PIP_X := "$(${BASE_PATH})/python$(${PYTHON_VERSION})"
-	$(python -m venv "${PIP_X}")
-
-.PHONY:
-test:
-	# WRITE TESTS... and then run them...?
-	@/usr/bin/env python -m test.py ./
-
-GET_KERNAL_VERSION := $$(uname -r)
-
-.PHONY:
-sys-info:
+.PHONY: sys-info
+sys-info: ## Print basic system info
 	@echo ""
 	@echo "System Info"
 	@echo "-----------"
-	@echo "Comapny: Oracle (OCI)"
+	@echo "Owner: $(OPERATOR_NAME)"
 	@echo ""
-	@echo Owner: $(OPERATOR_NAME)
+	@echo "Host Name: $$(hostname)"
 	@echo ""
-	@echo "Routes: "
+	@echo "Kernel: $$(uname -r)"
 	@echo ""
-	@ip route show
+	@echo "Routes:"
+	@ip route show || true
 	@echo ""
+	@echo "Loopback interface:"
+	@ip address show lo || true
 	@echo ""
-	@echo "Network Details"
-	@echo "-----------"
-	@echo ""
-	@echo "Host Name: ${HOSTNAME}"
-	@echo ""
-	@echo "Interfaces:"
-	@echo ""
-	@ip address show lo
-	@echo ""
-	@echo "Kernal: " ${GET_KERNAL_VERSION}
-	@echo ""
-	@echo "Installed Kernal Packages: "
-	@dpkg --list 'linux-image*' | grep ^ii | cut -d' ' -f3 | grep -v ${GET_KERNAL_VERSION}
-	@echo ""
-	@echo "Boot Parition Space:"
-	@df /boot/ -h
+	@echo "Boot partition usage:"
+	@df /boot/ -h || true
 	@echo ""
 
-PKG_MGR := "apt" # TODO(apryde): yum
-
-.PHONY:
-patching: sys-info
-	@echo "Patching $(${HOSTNAME})..."
-	@echo ""
-
-	@${PKG_MGR} update -y
-	@${PKG_MGR} upgrade -y
-	@${PKG_MGR} autoremove -y
-
-	@update-grub
-	# TODO(apryde): previous kernal not current!
-	# @apt-get remove ${GET_KERNAL_VERSION}
-	@shutdown -r now
-
-.PHONY:
-ol-migration:
-	# TODO(apryde):
-	#  - Kernal
-	#  - Package name translation
-	#  - Testing
-
-# Jira Ticket Handler
-#####################
-
-# This is garbage... one day maybe.
-
-# SYMBOLS
-#########
-
-DIGITS := 0 1 2 3 4 5 6 7 8 9
-
-IDX := 0
-
-CPUS := 0 1
-
-REGISTERS := IDX
-
-
-
-# LEXER
-#######
-
-# PARSER
-########
-
-ABRS := JQL | OSQL | SQL | PY2 | PY3
-LANG_NAME := JQL | ORACLE_SQL | SQL
-SYMBOLS := { E PIC S}
-TERMS := SET VAR LEXER FUNC
-SYMBOLS := SET {A..Z a..z 0-9]
-
-## Types
-DO_WORK_FUNC_TYPE := F (OBJECT) -> OBJECT
-CLASS_T := "Property<T>"
-
-## FUNCS
-
-PUBLISH_EPIC := F(DO_WORK)
-REDUCE_F := F(W) -> x -> $
+.PHONY: patching
+patching: sys-info ## Run apt patch cycle and reboot
+	@echo "Patching host..."
+	@sudo apt update -y
+	@sudo apt upgrade -y
+	@sudo apt autoremove -y
+	@sudo update-grub
+	@sudo shutdown -r now

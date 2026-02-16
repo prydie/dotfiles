@@ -28,6 +28,13 @@ o.termguicolors = true
 o.timeoutlen = 400
 o.undofile = true
 o.cursorline = true
+o.colorcolumn = "80"
+o.updatetime = 300
+o.completeopt = "menu,menuone,noselect"
+o.list = true
+o.listchars = "tab:»\\ ,extends:›,precedes:‹,nbsp:·,trail:·"
+o.incsearch = true
+o.hlsearch = true
 
 -- add binaries installed by mason.nvim to path
 local is_windows = vim.loop.os_uname().sysname == "Windows_NT"

@@ -1,32 +1,104 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # vim: set ft=sh sw=2:
 
+set -euo pipefail
+
+nvim::version_ge() {
+  # Returns success when $1 >= $2 using semantic-ish version compare.
+  [ "$(printf '%s\n%s\n' "$2" "$1" | sort -V | tail -n1)" = "$1" ]
+}
+
+nvim::current_version() {
+  "$1" --version | awk 'NR==1{print $2}' | sed 's/^v//'
+}
+
+nvim::download_arch() {
+  case "$(uname -m)" in
+    x86_64) echo "x86_64" ;;
+    aarch64|arm64) echo "arm64" ;;
+    *)
+      echo ""
+      ;;
+  esac
+}
+
+nvim::install_local() {
+  local arch tmpdir tarball
+  arch="$(nvim::download_arch)"
+  if [ -z "${arch}" ]; then
+    echo "Unsupported architecture for Neovim auto-install: $(uname -m)" >&2
+    return 1
+  fi
+
+  mkdir -p "${HOME}/.local/bin" "${HOME}/.local/opt"
+  tmpdir="$(mktemp -d)"
+  tarball="${tmpdir}/nvim-linux-${arch}.tar.gz"
+
+  curl -fsSL "https://github.com/neovim/neovim/releases/latest/download/nvim-linux-${arch}.tar.gz" -o "${tarball}"
+  rm -rf "${HOME}/.local/opt/nvim"
+  tar -xzf "${tarball}" -C "${tmpdir}"
+  mv "${tmpdir}/nvim-linux-${arch}" "${HOME}/.local/opt/nvim"
+  ln -sf "${HOME}/.local/opt/nvim/bin/nvim" "${HOME}/.local/bin/nvim"
+  rm -rf "${tmpdir}"
+}
+
+nvim::resolve_bin() {
+  if [ -x "${HOME}/.local/bin/nvim" ]; then
+    echo "${HOME}/.local/bin/nvim"
+    return
+  fi
+
+  command -v nvim
+}
+
+nvim::ensure_modern() {
+  local min_version nvim_bin current_version
+  min_version="${NVIM_MIN_VERSION:-0.11.0}"
+  min_version="${min_version#v}"
+
+  nvim_bin="$(nvim::resolve_bin || true)"
+  if [ -z "${nvim_bin}" ]; then
+    echo "nvim not found; attempting local install" >&2
+    nvim::install_local
+    export PATH="${HOME}/.local/bin:${PATH}"
+    return
+  fi
+
+  current_version="$(nvim::current_version "${nvim_bin}")"
+  if ! nvim::version_ge "${current_version}" "${min_version}"; then
+    echo "Neovim ${current_version} detected; installing >= ${min_version} locally" >&2
+    nvim::install_local
+  fi
+
+  export PATH="${HOME}/.local/bin:${PATH}"
+}
 
 nvim::venvs() {
   if [ ! -d "${HOME}/.config/nvim/py3" ]; then
-    python3 -m venv "${HOME}/.config/nvim/py3"
+    uv venv "${HOME}/.config/nvim/py3"
   fi
 
-  "${HOME}/.config/nvim/py3/bin/python" -m ensurepip --upgrade
-  "${HOME}/.config/nvim/py3/bin/pip3" install --upgrade pip neovim
-}
-
-nvim::plug_installed() {
-  # install vim-plug if not installed
-  if [ ! -e "$HOME"/.vim/autoload/plug.vim ]; then
-    curl -fLo "$HOME"/.vim/autoload/plug.vim --create-dirs \
-      https://raw.githubusercontent.com/junegunn/vim-plug/master/plug.vim
-  fi
+  uv pip install --python "${HOME}/.config/nvim/py3/bin/python" --upgrade pynvim
 }
 
 nvim::update_plugins() {
-  nvim +PlugInstall +PlugUpdate +PlugClean! +qa
+  nvim --headless "+Lazy! sync" +qa
 }
 
 nvim::ensure() {
   mkdir -p "${HOME}/.config/nvim"
+  command -v uv >/dev/null 2>&1 || {
+    echo "uv not found; install it first (hooks/os installs uv in package setup)." >&2
+    return 1
+  }
+
+  nvim::ensure_modern
+  command -v nvim >/dev/null 2>&1 || {
+    echo "nvim not found after bootstrap." >&2
+    return 1
+  }
+
   nvim::venvs
-  nvim::plug_installed
   nvim::update_plugins
 }
 

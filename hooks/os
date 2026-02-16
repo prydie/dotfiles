@@ -27,12 +27,98 @@ gh::download() {
   curl -sfLo "${output}" "https://github.com/${repo}/releases/download/${version}/${artifact}"
 }
 
+uv::ensure_installed() {
+  if command -v uv >/dev/null 2>&1; then
+    log::f "uv already installed: $(uv --version)"
+    return 0
+  fi
+
+  log::f "Installing uv"
+  curl -LsSf https://astral.sh/uv/install.sh | sh
+}
+
+uv::tool_install() {
+  local tool=$1
+  uv tool install --force --upgrade "${tool}"
+}
+
+tools::install_starship() {
+  if command -v starship >/dev/null 2>&1; then
+    log::f "starship already installed: $(starship --version)"
+    return 0
+  fi
+
+  log::f "Installing starship to ${HOME}/.local/bin"
+  mkdir -p "${HOME}/.local/bin"
+  curl -fsSL https://starship.rs/install.sh | sh -s -- -y -b "${HOME}/.local/bin"
+}
+
+nvm::ensure_installed() {
+  local nvm_version
+  nvm_version="${NVM_VERSION:-v0.40.3}"
+  export NVM_DIR="${NVM_DIR:-${HOME}/.nvm}"
+
+  if [ -s "${NVM_DIR}/nvm.sh" ]; then
+    return 0
+  fi
+
+  log::f "Installing nvm ${nvm_version}"
+  git clone https://github.com/nvm-sh/nvm.git "${NVM_DIR}"
+  (
+    cd "${NVM_DIR}"
+    git checkout "${nvm_version}"
+  )
+}
+
+nvm::load() {
+  export NVM_DIR="${NVM_DIR:-${HOME}/.nvm}"
+  if [ ! -s "${NVM_DIR}/nvm.sh" ]; then
+    return 1
+  fi
+
+  # shellcheck source=/dev/null
+  . "${NVM_DIR}/nvm.sh"
+}
+
+nvm::install_node_default() {
+  local node_version
+  node_version="${NVM_NODE_VERSION:-lts/*}"
+
+  nvm::ensure_installed
+  nvm::load
+  nvm install "${node_version}"
+  nvm alias default "${node_version}"
+  nvm use default >/dev/null
+  log::f "Using node $(node --version) and npm $(npm --version)"
+}
+
+docker::ensure_compose() {
+  if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
+    return 0
+  fi
+
+  log::f "Ensuring docker compose v2 is installed"
+  sudo apt update
+  sudo apt install -y --no-install-recommends docker-compose-v2
+}
+
+os::ubuntu::apt_repo_hygiene() {
+  # Clean up stale Docker source entries that point to Ubuntu focal.
+  # These trigger apt warnings on noble and can conflict with the canonical repo config.
+  local stale_repo="/etc/apt/sources.list.d/archive_uri-https_download_docker_com_linux_ubuntu-noble.list"
+  if [ -f "${stale_repo}" ] && grep -q 'download.docker.com/linux/ubuntu focal' "${stale_repo}"; then
+    log::f "Removing stale docker apt source: ${stale_repo}"
+    sudo rm -f "${stale_repo}"
+  fi
+}
+
 os::get_distro() {
+  local uname_lc
   # Determine OS platform
-  UNAME=$(uname | tr "[:upper:]" "[:lower:]")
+  uname_lc=$(uname | tr "[:upper:]" "[:lower:]")
 
   # If Linux, try to determine specific distribution
-  if [ "$UNAME" == "linux" ]; then
+  if [ "${uname_lc}" == "linux" ]; then
     # If available, use LSB to identify distribution
     if [ -f /etc/lsb-release -o -d /etc/lsb-release.d ]; then
       export DISTRO=$(lsb_release -i | cut -d: -f2 | sed s/'^\t'//)
@@ -43,67 +129,154 @@ os::get_distro() {
   fi
 
   # For everything else (or if above failed), just use generic identifier
-  [ "$DISTRO" == "" ] && export DISTRO=$UNAME
-  unset UNAME
+  [ "${DISTRO:-}" == "" ] && export DISTRO="${uname_lc}"
 
   log::f "Detected Linux distrubtion: ${DISTRO}"
 }
 
 kube::binaries() {
-  curl -L -o "$HOME/bin/kubectl" "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
-  ## TODO: Secure me
-  curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
-  curl -s https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh | bash
+  local kube_hooks
+  kube_hooks="${_ROOT}/hooks/kubernetes"
+
+  if [ ! -f "${kube_hooks}" ]; then
+    log::e "kubernetes hook not found at ${kube_hooks}"
+    return 1
+  fi
+
+  BIN_DIR="${HOME}/bin"
+  mkdir -p "${BIN_DIR}"
+
+  # Reuse the canonical installer implementation.
+  # shellcheck source=hooks/kubernetes
+  . "${kube_hooks}"
+  kube::install_kubectl
+
+  log::f "Installed kubectl to ${BIN_DIR}/kubectl"
+  log::f "To install helm/k3d safely, source hooks/kubernetes and run kube::install_helm / kube::install_k3d"
 }
 
 os::ubuntu::install_packages() {
-  log::f "Installing apt packages"
+  os::ubuntu::install_packages_core
+}
+
+os::ubuntu::install_packages_core() {
+  log::f "Installing core apt packages"
+
+  os::ubuntu::apt_repo_hygiene
+
+  local core_packages=(
+    binutils
+    cloudflared
+    cpu-checker
+    curl
+    dnsutils
+    dmsetup
+    fd-find
+    fonts-firacode
+    fzf
+    gawk
+    git
+    gnupg
+    jq
+    libpcsclite-dev
+    libpq-dev
+    neovim
+    net-tools
+    nmap
+    openconnect
+    openssh-client
+    python3-dev
+    python3-full
+    python3-pip
+    python3-venv
+    rclone
+    restic
+    rsync
+    ripgrep
+    ruby
+    silversearcher-ag
+    software-properties-common
+    swig
+    tailscale
+    tcpdump
+    tmux
+    traceroute
+    ufw
+    virtualenv
+    wireguard-tools
+    xclip
+    yq
+    zsh
+  )
 
   sudo apt update
+  sudo apt install -y --no-install-recommends "${core_packages[@]}"
 
-  sudo apt install -y --no-install-recommends \
-    binutils                   \
-    # containerd                 \
-    cpu-checker                \
-    curl                       \
-    dmsetup                    \
-    fonts-firacode             \
-    fzf                        \
-    gawk                       \
-    git                        \
-    gnupg                      \
-    libpcsclite-dev            \
-    libpq-dev                  \
-    neovim                     \
-    net-tools                  \
-    nodejs                     \
-    npm                        \
-    openssh-client             \
-    pipx                       \
-    python3-pip                \
-    python3-dev                \
-    python3-full               \
-    python3-neovim             \
-    python3-venv               \
-    restic                     \
-    ruby                       \
-    silversearcher-ag          \
-    software-properties-common \
-    swig                       \
-    tmux                       \
-    virtualenv                 \
-    xclip                      \
-    zsh
+  uv::ensure_installed
+  tools::install_starship
+  nvm::install_node_default
+  sudo apt install -y --no-install-recommends python3-neovim || true
 
-    if [ -x "$(which snap)" ] ; then
-      log::f "Installing snap packages"
+  # Ubuntu names the package fd-find but many tools expect fd.
+  if command -v fdfind >/dev/null 2>&1 && ! command -v fd >/dev/null 2>&1; then
+    mkdir -p "${HOME}/.local/bin"
+    ln -sf "$(command -v fdfind)" "${HOME}/.local/bin/fd"
+  fi
 
-      sudo snap install go --classic
-      sudo snap install --edge starship
+  # Prefer Docker tooling over containerd/nerdctl.
+  if ! command -v docker >/dev/null 2>&1; then
+    sudo apt install -y --no-install-recommends docker.io docker-buildx docker-compose-v2
+  else
+    log::f "Docker already installed; skipping docker.io package install"
+  fi
+  docker::ensure_compose
 
-      sudo snap install firefox
-      sudo snap connect firefox:u2f-devices # Yubikey support
-    fi
+  if command -v snap >/dev/null 2>&1; then
+    log::f "Installing snap packages"
+    sudo snap install go --classic
+    sudo snap install firefox
+    sudo snap connect firefox:u2f-devices # Yubikey support
+  fi
+}
+
+os::ubuntu::install_packages_dev() {
+  log::f "Installing developer apt packages"
+
+  local dev_packages=(
+    ansible
+    hugo
+    picocom
+    shellcheck
+    shfmt
+  )
+
+  sudo apt update
+  sudo apt install -y --no-install-recommends "${dev_packages[@]}"
+  tools::install_opentofu
+  go::ensure_installed
+  tools::install_awscli
+  tools::install_esp_tools
+  tools::doctl
+
+  # Keep fast-moving JS/Python tooling current from upstream registries.
+  nvm::install_node_default
+  mkdir -p "${HOME}/.local/bin"
+  npm install -g --prefix "${HOME}/.local" \
+    @google/gemini-cli \
+    @openai/codex \
+    @ansible/ansible-language-server \
+    bash-language-server \
+    dockerfile-language-server-nodejs \
+    eslint_d \
+    prettier \
+    pyright \
+    vscode-langservers-extracted \
+    yaml-language-server
+  uv::tool_install black
+  uv::tool_install isort
+  uv::tool_install ruff
+
+  tools::verify_dev_cli
 }
 
 os::set_zoom_scaling_factor () {
@@ -115,12 +288,26 @@ go::install_developer_tools() {
   go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.52.2
 }
 
+go::ensure_installed() {
+  if command -v go >/dev/null 2>&1; then
+    log::f "Go already installed: $(go version)"
+    return 0
+  fi
+
+  if command -v snap >/dev/null 2>&1; then
+    log::f "Installing go from snap"
+    sudo snap install go --classic
+  else
+    log::f "Installing go from apt"
+    sudo apt update
+    sudo apt install -y --no-install-recommends golang-go
+  fi
+}
+
 
 
 # Tools
 #######
-
-go::install_developer_tools
 
 tools::install_terraform() {
   local VERSION=v1.4.6
@@ -129,6 +316,22 @@ tools::install_terraform() {
   out="$(mktemp)"
   curl -sfLo "${out}" "https://releases.hashicorp.com/terraform/${VERSION:1}/terraform_${VERSION:1}_linux_${ARCH}.zip"
   sudo unzip "${out}" -d /usr/local/bin/
+}
+
+tools::install_awscli() {
+  if command -v aws >/dev/null 2>&1; then
+    log::f "AWS CLI already installed: $(aws --version 2>&1 | head -n1)"
+    return 0
+  fi
+
+  if command -v snap >/dev/null 2>&1; then
+    log::f "Installing AWS CLI from snap"
+    sudo snap install aws-cli --classic
+    return 0
+  fi
+
+  log::f "Installing AWS CLI via uv tool"
+  uv::tool_install awscli
 }
 
 tools::install_ansible() {
@@ -160,7 +363,14 @@ tools::nerdctl() {
 }
 
 tools::doctl() {
-  local VERSION=v1.94.0
+  local VERSION latest_json
+  if [ -n "${DOCTL_VERSION:-}" ]; then
+    VERSION="${DOCTL_VERSION}"
+  else
+    latest_json="$(curl -fsSL https://api.github.com/repos/digitalocean/doctl/releases/latest)"
+    VERSION="$(printf '%s\n' "${latest_json}" | sed -n 's/.*"tag_name":[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)"
+    VERSION="${VERSION:-v1.94.0}"
+  fi
 
   local out
   out="$(mktemp)"
@@ -168,6 +378,59 @@ tools::doctl() {
   gh::download "digitalocean/doctl" "${VERSION}" "doctl-${VERSION:1}-linux-${ARCH}.tar.gz" "${out}"
 
   sudo tar Cxzvvf /usr/local/bin "${out}"
+}
+
+tools::install_opentofu() {
+  if command -v tofu >/dev/null 2>&1; then
+    log::f "OpenTofu already installed: $(tofu --version | head -n1)"
+    return 0
+  fi
+
+  log::f "Installing OpenTofu from apt"
+  sudo apt update
+  sudo apt install -y --no-install-recommends tofu
+}
+
+tools::install_esp_tools() {
+  log::f "Installing ESP tools"
+  uv::tool_install esptool
+
+  local idf_root
+  idf_root="${HOME}/.espressif/esp-idf"
+  if [ ! -d "${idf_root}" ]; then
+    mkdir -p "${HOME}/.espressif"
+    git clone --depth 1 https://github.com/espressif/esp-idf.git "${idf_root}"
+  fi
+
+  if [ -f "${idf_root}/tools/idf.py" ]; then
+    mkdir -p "${HOME}/.local/bin"
+    ln -sf "${idf_root}/tools/idf.py" "${HOME}/.local/bin/idf.py"
+    chmod +x "${idf_root}/tools/idf.py" || true
+  fi
+}
+
+tools::verify_one() {
+  local name cmd version_cmd version path
+  name="$1"
+  cmd="$2"
+  version_cmd="$3"
+
+  if command -v "${cmd}" >/dev/null 2>&1; then
+    version="$(eval "${version_cmd}" 2>/dev/null | head -n1)"
+    path="$(command -v "${cmd}")"
+    log::f "${name}: ${version:-version unknown} (${path})"
+  else
+    log::e "${name} not found on PATH"
+  fi
+}
+
+tools::verify_dev_cli() {
+  log::f "Verifying key dev CLIs"
+  tools::verify_one "Codex CLI" "codex" "codex --version"
+  tools::verify_one "Gemini CLI" "gemini" "gemini --version"
+  tools::verify_one "OpenTofu" "tofu" "tofu --version"
+  tools::verify_one "doctl" "doctl" "doctl version"
+  tools::verify_one "AWS CLI" "aws" "aws --version"
 }
 
 tools::dive() {
@@ -215,23 +478,42 @@ tools::cf-terraforming() {
   sudo tar Cxzvvf /usr/local/bin "${out}"
 }
 
-tools::install_terraform
-tools::install_ansible
-tools::install_vegeta
-tools::wireshark
-tools::nerdctl
-# tools::dive # FIXME(apryde): dive only supports docker and that's verboten
-tools::buildkit
-tools::regctl
+tools::uv_basics() {
+  uv::ensure_installed
+  uv::tool_install oci-cli
+  uv::tool_install yubikey-manager # ykman
+  uv::tool_install isort
+  uv::tool_install autopep8
+}
 
-tools::doctl
-tools::cf-terraforming
+tools::full_install() {
+  go::install_developer_tools
+  tools::install_ansible
+  tools::install_vegeta
+  tools::wireshark
+  # tools::dive # FIXME(apryde): dive only supports docker and that's verboten
+  tools::buildkit
+  tools::regctl
+  tools::doctl
+  tools::cf-terraforming
+  tools::uv_basics
+}
 
-pipx install oci-cli
-pipx install yubikey-manager # ykman
-
-pipx install isort
-pipx install autopep8
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  case "${1:-}" in
+    full-install)
+      tools::full_install
+      ;;
+    "")
+      echo "No action selected. Use: $0 full-install"
+      ;;
+    *)
+      echo "Unknown action: $1"
+      echo "Usage: $0 full-install"
+      exit 1
+      ;;
+  esac
+fi
 
 # TODO:
 # - SSLScan (https://github.com/ioerror/sslscan)

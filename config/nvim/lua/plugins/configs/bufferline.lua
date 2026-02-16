@@ -2,7 +2,7 @@ return {
   options = {
     themable = true,
     offsets = {
-      { filetype = "NvimTree", highlight = "NvimTreeNormal" },
+      { filetype = "neo-tree", highlight = "NeoTreeNormal" },
     },
   },
 }

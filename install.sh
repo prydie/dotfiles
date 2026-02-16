@@ -1,13 +1,24 @@
 #!/usr/bin/env bash
 
-set -e -u -o pipefail
+set -euo pipefail
 
 IFS=$'\n\t'
 
-# Bootsrap with RCM
-sudo apt install rcm  # TODO(apryde) yum
+if ! command -v apt-get >/dev/null 2>&1; then
+  echo "This bootstrap script currently supports Debian/Ubuntu (apt-get) only."
+  exit 1
+fi
 
-# Make it our own
-make up -k 2>&1 | tee build.log
+missing_pkgs=0
+command -v git >/dev/null 2>&1 || missing_pkgs=1
+command -v make >/dev/null 2>&1 || missing_pkgs=1
+command -v rcup >/dev/null 2>&1 || missing_pkgs=1
 
-git config pull.ff only       # fast-forward only
+if [ "${missing_pkgs}" -eq 1 ]; then
+  echo "Installing bootstrap packages (git, make, rcm)..."
+  sudo apt-get update
+  sudo apt-get install -y git make rcm
+fi
+
+make up
+git config pull.ff only

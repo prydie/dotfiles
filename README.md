@@ -1,33 +1,92 @@
 # Andrew Pryde's dotfiles
 
-A not particularly well thought through collection of dotfiles.
+Personal dotfiles managed with [`rcm`](https://github.com/thoughtbot/rcm).
 
-## Tools of the trade
+## Scope
 
- - [zsh][1]
- - [zplug][2]
- - [tmux][3]
- - [vim][4]
- - [`rcm`][7]
+This repo contains shell/editor/tmux/git config and optional host bootstrap hooks.
 
-## Installation
+- Safe default: `make up` only links dotfiles.
+- Opt-in setup: `hooks/post-up` can install packages/plugins/tools via flags.
 
- 1. Install [`rcm`][7]
- 2. `make up`
+## Requirements
 
-## Inspiration / plagiarism
+- Linux (Debian/Ubuntu recommended for bootstrap scripts)
+- `git`, `make`, `rcm` (`install.sh` bootstraps these on Debian/Ubuntu)
+- `uv` (installed automatically during package setup)
 
-As with dotfiles everywhere I've begged, borrowed, and stolen snippets from too
-many places to provide a comprehensive list here. Some more notable sources are
-listed below:
+## Quick start
 
- - [nicksp/dotfiles][5]
- - [thoughtbot/dotfiles][6]
+One-line bootstrap (fresh Ubuntu):
 
-[1]: http://zsh.sourceforge.net/
-[2]: https://github.com/zplug/zplug
-[3]: https://tmux.github.io/
-[4]: http://www.vim.org/
-[5]: https://github.com/nicksp/dotfiles
-[6]: https://github.com/thoughtbot/dotfiles
-[7]: https://github.com/thoughtbot/rcm
+```bash
+sudo apt-get update && sudo apt-get install -y git make && git clone https://github.com/andrewpryde/dotfiles.git ~/.dotfiles && cd ~/.dotfiles && ./install.sh
+```
+
+```bash
+./install.sh
+```
+
+Or manually:
+
+```bash
+make up
+```
+
+## Common commands
+
+```bash
+make help
+make up
+make bootstrap-full
+make post-up
+```
+
+## Post-up flags
+
+`hooks/post-up` supports optional setup stages:
+
+- `INSTALL_PACKAGES=1` installs apt/snap packages
+- `PACKAGE_PROFILE=core|dev` chooses package tier (`core` default, `dev` installs core+dev)
+- `INSTALL_NVIM=1` runs Neovim bootstrap
+- `FULL_SETUP=1` runs extra heavy tool installers from `hooks/os`
+
+Python tooling is managed with `uv` (virtualenv + tool installs).
+Node tooling is managed with `nvm` (`NVM_NODE_VERSION` defaults to `lts/*`).
+`dev` profile includes `ansible`, `go`, `tofu` (OpenTofu), `doctl`, `aws`, `hugo`, `picocom`, Codex CLI (`@openai/codex`), Gemini CLI (`@google/gemini-cli`), and ESP tooling (`esptool` + `idf.py` bootstrap).
+Docker Compose v2 (`docker compose`) is ensured; use OpenTofu (`tofu`) instead of Terraform.
+Infra/network baseline is part of default `core` install (`tailscale`, `cloudflared`, `openconnect`, `wireguard-tools`, `nmap`, `tcpdump`, `dnsutils`, `jq`, `yq`, `traceroute`, `ufw`, `rsync`, `restic`, `rclone`).
+`post-up` also bootstraps zplug plugin installs and TPM; `INSTALL_NVIM=1` ensures Neovim >= `0.11.0` (local install fallback) and runs headless lazy.nvim sync.
+
+Examples:
+
+```bash
+INSTALL_PACKAGES=1 make post-up
+INSTALL_PACKAGES=1 PACKAGE_PROFILE=core make post-up
+INSTALL_PACKAGES=1 PACKAGE_PROFILE=dev make post-up
+NVM_NODE_VERSION=lts/* INSTALL_PACKAGES=1 PACKAGE_PROFILE=dev make post-up
+INSTALL_PACKAGES=1 INSTALL_NVIM=1 make post-up
+INSTALL_PACKAGES=1 INSTALL_NVIM=1 FULL_SETUP=1 make post-up
+```
+
+## Kubernetes installers (no `curl | bash`)
+
+For explicit, pinned installers with checksum verification:
+
+```bash
+source hooks/kubernetes
+kube::install_kubectl
+kube::install_helm
+kube::install_k3d
+```
+
+## Safety notes
+
+- Destructive cleanup is guarded and requires `ALLOW_DESTRUCTIVE=1`.
+- Host package/tool installation is opt-in, never implicit.
+- `hooks/os` no longer auto-runs installers when sourced.
+
+## Inspiration
+
+- https://github.com/nicksp/dotfiles
+- https://github.com/thoughtbot/dotfiles

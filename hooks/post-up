@@ -1,39 +1,77 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # vim: set ft=sh:
 
-_ROOT=$(dirname "${BASH_SOURCE}")/..
+set -euo pipefail
 
-touch "$HOME"/.psqlrc.local
+_ROOT="$(dirname "${BASH_SOURCE[0]}")/.."
 
-. ${_ROOT}/hooks/os
+# Optional flags:
+# - INSTALL_PACKAGES=1 : run distro package installation
+# - PACKAGE_PROFILE=core|dev : package profile to apply when INSTALL_PACKAGES=1
+# - NVM_NODE_VERSION=<version> : node version for nvm (default: lts/*)
+# - INSTALL_NVIM=1     : run Neovim plugin/bootstrap setup
+# - FULL_SETUP=1       : run extra toolchain installers from hooks/os
+INSTALL_PACKAGES="${INSTALL_PACKAGES:-0}"
+PACKAGE_PROFILE="${PACKAGE_PROFILE:-core}"
+INSTALL_NVIM="${INSTALL_NVIM:-0}"
+FULL_SETUP="${FULL_SETUP:-0}"
+
+touch "$HOME/.psqlrc.local"
+
+. "${_ROOT}/hooks/os"
 
 os::get_distro
 
-if [[ $DISTRO =~ ^(Ubuntu|debian) ]]; then
-      log::f "Ubuntu detected, installing packages"
-
-      os::ubuntu::install_packages
-else
-    log::e "Unspported distribution ${DISTRO}"
+if [[ "${INSTALL_PACKAGES}" == "1" ]]; then
+  if [[ "${DISTRO}" =~ ^(Ubuntu|debian) ]]; then
+    log::f "Ubuntu/debian detected, installing packages profile=${PACKAGE_PROFILE}"
+    case "${PACKAGE_PROFILE}" in
+      core)
+        os::ubuntu::install_packages_core
+        ;;
+      dev)
+        os::ubuntu::install_packages_core
+        os::ubuntu::install_packages_dev
+        ;;
+      *)
+        log::e "Unknown PACKAGE_PROFILE=${PACKAGE_PROFILE}. Supported: core, dev"
+        exit 1
+        ;;
+    esac
+  else
+    log::e "Unsupported distribution ${DISTRO}"
     exit 1
+  fi
+else
+  log::f "Skipping package installation (set INSTALL_PACKAGES=1 to enable)"
 fi
-
 
 # install zplug if not installed
 if [ ! -d "$HOME/.zplug" ]; then
-  git clone https://github.com/zplug/zplug ~/.zplug
-  source ~/.zplug/init.zsh
-  zplug update --self
+  git clone https://github.com/zplug/zplug "$HOME/.zplug"
+fi
+if [ -s "$HOME/.zplug/init.zsh" ]; then
+  # Install zplug plugins non-interactively so shell setup is fully bootstrapped.
+  zsh -lc 'source "$HOME/.zplug/init.zsh"; zplug check || zplug install' || true
 fi
 
-# TODO: yarn and node via nvm
-
 if [ ! -d "$HOME/.tmux/plugins/tpm" ]; then
-  git clone https://github.com/tmux-plugins/tpm ~/.tmux/plugins/tpm && ~/.tmux/plugins/tpm/bin/install_plugins
+  git clone https://github.com/tmux-plugins/tpm "$HOME/.tmux/plugins/tpm"
+  "$HOME/.tmux/plugins/tpm/bin/install_plugins"
 fi
 
 if [ -f "$HOME/.config/zoomus.conf" ]; then
-    os::set_zoom_scaling_factor
+  os::set_zoom_scaling_factor
 fi
 
-. ${_ROOT}/hooks/nvim
+if [[ "${INSTALL_NVIM}" == "1" ]]; then
+  . "${_ROOT}/hooks/nvim"
+else
+  log::f "Skipping Neovim bootstrap (set INSTALL_NVIM=1 to enable)"
+fi
+
+if [[ "${FULL_SETUP}" == "1" ]]; then
+  tools::full_install
+else
+  log::f "Skipping full tool installation (set FULL_SETUP=1 to enable)"
+fi

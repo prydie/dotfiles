@@ -1,12 +1,30 @@
 #!/usr/bin/env bash
 # vim: set ft=sh sw=2 et
 
-set -euf -o pipefail
+set -euo pipefail
 
 BIN_DIR="${BUILD_DIR:-/usr/local/bin}"
 
 export GOARCH
 GOARCH=$(go env GOARCH 2>/dev/null || echo "amd64")
+
+kube::arch() {
+  case "$(uname -m)" in
+    x86_64|amd64) echo "amd64" ;;
+    aarch64|arm64) echo "arm64" ;;
+    *)
+      echo "unsupported architecture: $(uname -m)" >&2
+      return 1
+      ;;
+  esac
+}
+
+kube::require_bin() {
+  command -v "$1" >/dev/null 2>&1 || {
+    echo "missing required command: $1" >&2
+    return 1
+  }
+}
 
 kube::install_cni_plugins() {
   local CNI_VERSION=v0.9.1
@@ -27,12 +45,69 @@ kube::install_cni_plugins() {
 kube::install_kubectl() {
   local out
   out="$(mktemp)"
-  curl -L -o "${out}" "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+  curl -fsSL -o "${out}" "https://dl.k8s.io/release/$(curl -fsSL https://dl.k8s.io/release/stable.txt)/bin/linux/$(kube::arch)/kubectl"
   chmod +x "${out}"
-  sudo mv "${out}" "${BIN_DIR}"
+  sudo install -m 0755 "${out}" "${BIN_DIR}/kubectl"
 }
 
-## TODO: Secure me
-curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
-curl -s https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh | bash
+kube::install_helm() {
+  kube::require_bin curl
+  kube::require_bin sha256sum
+  kube::require_bin tar
 
+  local version arch tmp checksum_file tarball expected
+  version="${HELM_VERSION:-v3.17.0}"
+  arch="$(kube::arch)"
+  tmp="$(mktemp -d)"
+  tarball="${tmp}/helm.tar.gz"
+  checksum_file="${tmp}/helm.sha256"
+
+  curl -fsSL -o "${tarball}" "https://get.helm.sh/helm-${version}-linux-${arch}.tar.gz"
+  curl -fsSL -o "${checksum_file}" "https://get.helm.sh/helm-${version}-linux-${arch}.tar.gz.sha256sum"
+
+  expected="$(awk '{print $1}' "${checksum_file}")"
+  printf "%s  %s\n" "${expected}" "${tarball}" | sha256sum -c -
+
+  tar -xzf "${tarball}" -C "${tmp}"
+  sudo install -m 0755 "${tmp}/linux-${arch}/helm" "${BIN_DIR}/helm"
+  rm -rf "${tmp}"
+}
+
+kube::install_k3d() {
+  kube::require_bin curl
+  kube::require_bin sha256sum
+
+  local version arch tmp binary checksum_file expected
+  version="${K3D_VERSION:-v5.7.5}"
+  arch="$(kube::arch)"
+  tmp="$(mktemp -d)"
+  binary="${tmp}/k3d"
+  checksum_file="${tmp}/checksums.txt"
+
+  curl -fsSL -o "${binary}" "https://github.com/k3d-io/k3d/releases/download/${version}/k3d-linux-${arch}"
+  curl -fsSL -o "${checksum_file}" "https://github.com/k3d-io/k3d/releases/download/${version}/checksums.txt"
+
+  expected="$(awk '/k3d-linux-'"${arch}"'$/ {print $1}' "${checksum_file}")"
+  if [ -z "${expected}" ]; then
+    echo "failed to find checksum for k3d-linux-${arch} in ${version}" >&2
+    return 1
+  fi
+  printf "%s  %s\n" "${expected}" "${binary}" | sha256sum -c -
+
+  chmod +x "${binary}"
+  sudo install -m 0755 "${binary}" "${BIN_DIR}/k3d"
+  rm -rf "${tmp}"
+}
+
+kube::install_notes() {
+  cat <<'EOF'
+Installers are explicit and never auto-run:
+  - kube::install_kubectl
+  - kube::install_helm
+  - kube::install_k3d
+
+Example:
+  source hooks/kubernetes
+  kube::install_helm
+EOF
+}
