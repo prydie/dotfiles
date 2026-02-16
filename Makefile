@@ -36,6 +36,11 @@ bootstrap-full: ## Install bootstrap deps, link dotfiles, install core packages,
 	@bash install.sh
 	@INSTALL_PACKAGES=1 PACKAGE_PROFILE=core INSTALL_NVIM=1 make post-up
 
+.PHONY: bootstrap-all
+bootstrap-all: ## Install bootstrap deps, link dotfiles, and run full dev setup (packages, Neovim, toolchain)
+	@bash install.sh
+	@INSTALL_PACKAGES=1 PACKAGE_PROFILE=dev INSTALL_NVIM=1 FULL_SETUP=1 make post-up
+
 .PHONY: clean-local-bin
 clean-local-bin: ## Remove ~/.local/bin
 	@rm -rf "$(HOME)/.local/bin"
