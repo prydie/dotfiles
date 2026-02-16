@@ -176,7 +176,7 @@ desktop::status_one() {
 }
 
 desktop::ensure_universe_repo() {
-  local candidate candidate2 policy_output
+  local source_files
   if [ "${DISTRO:-}" != "Ubuntu" ]; then
     return 0
   fi
@@ -185,11 +185,8 @@ desktop::ensure_universe_repo() {
     return 0
   fi
 
-  policy_output="$(apt-cache policy gnome-shell-extension-clipboard-indicator 2>/dev/null || true)"
-  candidate="$(awk '/Candidate:/ {print $2; exit}' <<<"${policy_output}")"
-  policy_output="$(apt-cache policy gnome-shell-extension-caffeine 2>/dev/null || true)"
-  candidate2="$(awk '/Candidate:/ {print $2; exit}' <<<"${policy_output}")"
-  if { [ -n "${candidate}" ] && [ "${candidate}" != "(none)" ]; } || { [ -n "${candidate2}" ] && [ "${candidate2}" != "(none)" ]; }; then
+  source_files="$(grep -RhsE '^[[:space:]]*deb .*ubuntu.* universe([[:space:]]|$)' /etc/apt/sources.list /etc/apt/sources.list.d/*.list 2>/dev/null || true)"
+  if [ -n "${source_files}" ]; then
     return 0
   fi
 
@@ -238,13 +235,16 @@ desktop::ensure_desktop_extensions_enabled() {
 }
 
 desktop::status_clipboard_and_caffeine() {
+  local enabled_extensions
   desktop::status_one "xclip" "xclip"
   desktop::status_one "xsel" "xsel"
   desktop::status_one "wl-clipboard" "wl-paste"
   desktop::status_one "Caffeine" "caffeine"
   if command -v gnome-extensions >/dev/null 2>&1; then
+    enabled_extensions="$(gsettings get org.gnome.shell enabled-extensions 2>/dev/null || true)"
+
     if gnome-extensions list 2>/dev/null | grep -Fxq "clipboard-indicator@tudmotu.com"; then
-      if gnome-extensions info "clipboard-indicator@tudmotu.com" 2>/dev/null | grep -q '^State: ENABLED$'; then
+      if grep -Fq "clipboard-indicator@tudmotu.com" <<<"${enabled_extensions}"; then
         log::f "Clipboard Indicator extension: enabled"
       else
         log::f "Clipboard Indicator extension: installed but disabled"
@@ -254,7 +254,7 @@ desktop::status_clipboard_and_caffeine() {
     fi
 
     if gnome-extensions list 2>/dev/null | grep -Fxq "caffeine@patapon.info"; then
-      if gnome-extensions info "caffeine@patapon.info" 2>/dev/null | grep -q '^State: ENABLED$'; then
+      if grep -Fq "caffeine@patapon.info" <<<"${enabled_extensions}"; then
         log::f "Caffeine extension: enabled"
       else
         log::f "Caffeine extension: installed but disabled"
