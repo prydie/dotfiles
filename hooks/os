@@ -185,89 +185,82 @@ desktop::ensure_universe_repo() {
     return 0
   fi
 
-  policy_output="$(apt-cache policy gpaste 2>/dev/null || true)"
+  policy_output="$(apt-cache policy gnome-shell-extension-clipboard-indicator 2>/dev/null || true)"
   candidate="$(awk '/Candidate:/ {print $2; exit}' <<<"${policy_output}")"
-  policy_output="$(apt-cache policy gpaste-2 2>/dev/null || true)"
+  policy_output="$(apt-cache policy gnome-shell-extension-caffeine 2>/dev/null || true)"
   candidate2="$(awk '/Candidate:/ {print $2; exit}' <<<"${policy_output}")"
   if { [ -n "${candidate}" ] && [ "${candidate}" != "(none)" ]; } || { [ -n "${candidate2}" ] && [ "${candidate2}" != "(none)" ]; }; then
     return 0
   fi
 
-  log::f "Enabling Ubuntu universe repository for desktop packages (gpaste)"
+  log::f "Enabling Ubuntu universe repository for desktop packages"
   sudo add-apt-repository -y universe
   sudo apt update
 }
 
 desktop::install_clipboard_and_caffeine() {
-  # Install a practical clipboard toolset and caffeine app when available.
+  # Install clipboard utilities plus GNOME clipboard/caffeine extensions.
   desktop::ensure_universe_repo
-  apt::install_if_available wl-clipboard xsel gpaste-2 gpaste gpaste-ui gnome-shell-extension-gpaste caffeine
+  apt::install_if_available \
+    wl-clipboard \
+    xsel \
+    gnome-shell-extension-clipboard-indicator \
+    gnome-shell-extension-caffeine \
+    caffeine
 }
 
-desktop::ensure_gpaste_running() {
-  local daemon_bin
-  daemon_bin=""
+desktop::ensure_gnome_extension_enabled() {
+  local extension_id
+  extension_id="$1"
 
-  # Prefer user service management first; package/binary names can vary by distro.
-  if command -v systemctl >/dev/null 2>&1 && systemctl --user status gpaste-daemon.service >/dev/null 2>&1; then
-    systemctl --user enable --now gpaste-daemon.service >/dev/null 2>&1 || true
-    if pgrep -x gpaste-daemon >/dev/null 2>&1 || pgrep -x gpaste-daemon-2 >/dev/null 2>&1; then
-      log::f "GPaste daemon started via user service"
-      return 0
-    fi
-  fi
-
-  if command -v gpaste-daemon >/dev/null 2>&1; then
-    daemon_bin="gpaste-daemon"
-  elif command -v gpaste-daemon-2 >/dev/null 2>&1; then
-    daemon_bin="gpaste-daemon-2"
-  fi
-
-  if [ -z "${daemon_bin}" ]; then
-    log::f "GPaste daemon binary not found; skipping auto-start"
+  if ! command -v gnome-extensions >/dev/null 2>&1; then
     return 0
   fi
 
-  if pgrep -x "${daemon_bin}" >/dev/null 2>&1; then
+  if ! gnome-extensions list 2>/dev/null | grep -Fxq "${extension_id}"; then
     return 0
   fi
 
-  if ! pgrep -x "${daemon_bin}" >/dev/null 2>&1; then
-    nohup "${daemon_bin}" >/dev/null 2>&1 &
-    sleep 1
+  if gnome-extensions info "${extension_id}" 2>/dev/null | grep -q '^State: ENABLED$'; then
+    return 0
   fi
 
-  if pgrep -x "${daemon_bin}" >/dev/null 2>&1; then
-    log::f "GPaste daemon started"
+  if gnome-extensions enable "${extension_id}" >/dev/null 2>&1; then
+    log::f "Enabled GNOME extension: ${extension_id}"
   else
-    log::f "GPaste daemon not running; launch manually with: ${daemon_bin}"
+    log::f "Could not enable GNOME extension automatically: ${extension_id}"
   fi
+}
+
+desktop::ensure_desktop_extensions_enabled() {
+  desktop::ensure_gnome_extension_enabled "clipboard-indicator@tudmotu.com"
+  desktop::ensure_gnome_extension_enabled "caffeine@patapon.info"
 }
 
 desktop::status_clipboard_and_caffeine() {
   desktop::status_one "xclip" "xclip"
   desktop::status_one "xsel" "xsel"
   desktop::status_one "wl-clipboard" "wl-paste"
-  if command -v gpaste-client >/dev/null 2>&1; then
-    desktop::status_one "GPaste" "gpaste-client"
-  else
-    desktop::status_one "GPaste" "gpaste-client-2"
-  fi
   desktop::status_one "Caffeine" "caffeine"
-
-  if command -v gpaste-client >/dev/null 2>&1 || command -v gpaste-client-2 >/dev/null 2>&1; then
-    if pgrep -x gpaste-daemon >/dev/null 2>&1 || pgrep -x gpaste-daemon-2 >/dev/null 2>&1; then
-      log::f "GPaste daemon: running"
+  if command -v gnome-extensions >/dev/null 2>&1; then
+    if gnome-extensions list 2>/dev/null | grep -Fxq "clipboard-indicator@tudmotu.com"; then
+      if gnome-extensions info "clipboard-indicator@tudmotu.com" 2>/dev/null | grep -q '^State: ENABLED$'; then
+        log::f "Clipboard Indicator extension: enabled"
+      else
+        log::f "Clipboard Indicator extension: installed but disabled"
+      fi
     else
-      log::f "GPaste daemon: not running"
+      log::f "Clipboard Indicator extension: not installed"
     fi
-  fi
 
-  if command -v caffeine >/dev/null 2>&1; then
-    if pgrep -fa 'caffeine|caffeine-indicator' >/dev/null 2>&1; then
-      log::f "Caffeine process: running"
+    if gnome-extensions list 2>/dev/null | grep -Fxq "caffeine@patapon.info"; then
+      if gnome-extensions info "caffeine@patapon.info" 2>/dev/null | grep -q '^State: ENABLED$'; then
+        log::f "Caffeine extension: enabled"
+      else
+        log::f "Caffeine extension: installed but disabled"
+      fi
     else
-      log::f "Caffeine process: not running"
+      log::f "Caffeine extension: not installed"
     fi
   fi
 }
@@ -584,7 +577,7 @@ os::ubuntu::install_packages_core() {
   apt::install_if_available "${core_packages[@]}"
   apt::install_if_available cloudflared tailscale
   desktop::install_clipboard_and_caffeine
-  desktop::ensure_gpaste_running
+  desktop::ensure_desktop_extensions_enabled
 
   uv::ensure_installed
   tools::install_starship
