@@ -88,6 +88,20 @@ nvm::load() {
   . "${NVM_DIR}/nvm.sh"
 }
 
+nvm::link_default_node_binaries() {
+  local default_node_bin default_node_root
+  default_node_bin="$(nvm which default 2>/dev/null || true)"
+  if [ -z "${default_node_bin}" ] || [ "${default_node_bin}" = "N/A" ]; then
+    return 0
+  fi
+
+  default_node_root="${default_node_bin%/bin/node}"
+  mkdir -p "${HOME}/.local/bin"
+  ln -sf "${default_node_root}/bin/node" "${HOME}/.local/bin/node"
+  ln -sf "${default_node_root}/bin/npm" "${HOME}/.local/bin/npm"
+  ln -sf "${default_node_root}/bin/npx" "${HOME}/.local/bin/npx"
+}
+
 nvm::install_node_default() {
   local node_version
   node_version="${NVM_NODE_VERSION:-lts/*}"
@@ -97,6 +111,7 @@ nvm::install_node_default() {
   nvm install "${node_version}"
   nvm alias default "${node_version}"
   nvm use default >/dev/null
+  nvm::link_default_node_binaries
   log::f "Using node $(node --version) and npm $(npm --version)"
 }
 
