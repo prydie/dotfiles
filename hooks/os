@@ -102,6 +102,29 @@ docker::ensure_compose() {
   sudo apt install -y --no-install-recommends docker-compose-v2
 }
 
+apt::install_if_available() {
+  local packages=("$@")
+  local available=()
+  local skipped=()
+  local pkg
+
+  for pkg in "${packages[@]}"; do
+    if apt-cache show "${pkg}" >/dev/null 2>&1; then
+      available+=("${pkg}")
+    else
+      skipped+=("${pkg}")
+    fi
+  done
+
+  if [ "${#available[@]}" -gt 0 ]; then
+    sudo apt install -y --no-install-recommends "${available[@]}"
+  fi
+
+  if [ "${#skipped[@]}" -gt 0 ]; then
+    log::f "Skipping unavailable apt packages: ${skipped[*]}"
+  fi
+}
+
 os::ubuntu::apt_repo_hygiene() {
   # Clean up stale Docker source entries that point to Ubuntu focal.
   # These trigger apt warnings on noble and can conflict with the canonical repo config.
@@ -249,7 +272,6 @@ os::ubuntu::install_packages_core() {
 
   local core_packages=(
     binutils
-    cloudflared
     cpu-checker
     curl
     dnsutils
@@ -280,7 +302,6 @@ os::ubuntu::install_packages_core() {
     silversearcher-ag
     software-properties-common
     swig
-    tailscale
     tcpdump
     tmux
     traceroute
@@ -294,7 +315,8 @@ os::ubuntu::install_packages_core() {
   )
 
   sudo apt update
-  sudo apt install -y --no-install-recommends "${core_packages[@]}"
+  apt::install_if_available "${core_packages[@]}"
+  apt::install_if_available cloudflared tailscale
 
   uv::ensure_installed
   tools::install_starship
