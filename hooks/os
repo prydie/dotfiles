@@ -176,7 +176,7 @@ desktop::status_one() {
 }
 
 desktop::ensure_universe_repo() {
-  local source_files
+  local source_files source_components
   if [ "${DISTRO:-}" != "Ubuntu" ]; then
     return 0
   fi
@@ -186,7 +186,8 @@ desktop::ensure_universe_repo() {
   fi
 
   source_files="$(grep -RhsE '^[[:space:]]*deb .*ubuntu.* universe([[:space:]]|$)' /etc/apt/sources.list /etc/apt/sources.list.d/*.list 2>/dev/null || true)"
-  if [ -n "${source_files}" ]; then
+  source_components="$(grep -RhsE '^[[:space:]]*Components:.*(^|[[:space:]])universe([[:space:]]|$)' /etc/apt/sources.list.d/*.sources 2>/dev/null || true)"
+  if [ -n "${source_files}" ] || [ -n "${source_components}" ]; then
     return 0
   fi
 
