@@ -125,6 +125,67 @@ apt::install_if_available() {
   fi
 }
 
+os::debian_codename() {
+  if command -v lsb_release >/dev/null 2>&1; then
+    lsb_release -cs
+    return 0
+  fi
+
+  if [ -r /etc/os-release ]; then
+    # shellcheck disable=SC1091
+    . /etc/os-release
+    if [ -n "${VERSION_CODENAME:-}" ]; then
+      echo "${VERSION_CODENAME}"
+      return 0
+    fi
+  fi
+
+  return 1
+}
+
+os::ubuntu::ensure_cloudflared_repo() {
+  local keyring listfile
+  keyring="/usr/share/keyrings/cloudflare-main.gpg"
+  listfile="/etc/apt/sources.list.d/cloudflared.list"
+
+  if [ ! -f "${keyring}" ]; then
+    curl -fsSL https://pkg.cloudflare.com/cloudflare-main.gpg | sudo gpg --dearmor -o "${keyring}"
+  fi
+
+  if [ ! -f "${listfile}" ] || ! grep -q 'pkg.cloudflare.com/cloudflared' "${listfile}" 2>/dev/null; then
+    echo "deb [signed-by=${keyring}] https://pkg.cloudflare.com/cloudflared any main" | sudo tee "${listfile}" >/dev/null
+  fi
+}
+
+os::ubuntu::ensure_tailscale_repo() {
+  local codename distro_path key_url list_url keyring listfile
+  codename="$(os::debian_codename || true)"
+  if [ -z "${codename}" ]; then
+    log::f "Skipping tailscale repo setup: unable to determine distro codename"
+    return 0
+  fi
+
+  keyring="/usr/share/keyrings/tailscale-archive-keyring.gpg"
+  listfile="/etc/apt/sources.list.d/tailscale.list"
+
+  case "${DISTRO}" in
+    Ubuntu) distro_path="ubuntu" ;;
+    debian) distro_path="debian" ;;
+    *) distro_path="ubuntu" ;;
+  esac
+
+  key_url="https://pkgs.tailscale.com/stable/${distro_path}/${codename}.noarmor.gpg"
+  list_url="https://pkgs.tailscale.com/stable/${distro_path}/${codename}.tailscale-keyring.list"
+
+  if [ ! -f "${keyring}" ]; then
+    curl -fsSL "${key_url}" | sudo tee "${keyring}" >/dev/null
+  fi
+
+  if [ ! -f "${listfile}" ] || ! grep -q 'pkgs.tailscale.com' "${listfile}" 2>/dev/null; then
+    curl -fsSL "${list_url}" | sudo tee "${listfile}" >/dev/null
+  fi
+}
+
 os::ubuntu::apt_repo_hygiene() {
   # Clean up stale Docker source entries that point to Ubuntu focal.
   # These trigger apt warnings on noble and can conflict with the canonical repo config.
@@ -269,6 +330,8 @@ os::ubuntu::install_packages_core() {
   log::f "Installing core apt packages"
 
   os::ubuntu::apt_repo_hygiene
+  os::ubuntu::ensure_cloudflared_repo
+  os::ubuntu::ensure_tailscale_repo
 
   local core_packages=(
     binutils
