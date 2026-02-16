@@ -309,6 +309,34 @@ os::ensure_zsh() {
   log::f "zsh not found and no supported installer for DISTRO=${DISTRO:-unknown}"
 }
 
+os::ensure_user_shell_zsh() {
+  local desired_shell current_shell user_name
+  desired_shell="$(command -v zsh || true)"
+  user_name="${USER:-$(id -un)}"
+
+  if [ -z "${desired_shell}" ]; then
+    log::f "Skipping default shell update: zsh binary not found"
+    return 0
+  fi
+
+  current_shell="$(getent passwd "${user_name}" | cut -d: -f7)"
+  if [ "${current_shell}" = "${desired_shell}" ]; then
+    return 0
+  fi
+
+  if ! command -v chsh >/dev/null 2>&1; then
+    log::f "Skipping default shell update: chsh command unavailable"
+    return 0
+  fi
+
+  if chsh -s "${desired_shell}" "${user_name}"; then
+    log::f "Updated login shell for ${user_name} to ${desired_shell}"
+    log::f "Open a new terminal session to use zsh as the default shell"
+  else
+    log::f "Unable to update login shell automatically; run: chsh -s ${desired_shell}"
+  fi
+}
+
 fonts::install_nerd_font() {
   local font_name version fonts_dir font_dir tmpdir tarball zipball
   font_name="${NERD_FONT_NAME:-FiraCode}"

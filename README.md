@@ -56,6 +56,7 @@ make post-up
 - `PACKAGE_PROFILE=core|dev` chooses package tier (`core` default, `dev` installs core+dev)
 - `INSTALL_NVIM=1` runs Neovim bootstrap
 - `FULL_SETUP=1` runs extra heavy tool installers from `hooks/os`
+- `SET_ZSH_DEFAULT=0` skips setting your login shell to `zsh` (default behavior is to set it)
 
 Python tooling is managed with `uv` (virtualenv + tool installs).
 Node tooling is managed with `nvm` (`NVM_NODE_VERSION` defaults to `lts/*`).

@@ -15,6 +15,7 @@ INSTALL_PACKAGES="${INSTALL_PACKAGES:-0}"
 PACKAGE_PROFILE="${PACKAGE_PROFILE:-core}"
 INSTALL_NVIM="${INSTALL_NVIM:-0}"
 FULL_SETUP="${FULL_SETUP:-0}"
+SET_ZSH_DEFAULT="${SET_ZSH_DEFAULT:-1}"
 
 touch "$HOME/.psqlrc.local"
 
@@ -22,6 +23,11 @@ touch "$HOME/.psqlrc.local"
 
 os::get_distro
 os::ensure_zsh
+if [[ "${SET_ZSH_DEFAULT}" == "1" ]]; then
+  os::ensure_user_shell_zsh
+else
+  log::f "Skipping login shell update (set SET_ZSH_DEFAULT=1 to enable)"
+fi
 
 if [[ "${INSTALL_PACKAGES}" == "1" ]]; then
   if [[ "${DISTRO}" =~ ^(Ubuntu|debian) ]]; then
