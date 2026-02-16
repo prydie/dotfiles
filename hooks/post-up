@@ -51,8 +51,12 @@ if [ ! -d "$HOME/.zplug" ]; then
   git clone https://github.com/zplug/zplug "$HOME/.zplug"
 fi
 if [ -s "$HOME/.zplug/init.zsh" ]; then
-  # Install zplug plugins non-interactively so shell setup is fully bootstrapped.
-  zsh -lc 'source "$HOME/.zplug/init.zsh"; zplug check || zplug install' || true
+  if command -v zsh >/dev/null 2>&1; then
+    # Install zplug plugins non-interactively so shell setup is fully bootstrapped.
+    zsh -lc 'source "$HOME/.zplug/init.zsh"; zplug check || zplug install' || true
+  else
+    log::f "Skipping zplug bootstrap: zsh not installed (install zsh or run with INSTALL_PACKAGES=1)"
+  fi
 fi
 
 if [ ! -d "$HOME/.tmux/plugins/tpm" ]; then
