@@ -655,8 +655,12 @@ os::set_zoom_scaling_factor () {
 }
 
 go::install_developer_tools() {
-  go get -u github.com/goware/modvendor
-  go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.52.2
+  local modvendor_version golangci_lint_version
+  modvendor_version="${MODVENDOR_VERSION:-v0.5.0}"
+  golangci_lint_version="${GOLANGCI_LINT_VERSION:-v1.52.2}"
+
+  go install "github.com/goware/modvendor@${modvendor_version}"
+  go install "github.com/golangci/golangci-lint/cmd/golangci-lint@${golangci_lint_version}"
 }
 
 go::ensure_installed() {
@@ -712,7 +716,18 @@ tools::install_ansible() {
 }
 
 tools::install_vegeta() {
-  go install github.com/tsenart/vegeta@latest
+  local vegeta_version fallback_version
+  vegeta_version="${VEGETA_VERSION:-latest}"
+  fallback_version="${VEGETA_FALLBACK_VERSION:-v12.11.1}"
+
+  if go install "github.com/tsenart/vegeta@${vegeta_version}"; then
+    return 0
+  fi
+
+  log::f "vegeta@${vegeta_version} install failed; retrying ${fallback_version} for older Go toolchains"
+  if ! go install "github.com/tsenart/vegeta@${fallback_version}"; then
+    log::f "Skipping vegeta install: compatible version could not be installed with current Go toolchain"
+  fi
 }
 
 tools::wireshark() {
