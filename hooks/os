@@ -134,6 +134,57 @@ os::get_distro() {
   log::f "Detected Linux distrubtion: ${DISTRO}"
 }
 
+os::ensure_zsh() {
+  if command -v zsh >/dev/null 2>&1; then
+    return 0
+  fi
+
+  if [[ "${DISTRO:-}" =~ ^(Ubuntu|debian)$ ]] && command -v apt-get >/dev/null 2>&1; then
+    log::f "zsh not found; installing via apt"
+    sudo apt update
+    sudo apt install -y --no-install-recommends zsh
+    return 0
+  fi
+
+  log::f "zsh not found and no supported installer for DISTRO=${DISTRO:-unknown}"
+}
+
+fonts::install_nerd_font() {
+  local font_name version fonts_dir font_dir tmpdir tarball zipball
+  font_name="${NERD_FONT_NAME:-JetBrainsMono}"
+  version="${NERD_FONT_VERSION:-v3.4.0}"
+  fonts_dir="${HOME}/.local/share/fonts"
+  font_dir="${fonts_dir}/NerdFonts/${font_name}"
+  tmpdir="$(mktemp -d)"
+  tarball="${tmpdir}/${font_name}.tar.xz"
+  zipball="${tmpdir}/${font_name}.zip"
+
+  if [ -d "${font_dir}" ] && find "${font_dir}" -type f -name '*Nerd Font*.ttf' | grep -q .; then
+    log::f "Nerd Font already installed at ${font_dir}"
+    rm -rf "${tmpdir}"
+    return 0
+  fi
+
+  mkdir -p "${font_dir}"
+
+  if curl -fsSL "https://github.com/ryanoasis/nerd-fonts/releases/download/${version}/${font_name}.tar.xz" -o "${tarball}"; then
+    tar -xJf "${tarball}" -C "${font_dir}"
+  else
+    log::f "tar.xz artifact unavailable; trying zip fallback"
+    curl -fsSL "https://github.com/ryanoasis/nerd-fonts/releases/download/${version}/${font_name}.zip" -o "${zipball}"
+    unzip -q "${zipball}" -d "${font_dir}"
+  fi
+
+  find "${font_dir}" -type f \( -name '*.md' -o -name 'LICENSE' -o -name '*.txt' \) -delete
+
+  if command -v fc-cache >/dev/null 2>&1; then
+    fc-cache -f "${fonts_dir}" || true
+  fi
+
+  rm -rf "${tmpdir}"
+  log::f "Installed ${font_name} Nerd Font (${version}) to ${font_dir}"
+}
+
 kube::binaries() {
   local kube_hooks
   kube_hooks="${_ROOT}/hooks/kubernetes"
@@ -202,6 +253,7 @@ os::ubuntu::install_packages_core() {
     tmux
     traceroute
     ufw
+    unzip
     virtualenv
     wireguard-tools
     xclip
@@ -214,6 +266,7 @@ os::ubuntu::install_packages_core() {
 
   uv::ensure_installed
   tools::install_starship
+  fonts::install_nerd_font
   nvm::install_node_default
   sudo apt install -y --no-install-recommends python3-neovim || true
 

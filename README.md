@@ -62,6 +62,7 @@ Node tooling is managed with `nvm` (`NVM_NODE_VERSION` defaults to `lts/*`).
 `dev` profile includes `ansible`, `go`, `tofu` (OpenTofu), `doctl`, `aws`, `hugo`, `picocom`, Codex CLI (`@openai/codex`), Gemini CLI (`@google/gemini-cli`), and ESP tooling (`esptool` + `idf.py` bootstrap).
 Docker Compose v2 (`docker compose`) is ensured; use OpenTofu (`tofu`) instead of Terraform.
 Infra/network baseline is part of default `core` install (`tailscale`, `cloudflared`, `openconnect`, `wireguard-tools`, `nmap`, `tcpdump`, `dnsutils`, `jq`, `yq`, `traceroute`, `ufw`, `rsync`, `restic`, `rclone`).
+Default `core` install also bootstraps `JetBrainsMono Nerd Font` into `~/.local/share/fonts/NerdFonts/JetBrainsMono` (override with `NERD_FONT_NAME` / `NERD_FONT_VERSION`).
 `post-up` also bootstraps zplug plugin installs and TPM; `INSTALL_NVIM=1` ensures Neovim >= `0.11.0` (local install fallback) and runs headless lazy.nvim sync.
 
 Examples:

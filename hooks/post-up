@@ -21,6 +21,7 @@ touch "$HOME/.psqlrc.local"
 . "${_ROOT}/hooks/os"
 
 os::get_distro
+os::ensure_zsh
 
 if [[ "${INSTALL_PACKAGES}" == "1" ]]; then
   if [[ "${DISTRO}" =~ ^(Ubuntu|debian) ]]; then
