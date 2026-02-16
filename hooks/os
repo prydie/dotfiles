@@ -371,6 +371,7 @@ os::ubuntu::install_packages_core() {
 
   local core_packages=(
     binutils
+    build-essential
     cpu-checker
     curl
     dnsutils
@@ -389,6 +390,7 @@ os::ubuntu::install_packages_core() {
     nmap
     openconnect
     openssh-client
+    pkg-config
     python3-dev
     python3-full
     python3-pip
@@ -689,9 +691,30 @@ tools::cf-terraforming() {
 tools::uv_basics() {
   uv::ensure_installed
   uv::tool_install oci-cli
-  uv::tool_install yubikey-manager # ykman
+  tools::install_yubikey_manager
   uv::tool_install isort
   uv::tool_install autopep8
+}
+
+tools::install_yubikey_manager() {
+  if command -v ykman >/dev/null 2>&1; then
+    log::f "yubikey-manager already installed: $(ykman --version 2>/dev/null | head -n1)"
+    return 0
+  fi
+
+  if apt-cache show yubikey-manager >/dev/null 2>&1; then
+    log::f "Installing yubikey-manager from apt"
+    sudo apt install -y --no-install-recommends yubikey-manager pcscd || true
+  fi
+
+  if command -v ykman >/dev/null 2>&1; then
+    return 0
+  fi
+
+  log::f "Installing yubikey-manager via uv tool fallback"
+  if ! uv tool install --force --upgrade yubikey-manager; then
+    log::f "Skipping yubikey-manager: uv install failed (likely missing optional smartcard build/runtime deps)"
+  fi
 }
 
 tools::full_install() {
