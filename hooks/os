@@ -6,6 +6,7 @@ export GOARCH=$(go env GOARCH 2>/dev/null || echo "amd64")
 _ROOT="$(dirname "${BASH_SOURCE}")/.."
 
 ARCH=$([ "$(uname -m)" = "x86_64" ] && echo amd64 || echo arm64)
+export PATH="${HOME}/.local/bin:${HOME}/.cargo/bin:${PATH}"
 
 log::f () {
  printf "INFO: %s $*\n" "$(date)"
@@ -35,10 +36,17 @@ uv::ensure_installed() {
 
   log::f "Installing uv"
   curl -LsSf https://astral.sh/uv/install.sh | sh
+  export PATH="${HOME}/.local/bin:${HOME}/.cargo/bin:${PATH}"
+
+  if ! command -v uv >/dev/null 2>&1; then
+    log::e "uv installation completed but uv is not on PATH"
+    return 1
+  fi
 }
 
 uv::tool_install() {
   local tool=$1
+  uv::ensure_installed
   uv tool install --force --upgrade "${tool}"
 }
 
