@@ -110,6 +110,25 @@ refresh-dev: ## Refresh user-level tooling/plugins (zplug, tmux TPM, Neovim lazy
 		echo "Skipping Neovim plugin sync (nvim not installed)"; \
 	fi
 
+.PHONY: gnome-prefs-save
+gnome-prefs-save: ## Save GNOME clipboard/caffeine extension prefs to config/gnome/*.dconf
+	@mkdir -p config/gnome
+	@command -v dconf >/dev/null 2>&1 || { echo "dconf not found"; exit 1; }
+	@dconf dump /org/gnome/shell/extensions/clipboard-indicator/ > config/gnome/clipboard-indicator.dconf
+	@dconf dump /org/gnome/shell/extensions/caffeine/ > config/gnome/caffeine.dconf
+	@echo "Saved GNOME extension preferences to config/gnome/"
+
+.PHONY: gnome-prefs-apply
+gnome-prefs-apply: ## Apply GNOME clipboard/caffeine extension prefs from config/gnome/*.dconf
+	@command -v dconf >/dev/null 2>&1 || { echo "dconf not found"; exit 1; }
+	@if [ -s config/gnome/clipboard-indicator.dconf ]; then \
+		dconf load /org/gnome/shell/extensions/clipboard-indicator/ < config/gnome/clipboard-indicator.dconf; \
+	fi
+	@if [ -s config/gnome/caffeine.dconf ]; then \
+		dconf load /org/gnome/shell/extensions/caffeine/ < config/gnome/caffeine.dconf; \
+	fi
+	@echo "Applied GNOME extension preferences"
+
 .PHONY: patching-full
 patching-full: refresh-dev sys-info ## Refresh user plugins, patch apt packages, and reboot
 	@echo "Refreshing dev tools completed; now patching host..."

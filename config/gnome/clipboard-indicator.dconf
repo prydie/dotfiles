@@ -1,0 +1,4 @@
+[/]
+cache-only-favorites=false
+history-size=300
+toggle-menu=['<Control><Alt>v']

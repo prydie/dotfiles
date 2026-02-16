@@ -273,6 +273,33 @@ desktop::ensure_desktop_extensions_enabled() {
   desktop::ensure_gnome_extension_enabled "caffeine@patapon.info"
 }
 
+desktop::apply_gnome_extension_preferences() {
+  local clipboard_dconf caffeine_dconf
+  clipboard_dconf="${_ROOT}/config/gnome/clipboard-indicator.dconf"
+  caffeine_dconf="${_ROOT}/config/gnome/caffeine.dconf"
+
+  if ! command -v dconf >/dev/null 2>&1; then
+    log::f "Skipping GNOME extension preference apply: dconf not found"
+    return 0
+  fi
+
+  if [ -s "${clipboard_dconf}" ]; then
+    if dconf load /org/gnome/shell/extensions/clipboard-indicator/ < "${clipboard_dconf}" 2>/dev/null; then
+      log::f "Applied clipboard indicator preferences from ${clipboard_dconf}"
+    else
+      log::f "Could not apply clipboard indicator preferences (likely no active GNOME session)"
+    fi
+  fi
+
+  if [ -s "${caffeine_dconf}" ]; then
+    if dconf load /org/gnome/shell/extensions/caffeine/ < "${caffeine_dconf}" 2>/dev/null; then
+      log::f "Applied caffeine extension preferences from ${caffeine_dconf}"
+    else
+      log::f "Could not apply caffeine extension preferences (likely no active GNOME session)"
+    fi
+  fi
+}
+
 desktop::status_clipboard_and_caffeine() {
   local enabled_extensions
   desktop::status_one "xclip" "xclip"
@@ -618,6 +645,7 @@ os::ubuntu::install_packages_core() {
   apt::install_if_available cloudflared tailscale
   desktop::install_clipboard_and_caffeine
   desktop::ensure_desktop_extensions_enabled
+  desktop::apply_gnome_extension_preferences
 
   uv::ensure_installed
   tools::install_starship

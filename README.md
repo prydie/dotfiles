@@ -48,6 +48,8 @@ make bootstrap-all
 make bootstrap-full
 make post-up
 make refresh-dev
+make gnome-prefs-save
+make gnome-prefs-apply
 make patching
 make patching-full
 ```
@@ -80,6 +82,20 @@ NVM_NODE_VERSION=lts/* INSTALL_PACKAGES=1 PACKAGE_PROFILE=dev make post-up
 INSTALL_PACKAGES=1 INSTALL_NVIM=1 make post-up
 INSTALL_PACKAGES=1 INSTALL_NVIM=1 FULL_SETUP=1 make post-up
 ```
+
+## GNOME extension preferences
+
+Clipboard Indicator and Caffeine preferences can be versioned in this repo:
+
+```bash
+make gnome-prefs-save
+make gnome-prefs-apply
+```
+
+This stores/loads:
+
+- `config/gnome/clipboard-indicator.dconf`
+- `config/gnome/caffeine.dconf`
 
 ## Kubernetes installers (no `curl | bash`)
 
