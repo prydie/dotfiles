@@ -7,7 +7,7 @@ Personal dotfiles managed with [`rcm`](https://github.com/thoughtbot/rcm).
 This repo contains shell/editor/tmux/git config and optional host bootstrap hooks.
 
 - Safe default: `make up` only links dotfiles.
-- Opt-in setup: `hooks/post-up` can install packages/plugins/tools via flags.
+- Opt-in setup: choose a `PROFILE` to install packages/plugins/tools.
 
 ## Requirements
 
@@ -20,14 +20,16 @@ This repo contains shell/editor/tmux/git config and optional host bootstrap hook
 One-line bootstrap (fresh Ubuntu):
 
 ```bash
-sudo apt-get update && sudo apt-get install -y git make && git clone https://github.com/prydie/dotfiles.git ~/.dotfiles && cd ~/.dotfiles && make bootstrap-all
+sudo apt-get update && sudo apt-get install -y git make && git clone https://github.com/prydie/dotfiles.git ~/.dotfiles && cd ~/.dotfiles && make bootstrap PROFILE=full
 ```
 
 If you prefer SSH auth (recommended when you will push changes):
 
 ```bash
-sudo apt-get update && sudo apt-get install -y git make && git clone git@github.com:prydie/dotfiles.git ~/.dotfiles && cd ~/.dotfiles && make bootstrap-all
+sudo apt-get update && sudo apt-get install -y git make && git clone git@github.com:prydie/dotfiles.git ~/.dotfiles && cd ~/.dotfiles && make bootstrap PROFILE=full
 ```
+
+If the repo is already cloned:
 
 ```bash
 ./install.sh
@@ -44,9 +46,8 @@ make up
 ```bash
 make help
 make up
-make bootstrap-all
-make bootstrap-full
-make post-up
+make bootstrap
+make setup
 make refresh-dev
 make gnome-prefs-save
 make gnome-prefs-apply
@@ -54,33 +55,49 @@ make patching
 make patching-full
 ```
 
-## Post-up flags
+## Setup profiles
 
-`hooks/post-up` supports optional setup stages:
+`hooks/post-up` is profile-driven. By default, `PROFILE=link`, which does not install host packages.
 
-- `INSTALL_PACKAGES=1` installs apt/snap packages
-- `PACKAGE_PROFILE=core|dev` chooses package tier (`core` default, `dev` installs core+dev)
-- `INSTALL_NVIM=1` runs Neovim bootstrap
-- `FULL_SETUP=1` runs extra heavy tool installers from `hooks/os`
-- `SET_ZSH_DEFAULT=0` skips setting your login shell to `zsh` (default behavior is to set it)
+### Controls
 
-Python tooling is managed with `uv` (virtualenv + tool installs).
-Node tooling is managed with `nvm` (`NVM_NODE_VERSION` defaults to `lts/*`).
-`dev` profile includes `ansible`, `go`, `tofu` (OpenTofu), `doctl`, `aws`, `hugo`, `picocom`, Codex CLI (`@openai/codex`), Gemini CLI (`@google/gemini-cli`), and ESP tooling (`esptool` + `idf.py` bootstrap).
-Docker Compose v2 (`docker compose`) is ensured; use OpenTofu (`tofu`) instead of Terraform.
-Infra/network baseline is part of default `core` install (`tailscale`, `cloudflared`, `openconnect`, `wireguard-tools`, `nmap`, `tcpdump`, `dnsutils`, `jq`, `yq`, `traceroute`, `ufw`, `rsync`, `restic`, `rclone`).
-Default `core` install also bootstraps `FiraCode Nerd Font` into `~/.local/share/fonts/NerdFonts/FiraCode` (override with `NERD_FONT_NAME` / `NERD_FONT_VERSION`) and configures the GNOME Terminal default profile font to `FiraCode Nerd Font Mono 11` (override with `TERMINAL_FONT_SPEC`).
-`post-up` also bootstraps zplug plugin installs and TPM; `INSTALL_NVIM=1` ensures Neovim >= `0.11.0` (local install fallback) and runs headless lazy.nvim sync.
+- `PROFILE=link|core|dev|full`
+- `SHELL_DEFAULT=1|0` (default `1`; set `0` to skip login shell update)
+- `NODE_VERSION=<version>` (default `lts/*`)
+- `ATUIN_VERSION=<tag>` (optional; pin Atuin install version, e.g. `v18.8.0`)
 
-Examples:
+### What gets configured
+
+- Python tooling via `uv`.
+- Node tooling via `nvm`.
+- `PROFILE=core|dev|full` bootstraps zplug plugins and TPM.
+- `PROFILE=dev|full` ensures Neovim >= `0.11.0` (local install fallback) and runs headless lazy.nvim sync.
+
+### Profiles
+
+- `link`: no host package/tool installs; dotfiles only.
+- `core`: infra/network baseline (`tailscale`, `cloudflared`, `openconnect`, `wireguard-tools`, `nmap`, `tcpdump`, `dnsutils`, `jq`, `yq`, `traceroute`, `ufw`, `rsync`, `restic`, `rclone`) and Docker Compose v2 (`docker compose`).
+- `core` also installs Atuin, bootstraps `FiraCode Nerd Font` into `~/.local/share/fonts/NerdFonts/FiraCode` (override with `NERD_FONT_NAME` / `NERD_FONT_VERSION`), and configures GNOME Terminal default font to `FiraCode Nerd Font Mono 11` (override with `TERMINAL_FONT_SPEC`).
+- `dev`: `core` + developer tools such as `ansible`, `go`, `tofu` (OpenTofu), `doctl`, `aws`, `hugo`, `picocom`, Codex CLI (`@openai/codex`), Gemini CLI (`@google/gemini-cli`), and ESP tooling (`esptool` + `idf.py` bootstrap), plus Neovim bootstrap.
+- `full`: `dev` + heavier extras from `hooks/os` (`tools::full_install`).
+
+Use OpenTofu (`tofu`) instead of Terraform.
+
+### Examples
 
 ```bash
-INSTALL_PACKAGES=1 make post-up
-INSTALL_PACKAGES=1 PACKAGE_PROFILE=core make post-up
-INSTALL_PACKAGES=1 PACKAGE_PROFILE=dev make post-up
-NVM_NODE_VERSION=lts/* INSTALL_PACKAGES=1 PACKAGE_PROFILE=dev make post-up
-INSTALL_PACKAGES=1 INSTALL_NVIM=1 make post-up
-INSTALL_PACKAGES=1 INSTALL_NVIM=1 FULL_SETUP=1 make post-up
+# dotfiles + selected setup profile
+make setup PROFILE=link
+make setup PROFILE=core
+make setup PROFILE=dev
+make setup PROFILE=full
+
+# bootstrap host dependencies, then run selected setup profile
+make bootstrap PROFILE=dev
+make bootstrap PROFILE=full
+
+# override Node channel and shell default behavior
+NODE_VERSION=lts/* SHELL_DEFAULT=0 make setup PROFILE=dev
 ```
 
 ## GNOME extension preferences

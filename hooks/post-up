@@ -5,84 +5,98 @@ set -euo pipefail
 
 _ROOT="$(dirname "${BASH_SOURCE[0]}")/.."
 
-# Optional flags:
-# - INSTALL_PACKAGES=1 : run distro package installation
-# - PACKAGE_PROFILE=core|dev : package profile to apply when INSTALL_PACKAGES=1
-# - NVM_NODE_VERSION=<version> : node version for nvm (default: lts/*)
-# - INSTALL_NVIM=1     : run Neovim plugin/bootstrap setup
-# - FULL_SETUP=1       : run extra toolchain installers from hooks/os
-INSTALL_PACKAGES="${INSTALL_PACKAGES:-0}"
-PACKAGE_PROFILE="${PACKAGE_PROFILE:-core}"
-INSTALL_NVIM="${INSTALL_NVIM:-0}"
-FULL_SETUP="${FULL_SETUP:-0}"
-SET_ZSH_DEFAULT="${SET_ZSH_DEFAULT:-1}"
+# Setup options:
+# - PROFILE=link|core|dev|full (default: link)
+# - SHELL_DEFAULT=1|0 (default: 1)
+# - NODE_VERSION=<version> (default: lts/*)
+PROFILE="${PROFILE:-link}"
+SHELL_DEFAULT="${SHELL_DEFAULT:-1}"
+NODE_VERSION="${NODE_VERSION:-lts/*}"
+# hooks/os reads NVM_NODE_VERSION; map from the public interface.
+export NVM_NODE_VERSION="${NODE_VERSION}"
 
 touch "$HOME/.psqlrc.local"
 
 . "${_ROOT}/hooks/os"
 
 os::get_distro
-os::ensure_zsh
-if [[ "${SET_ZSH_DEFAULT}" == "1" ]]; then
-  os::ensure_user_shell_zsh
-else
-  log::f "Skipping login shell update (set SET_ZSH_DEFAULT=1 to enable)"
-fi
+case "${PROFILE}" in
+  link|core|dev|full)
+    ;;
+  *)
+    log::e "Unknown PROFILE=${PROFILE}. Supported: link, core, dev, full"
+    exit 1
+    ;;
+esac
 
-if [[ "${INSTALL_PACKAGES}" == "1" ]]; then
-  if [[ "${DISTRO}" =~ ^(Ubuntu|debian) ]]; then
-    log::f "Ubuntu/debian detected, installing packages profile=${PACKAGE_PROFILE}"
-    case "${PACKAGE_PROFILE}" in
-      core)
-        os::ubuntu::install_packages_core
-        ;;
-      dev)
-        os::ubuntu::install_packages_core
-        os::ubuntu::install_packages_dev
-        ;;
-      *)
-        log::e "Unknown PACKAGE_PROFILE=${PACKAGE_PROFILE}. Supported: core, dev"
-        exit 1
-        ;;
-    esac
+if [[ "${PROFILE}" != "link" ]]; then
+  if [[ "${DISTRO}" =~ ^(Ubuntu|debian)$ ]]; then
+    os::ensure_zsh
+
+    if [[ "${SHELL_DEFAULT}" == "1" ]]; then
+      os::ensure_user_shell_zsh
+    else
+      log::f "Skipping login shell update (set SHELL_DEFAULT=1 to enable)"
+    fi
+
+    log::f "Running setup profile=${PROFILE}"
+    os::ubuntu::install_packages_core
+
+    if [[ "${PROFILE}" == "dev" || "${PROFILE}" == "full" ]]; then
+      os::ubuntu::install_packages_dev
+    fi
   else
     log::e "Unsupported distribution ${DISTRO}"
     exit 1
   fi
 else
-  log::f "Skipping package installation (set INSTALL_PACKAGES=1 to enable)"
-fi
+  log::f "Profile link selected: skipping host package/tool installation"
 
-# install zplug if not installed
-if [ ! -d "$HOME/.zplug" ]; then
-  git clone https://github.com/zplug/zplug "$HOME/.zplug"
-fi
-if [ -s "$HOME/.zplug/init.zsh" ]; then
-  if command -v zsh >/dev/null 2>&1; then
-    # Install zplug plugins non-interactively so shell setup is fully bootstrapped.
-    zsh -lc 'source "$HOME/.zplug/init.zsh"; zplug check || zplug install' || true
+  if [[ "${SHELL_DEFAULT}" == "1" ]]; then
+    if command -v zsh >/dev/null 2>&1; then
+      os::ensure_user_shell_zsh
+    else
+      log::f "Skipping login shell update: zsh not installed (use PROFILE=core or above)"
+    fi
   else
-    log::f "Skipping zplug bootstrap: zsh not installed (install zsh or run with INSTALL_PACKAGES=1)"
+    log::f "Skipping login shell update (set SHELL_DEFAULT=1 to enable)"
   fi
 fi
 
-if [ ! -d "$HOME/.tmux/plugins/tpm" ]; then
-  git clone https://github.com/tmux-plugins/tpm "$HOME/.tmux/plugins/tpm"
-  "$HOME/.tmux/plugins/tpm/bin/install_plugins"
+if [[ "${PROFILE}" != "link" ]]; then
+  # install zplug if not installed
+  if [ ! -d "$HOME/.zplug" ]; then
+    git clone https://github.com/zplug/zplug "$HOME/.zplug"
+  fi
+  if [ -s "$HOME/.zplug/init.zsh" ]; then
+    if command -v zsh >/dev/null 2>&1; then
+      # Install zplug plugins non-interactively so shell setup is fully bootstrapped.
+      zsh -lc 'source "$HOME/.zplug/init.zsh"; zplug check || zplug install' || true
+    else
+      log::f "Skipping zplug bootstrap: zsh not installed"
+    fi
+  fi
+
+  if [ ! -d "$HOME/.tmux/plugins/tpm" ]; then
+    git clone https://github.com/tmux-plugins/tpm "$HOME/.tmux/plugins/tpm"
+    "$HOME/.tmux/plugins/tpm/bin/install_plugins"
+  fi
+else
+  log::f "Skipping zplug/TPM bootstrap for PROFILE=link"
 fi
 
 if [ -f "$HOME/.config/zoomus.conf" ]; then
   os::set_zoom_scaling_factor
 fi
 
-if [[ "${INSTALL_NVIM}" == "1" ]]; then
+if [[ "${PROFILE}" == "dev" || "${PROFILE}" == "full" ]]; then
   . "${_ROOT}/hooks/nvim"
 else
-  log::f "Skipping Neovim bootstrap (set INSTALL_NVIM=1 to enable)"
+  log::f "Skipping Neovim bootstrap (requires PROFILE=dev|full)"
 fi
 
-if [[ "${FULL_SETUP}" == "1" ]]; then
+if [[ "${PROFILE}" == "full" ]]; then
   tools::full_install
 else
-  log::f "Skipping full tool installation (set FULL_SETUP=1 to enable)"
+  log::f "Skipping full tool installation (requires PROFILE=full)"
 fi

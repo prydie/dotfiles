@@ -1,0 +1,7 @@
+AlertInfo = "deepskyblue"
+AlertWarn = "gold"
+AlertError = "tomato"
+Annotation = "lightslategray"
+Base = "white"
+Guidance = "lightsteelblue"
+Important = "mediumaquamarine"

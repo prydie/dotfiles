@@ -1,3 +1,6 @@
+command_timeout = 1000
+scan_timeout = 10
+
 [kubernetes]
 format = '[$symbol$context( \($namespace\))]($style) in '
 disabled = false
@@ -11,6 +14,15 @@ disabled = true
 
 [custom.mapi]
 symbol = "🗺️"
-command = """ echo "$(echo $MAPI_ENDPOINT | cut -d'-' -f 2 | sed 's/mapi/prod/') $(echo $MAPI_ENDPOINT | cut -d'.' -f 2)" """
-when = """ [ ! -z "$MAPI_ENDPOINT" ] """
+command = """
+endpoint="${MAPI_ENDPOINT:-}"
+sub="${endpoint%%.*}"
+env="${sub#*-}"
+[ "${env}" = "${sub}" ] && env="${sub}"
+[ "${env}" = "mapi" ] && env="prod"
+domain="${endpoint#*.}"
+[ "${domain}" = "${endpoint}" ] && domain=""
+printf "%s %s" "${env}" "${domain}"
+"""
+when = """ [ -n "$MAPI_ENDPOINT" ] """
 format = " [\\($symbol  $output\\) ]($style)"

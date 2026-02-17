@@ -61,6 +61,55 @@ tools::install_starship() {
   curl -fsSL https://starship.rs/install.sh | sh -s -- -y -b "${HOME}/.local/bin"
 }
 
+tools::install_atuin() {
+  local version latest_json target out tmpdir bin_path
+
+  if command -v atuin >/dev/null 2>&1; then
+    log::f "atuin already installed: $(atuin --version)"
+    return 0
+  fi
+
+  case "${ARCH}" in
+    amd64)
+      target="x86_64-unknown-linux-gnu"
+      ;;
+    arm64)
+      target="aarch64-unknown-linux-gnu"
+      ;;
+    *)
+      log::f "Skipping atuin install: unsupported ARCH=${ARCH}"
+      return 0
+      ;;
+  esac
+
+  if [ -n "${ATUIN_VERSION:-}" ]; then
+    version="${ATUIN_VERSION}"
+  else
+    latest_json="$(curl -fsSL https://api.github.com/repos/atuinsh/atuin/releases/latest || true)"
+    version="$(printf '%s\n' "${latest_json}" | sed -n 's/.*"tag_name":[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)"
+    version="${version:-v18.8.0}"
+  fi
+
+  out="$(mktemp)"
+  tmpdir="$(mktemp -d)"
+  gh::download "atuinsh/atuin" "${version}" "atuin-${target}.tar.gz" "${out}"
+  tar -xzf "${out}" -C "${tmpdir}"
+
+  bin_path="$(find "${tmpdir}" -type f -name atuin | head -n1)"
+  if [ -z "${bin_path}" ]; then
+    log::e "atuin binary not found in downloaded archive"
+    rm -rf "${tmpdir}"
+    rm -f "${out}"
+    return 1
+  fi
+
+  mkdir -p "${HOME}/.local/bin"
+  install -m 0755 "${bin_path}" "${HOME}/.local/bin/atuin"
+  rm -rf "${tmpdir}"
+  rm -f "${out}"
+  log::f "Installed atuin ${version} to ${HOME}/.local/bin/atuin"
+}
+
 nvm::ensure_installed() {
   local nvm_version
   nvm_version="${NVM_VERSION:-v0.40.3}"
@@ -649,6 +698,7 @@ os::ubuntu::install_packages_core() {
 
   uv::ensure_installed
   tools::install_starship
+  tools::install_atuin
   fonts::install_nerd_font
   terminal::configure_gnome_terminal_font
   nvm::install_node_default

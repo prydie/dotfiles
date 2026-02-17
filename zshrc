@@ -1,11 +1,9 @@
 typeset -U path
-path=("$HOME/.local/bin" "$HOME/bin" "$HOME/go/bin" $path)
+path=("$HOME/.local/bin" "$HOME/bin" "$HOME/go/bin" "/opt/nvim-linux-x86_64/bin" $path)
 export PATH
 export GOPATH=${HOME}/go
 
 # zmodload zsh/zprof
-
-[[ $TMUX = "" ]] && export TERM="xterm-256color"
 
 source ~/.zplug/init.zsh
 
@@ -18,8 +16,6 @@ export NVM_COMPLETION=true
 zplug "lukechilds/zsh-nvm"
 
 zplug "junegunn/fzf", as:command, use:bin/fzf-tmux
-
-zplug "plugins/vi-mode",   from:oh-my-zsh
 
 # Prompt
 zplug mafredri/zsh-async, from:github
@@ -84,7 +80,6 @@ setopt hist_verify
 setopt inc_append_history
 setopt share_history
 
-
 # Aliases
 #########
 
@@ -93,11 +88,33 @@ setopt share_history
 
 # Completions
 #############
+autoload -Uz compinit
+typeset -g __zcompcache_dir="${XDG_CACHE_HOME:-$HOME/.cache}/zsh"
+typeset -g __zcompdump="${__zcompcache_dir}/.zcompdump-${ZSH_VERSION}"
+mkdir -p "${__zcompcache_dir}"
+if ! (( ${+_comps} )); then
+  compinit -d "${__zcompdump}"
+fi
+zstyle ':completion:*' menu select
+zstyle ':completion:*' matcher-list 'm:{a-z}={A-Za-z}'
+zstyle ':completion:*' use-cache on
+zstyle ':completion:*' cache-path "${__zcompcache_dir}/completion-cache"
+zstyle ':completion:*:*:cd:*' ignored-patterns '*/.git' '*/node_modules' '*/.direnv'
 
 # FZF
 #####
-export FZF_DEFAULT_COMMAND='ag -l -g ""'
+export FZF_DEFAULT_COMMAND='fd --type f --hidden --follow --exclude .git'
 export FZF_DEFAULT_OPTS='--height 40% --reverse --border'
+if [ -f /usr/share/doc/fzf/examples/key-bindings.zsh ]; then
+  source /usr/share/doc/fzf/examples/key-bindings.zsh
+fi
+if [ -f /usr/share/doc/fzf/examples/completion.zsh ]; then
+  source /usr/share/doc/fzf/examples/completion.zsh
+fi
+
+if command -v atuin >/dev/null 2>&1; then
+  eval "$(atuin init zsh --disable-up-arrow)"
+fi
 
 
 # pyenv
