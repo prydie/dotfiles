@@ -124,3 +124,39 @@ patching-full: refresh-dev sys-info ## Refresh user plugins, patch apt packages,
 	@sudo apt autoremove -y
 	@sudo update-grub
 	@sudo shutdown -r now
+
+.PHONY: restic-backup-now
+restic-backup-now: ## Run restic backup now (requires ~/.config/restic-backup/env)
+	@"$(HOME)/bin/restic-backup" backup
+
+.PHONY: restic-backup-dry-run
+restic-backup-dry-run: ## Preview restic backup file selection
+	@"$(HOME)/bin/restic-backup" dry-run
+
+.PHONY: restic-snapshots
+restic-snapshots: ## List restic snapshots
+	@"$(HOME)/bin/restic-backup" snapshots
+
+.PHONY: restic-maintenance-now
+restic-maintenance-now: ## Run restic retention+prune now
+	@"$(HOME)/bin/restic-backup" forget
+
+.PHONY: restic-verify-now
+restic-verify-now: ## Check restic snapshot freshness for this host
+	@"$(HOME)/bin/restic-verify" freshness
+
+.PHONY: restic-check-now
+restic-check-now: ## Run restic repository check now
+	@"$(HOME)/bin/restic-verify" check-lite
+
+.PHONY: restic-systemd-enable
+restic-systemd-enable: ## Enable/start user restic backup + maintenance + verify timers
+	@systemctl --user daemon-reload
+	@systemctl --user enable --now restic-backup.timer restic-maintenance.timer restic-verify.timer
+	@systemctl --user list-timers --all | grep -E 'restic-(backup|maintenance|verify)\.timer' || true
+
+.PHONY: restic-systemd-status
+restic-systemd-status: ## Show recent restic timer/service status
+	@systemctl --user status restic-backup.timer restic-maintenance.timer restic-verify.timer --no-pager || true
+	@echo ""
+	@systemctl --user status restic-backup.service restic-maintenance.service restic-verify.service --no-pager || true

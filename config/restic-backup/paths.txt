@@ -1,0 +1,7 @@
+# One path per line. Comments and blank lines are ignored.
+# $HOME and ~ are expanded by the wrapper script.
+#
+# Default posture: back up (almost) the whole home directory, then exclude caches,
+# build outputs, and other disposable files in excludes.txt.
+
+$HOME

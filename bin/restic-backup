@@ -1,0 +1,178 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/restic-backup"
+CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/restic"
+HOST_SHORT="$(hostname -s 2>/dev/null || hostname)"
+CMD="${1:-backup}"
+shift || true
+
+mkdir -p "$CACHE_DIR"
+export RESTIC_CACHE_DIR="${RESTIC_CACHE_DIR:-$CACHE_DIR}"
+
+if [[ -f "$CONFIG_DIR/env" ]]; then
+  # shellcheck disable=SC1090
+  set -a
+  source "$CONFIG_DIR/env"
+  set +a
+fi
+
+usage() {
+  cat <<'EOF'
+Usage: restic-backup <command> [args...]
+
+Commands:
+  backup        Run backup using configured path/exclude files (default)
+  dry-run       Show what would be backed up
+  snapshots     List snapshots
+  init          Initialize repository
+  check         Run repository check
+  forget        Apply retention policy (and prune)
+  unlock        Remove stale locks
+
+Config:
+  ~/.config/restic-backup/env                  (local secrets + repository)
+  ~/.config/restic-backup/paths.txt            (repo-managed defaults)
+  ~/.config/restic-backup/paths.<hostname>.txt (optional host-specific)
+  ~/.config/restic-backup/paths.local.txt      (optional local additions)
+  ~/.config/restic-backup/excludes*.txt        (optional excludes)
+EOF
+}
+
+require_restic() {
+  command -v restic >/dev/null 2>&1 || {
+    echo "restic not found on PATH" >&2
+    exit 1
+  }
+}
+
+require_repo_config() {
+  if [[ -z "${RESTIC_REPOSITORY:-}" ]]; then
+    echo "RESTIC_REPOSITORY is not set (configure $CONFIG_DIR/env)" >&2
+    exit 1
+  fi
+  if [[ -z "${RESTIC_PASSWORD_FILE:-}" && -z "${RESTIC_PASSWORD_COMMAND:-}" && -z "${RESTIC_PASSWORD:-}" ]]; then
+    echo "Set RESTIC_PASSWORD_FILE (or RESTIC_PASSWORD[_COMMAND]) in $CONFIG_DIR/env" >&2
+    exit 1
+  fi
+}
+
+expand_path_line() {
+  local line="$1"
+  line="${line/#\~/$HOME}"
+  line="${line//\$\{HOME\}/$HOME}"
+  line="${line//\$HOME/$HOME}"
+  printf '%s\n' "$line"
+}
+
+append_paths_from_file() {
+  local src="$1"
+  local out="$2"
+  [[ -f "$src" ]] || return 0
+
+  while IFS= read -r raw || [[ -n "$raw" ]]; do
+    [[ -z "${raw//[[:space:]]/}" ]] && continue
+    [[ "$raw" =~ ^[[:space:]]*# ]] && continue
+    local path
+    path="$(expand_path_line "$raw")"
+    if [[ -e "$path" ]]; then
+      printf '%s\n' "$path" >>"$out"
+    else
+      echo "Skipping missing path: $path" >&2
+    fi
+  done <"$src"
+}
+
+append_excludes_from_file() {
+  local src="$1"
+  local out="$2"
+  [[ -f "$src" ]] || return 0
+
+  while IFS= read -r raw || [[ -n "$raw" ]]; do
+    [[ -z "${raw//[[:space:]]/}" ]] && continue
+    [[ "$raw" =~ ^[[:space:]]*# ]] && continue
+    printf '%s\n' "$raw" >>"$out"
+  done <"$src"
+}
+
+build_backup_file_lists() {
+  FILES_TMP="$(mktemp)"
+  EXCLUDES_TMP="$(mktemp)"
+  trap 'rm -f "$FILES_TMP" "$EXCLUDES_TMP"' EXIT
+
+  append_paths_from_file "$CONFIG_DIR/paths.txt" "$FILES_TMP"
+  append_paths_from_file "$CONFIG_DIR/paths.$HOST_SHORT.txt" "$FILES_TMP"
+  append_paths_from_file "$CONFIG_DIR/paths.local.txt" "$FILES_TMP"
+
+  append_excludes_from_file "$CONFIG_DIR/excludes.txt" "$EXCLUDES_TMP"
+  append_excludes_from_file "$CONFIG_DIR/excludes.$HOST_SHORT.txt" "$EXCLUDES_TMP"
+  append_excludes_from_file "$CONFIG_DIR/excludes.local.txt" "$EXCLUDES_TMP"
+
+  if [[ ! -s "$FILES_TMP" ]]; then
+    echo "No backup paths found. Populate $CONFIG_DIR/paths.txt (or host/local variants)." >&2
+    exit 1
+  fi
+}
+
+backup_command() {
+  build_backup_file_lists
+  local -a args
+  args=(backup --files-from "$FILES_TMP")
+  if [[ -s "$EXCLUDES_TMP" ]]; then
+    args+=(--exclude-file "$EXCLUDES_TMP")
+  fi
+  args+=(--tag "dotfiles-managed")
+  if [[ -n "${RESTIC_HOST_LABEL:-}" ]]; then
+    args+=(--host "$RESTIC_HOST_LABEL")
+  fi
+  args+=("$@")
+  restic "${args[@]}"
+}
+
+forget_command() {
+  local keep_daily="${RESTIC_KEEP_DAILY:-7}"
+  local keep_weekly="${RESTIC_KEEP_WEEKLY:-4}"
+  local keep_monthly="${RESTIC_KEEP_MONTHLY:-6}"
+  local keep_yearly="${RESTIC_KEEP_YEARLY:-2}"
+  restic forget --prune \
+    --keep-daily "$keep_daily" \
+    --keep-weekly "$keep_weekly" \
+    --keep-monthly "$keep_monthly" \
+    --keep-yearly "$keep_yearly" \
+    "$@"
+}
+
+require_restic
+require_repo_config
+
+case "$CMD" in
+  backup)
+    backup_command "$@"
+    ;;
+  dry-run)
+    backup_command --dry-run "$@"
+    ;;
+  snapshots)
+    restic snapshots "$@"
+    ;;
+  init)
+    restic init "$@"
+    ;;
+  check)
+    restic check "$@"
+    ;;
+  forget)
+    forget_command "$@"
+    ;;
+  unlock)
+    restic unlock "$@"
+    ;;
+  help|-h|--help)
+    usage
+    ;;
+  *)
+    echo "Unknown command: $CMD" >&2
+    usage >&2
+    exit 2
+    ;;
+esac

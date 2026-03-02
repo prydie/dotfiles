@@ -1,0 +1,262 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/restic-backup"
+ENV_FILE="$CONFIG_DIR/env"
+PASSWORD_FILE="$CONFIG_DIR/password"
+SSH_DIR="$HOME/.ssh"
+SSH_CONFIG_FILE="$SSH_DIR/config"
+SSH_KEY_FILE="$SSH_DIR/id_ed25519_home_nas_backup"
+
+NAS_HOST_ALIAS="home-nas"
+BACKUP_HOST_ALIAS="home-nas-backup"
+BACKUP_USER="backup"
+REPO_PATH="/volume1/Backups/restic/workstations"
+DOTFILES_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ENV_TEMPLATE="$DOTFILES_DIR/config/restic-backup/env.example"
+GENERATE_PASSWORD=1
+GENERATE_SSH_KEY=1
+WRITE_SSH_CONFIG=0
+
+usage() {
+  cat <<EOF
+Usage: restic-workstation-setup [options]
+
+Bootstrap local restic backup config + dedicated SSH key/alias for Synology NAS.
+
+Options:
+  --nas-host-alias <host>      Existing SSH host alias for NAS root/admin (default: $NAS_HOST_ALIAS)
+  --backup-host-alias <host>   SSH alias for backup user (default: $BACKUP_HOST_ALIAS)
+  --backup-user <user>         NAS backup username (default: $BACKUP_USER)
+  --repo-path <path>           NAS restic repo path (default: $REPO_PATH)
+  --ssh-key-file <path>        Dedicated SSH private key path (default: $SSH_KEY_FILE)
+  --env-file <path>            Local restic env file (default: $ENV_FILE)
+  --password-file <path>       Local restic password file (default: $PASSWORD_FILE)
+  --write-ssh-config           Update ~/.ssh/config with a marked host block (default: off)
+  --no-generate-password       Do not create password file if missing
+  --no-generate-ssh-key        Do not create SSH key if missing
+  -h, --help                   Show this help
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --nas-host-alias)
+      NAS_HOST_ALIAS="$2"; shift 2 ;;
+    --backup-host-alias)
+      BACKUP_HOST_ALIAS="$2"; shift 2 ;;
+    --backup-user)
+      BACKUP_USER="$2"; shift 2 ;;
+    --repo-path)
+      REPO_PATH="$2"; shift 2 ;;
+    --ssh-key-file)
+      SSH_KEY_FILE="${2/#\~/$HOME}"; shift 2 ;;
+    --env-file)
+      ENV_FILE="${2/#\~/$HOME}"; shift 2 ;;
+    --password-file)
+      PASSWORD_FILE="${2/#\~/$HOME}"; shift 2 ;;
+    --no-generate-password)
+      GENERATE_PASSWORD=0; shift ;;
+    --no-generate-ssh-key)
+      GENERATE_SSH_KEY=0; shift ;;
+    --write-ssh-config)
+      WRITE_SSH_CONFIG=1; shift ;;
+    -h|--help)
+      usage; exit 0 ;;
+    *)
+      echo "Unknown option: $1" >&2
+      usage >&2
+      exit 2 ;;
+  esac
+done
+
+require_cmd() {
+  command -v "$1" >/dev/null 2>&1 || {
+    echo "Required command not found: $1" >&2
+    exit 1
+  }
+}
+
+ensure_dir() {
+  mkdir -p "$1"
+}
+
+ensure_mode() {
+  local path="$1" mode="$2"
+  chmod "$mode" "$path"
+}
+
+ensure_password_file() {
+  if [[ -f "$PASSWORD_FILE" ]]; then
+    ensure_mode "$PASSWORD_FILE" 600
+    return 0
+  fi
+  if [[ "$GENERATE_PASSWORD" -ne 1 ]]; then
+    echo "Password file missing and generation disabled: $PASSWORD_FILE" >&2
+    return 0
+  fi
+  umask 077
+  head -c 32 /dev/urandom | base64 >"$PASSWORD_FILE"
+  ensure_mode "$PASSWORD_FILE" 600
+  echo "Created restic password file: $PASSWORD_FILE"
+}
+
+ensure_env_file() {
+  if [[ ! -f "$ENV_FILE" ]]; then
+    if [[ -f "$ENV_TEMPLATE" ]]; then
+      cp "$ENV_TEMPLATE" "$ENV_FILE"
+    else
+      : >"$ENV_FILE"
+    fi
+    echo "Created env file: $ENV_FILE"
+  fi
+  ensure_mode "$ENV_FILE" 600
+}
+
+set_env_var() {
+  local key="$1" value="$2" file="$3"
+  local escaped
+  escaped="$(printf '%s' "$value" | sed 's/[\/&]/\\&/g')"
+  if grep -Eq "^[[:space:]]*${key}=" "$file"; then
+    sed -i "s|^[[:space:]]*${key}=.*|${key}=\"${escaped}\"|" "$file"
+  else
+    printf '%s="%s"\n' "$key" "$value" >>"$file"
+  fi
+}
+
+ensure_ssh_key() {
+  if [[ -f "$SSH_KEY_FILE" ]]; then
+    [[ -f "$SSH_KEY_FILE.pub" ]] || {
+      echo "Private key exists but public key missing: $SSH_KEY_FILE.pub" >&2
+      exit 1
+    }
+    return 0
+  fi
+  if [[ "$GENERATE_SSH_KEY" -ne 1 ]]; then
+    echo "SSH key missing and generation disabled: $SSH_KEY_FILE" >&2
+    return 0
+  fi
+  require_cmd ssh-keygen
+  ensure_dir "$SSH_DIR"
+  ssh-keygen -t ed25519 -a 100 -f "$SSH_KEY_FILE" -N "" -C "${BACKUP_USER}@${BACKUP_HOST_ALIAS} restic"
+  echo "Created SSH key pair: $SSH_KEY_FILE"
+}
+
+upsert_ssh_config_block() {
+  ensure_dir "$SSH_DIR"
+  touch "$SSH_CONFIG_FILE"
+  ensure_mode "$SSH_CONFIG_FILE" 600
+
+  local resolved_hostname resolved_port
+  resolved_hostname="$NAS_HOST_ALIAS"
+  resolved_port=""
+  if command -v ssh >/dev/null 2>&1; then
+    resolved_hostname="$(ssh -G "$NAS_HOST_ALIAS" 2>/dev/null | awk '/^hostname /{print $2; exit}')"
+    resolved_port="$(ssh -G "$NAS_HOST_ALIAS" 2>/dev/null | awk '/^port /{print $2; exit}')"
+    [[ -n "$resolved_hostname" ]] || resolved_hostname="$NAS_HOST_ALIAS"
+  fi
+
+  local marker_begin="# BEGIN restic-backup ${BACKUP_HOST_ALIAS}"
+  local marker_end="# END restic-backup ${BACKUP_HOST_ALIAS}"
+  local tmp
+  tmp="$(mktemp)"
+
+  awk -v begin="$marker_begin" -v end="$marker_end" '
+    $0 == begin { skipping=1; next }
+    $0 == end { skipping=0; next }
+    !skipping { print }
+  ' "$SSH_CONFIG_FILE" >"$tmp"
+
+  {
+    [[ -s "$tmp" ]] && tail -c1 "$tmp" | read -r _ || true
+    printf '\n%s\n' "$marker_begin"
+    printf 'Host %s\n' "$BACKUP_HOST_ALIAS"
+    printf '  HostName %s\n' "$resolved_hostname"
+    if [[ -n "$resolved_port" ]]; then
+      printf '  Port %s\n' "$resolved_port"
+    fi
+    printf '  User %s\n' "$BACKUP_USER"
+    printf '  IdentityFile %s\n' "$SSH_KEY_FILE"
+    printf '  IdentitiesOnly yes\n'
+    printf '%s\n' "$marker_end"
+  } >>"$tmp"
+
+  mv "$tmp" "$SSH_CONFIG_FILE"
+  echo "Updated SSH config alias: $BACKUP_HOST_ALIAS -> $NAS_HOST_ALIAS"
+}
+
+print_ssh_snippet() {
+  local resolved_hostname resolved_port
+  resolved_hostname="$NAS_HOST_ALIAS"
+  resolved_port=""
+  if command -v ssh >/dev/null 2>&1; then
+    resolved_hostname="$(ssh -G "$NAS_HOST_ALIAS" 2>/dev/null | awk '/^hostname /{print $2; exit}')"
+    resolved_port="$(ssh -G "$NAS_HOST_ALIAS" 2>/dev/null | awk '/^port /{print $2; exit}')"
+    [[ -n "$resolved_hostname" ]] || resolved_hostname="$NAS_HOST_ALIAS"
+  fi
+  cat <<EOF
+SSH config snippet (optional; add to ~/.ssh/config manually if desired):
+Host ${BACKUP_HOST_ALIAS}
+  HostName ${resolved_hostname}
+$( [[ -n "$resolved_port" ]] && printf '  Port %s\n' "$resolved_port" )
+  User ${BACKUP_USER}
+  IdentityFile ${SSH_KEY_FILE}
+  IdentitiesOnly yes
+EOF
+}
+
+print_next_steps() {
+  cat <<EOF
+
+Local workstation setup complete.
+
+Client repository setting:
+  RESTIC_REPOSITORY="sftp:${BACKUP_USER}@${BACKUP_HOST_ALIAS}:${REPO_PATH}"
+
+Next steps:
+  1. Run NAS setup playbook (if not already done).
+  2. Test SSH (either alias or direct command):
+     ssh -i "${SSH_KEY_FILE}" ${BACKUP_USER}@${NAS_HOST_ALIAS}
+  3. Initialize repo once (first machine only):
+     source "$ENV_FILE" && restic init
+  4. Test backup:
+     make restic-backup-dry-run
+     make restic-backup-now
+  5. Enable timers:
+     make restic-systemd-enable
+EOF
+}
+
+main() {
+  require_cmd sed
+  require_cmd awk
+  require_cmd base64
+
+  CONFIG_DIR="$(dirname "$ENV_FILE")"
+  ensure_dir "$CONFIG_DIR"
+  ensure_dir "$(dirname "$PASSWORD_FILE")"
+
+  ensure_password_file
+  ensure_env_file
+  ensure_ssh_key
+  if [[ "$WRITE_SSH_CONFIG" -eq 1 ]]; then
+    upsert_ssh_config_block
+  fi
+
+  if [[ "$WRITE_SSH_CONFIG" -eq 1 ]]; then
+    set_env_var "RESTIC_REPOSITORY" "sftp:${BACKUP_USER}@${BACKUP_HOST_ALIAS}:${REPO_PATH}" "$ENV_FILE"
+  else
+    set_env_var "RESTIC_REPOSITORY" "sftp:${BACKUP_USER}@${NAS_HOST_ALIAS}:${REPO_PATH}" "$ENV_FILE"
+  fi
+  set_env_var "RESTIC_PASSWORD_FILE" "$PASSWORD_FILE" "$ENV_FILE"
+  ensure_mode "$ENV_FILE" 600
+
+  echo "Configured $ENV_FILE"
+  if [[ "$WRITE_SSH_CONFIG" -ne 1 ]]; then
+    echo
+    print_ssh_snippet
+  fi
+  print_next_steps
+}
+
+main "$@"

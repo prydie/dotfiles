@@ -1,0 +1,158 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/restic-backup"
+CMD="${1:-freshness}"
+shift || true
+
+if [[ -f "$CONFIG_DIR/env" ]]; then
+  # shellcheck disable=SC1090
+  source "$CONFIG_DIR/env"
+fi
+
+HOST_SHORT="$(hostname -s 2>/dev/null || hostname)"
+VERIFY_HOST="${RESTIC_VERIFY_HOST_LABEL:-${RESTIC_HOST_LABEL:-$HOST_SHORT}}"
+WARN_HOURS="${RESTIC_VERIFY_WARN_AGE_HOURS:-168}"
+CRIT_HOURS="${RESTIC_VERIFY_CRIT_AGE_HOURS:-720}"
+HA_WEBHOOK_URL="${RESTIC_HA_WEBHOOK_URL:-}"
+BACKUP_WRAPPER="${RESTIC_BACKUP_WRAPPER:-$HOME/bin/restic-backup}"
+
+usage() {
+  cat <<'EOF'
+Usage: restic-verify <command>
+
+Commands:
+  freshness   Check latest snapshot age for this host (default)
+  check-lite  Run `restic check` (pass extra args after command)
+
+Env (optional, in ~/.config/restic-backup/env):
+  RESTIC_VERIFY_HOST_LABEL       Hostname to evaluate (defaults to RESTIC_HOST_LABEL or hostname -s)
+  RESTIC_VERIFY_WARN_AGE_HOURS   Warn threshold (default: 168 / 7d)
+  RESTIC_VERIFY_CRIT_AGE_HOURS   Critical threshold (default: 720 / 30d)
+  RESTIC_HA_WEBHOOK_URL          Home Assistant webhook URL for JSON status posts
+EOF
+}
+
+require_cmd() {
+  command -v "$1" >/dev/null 2>&1 || {
+    echo "Required command not found: $1" >&2
+    exit 1
+  }
+}
+
+require_backup_wrapper() {
+  [[ -x "$BACKUP_WRAPPER" ]] || {
+    echo "restic backup wrapper not executable: $BACKUP_WRAPPER" >&2
+    exit 1
+  }
+}
+
+json_escape() {
+  printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'
+}
+
+post_ha_webhook() {
+  local payload="$1"
+  [[ -n "$HA_WEBHOOK_URL" ]] || return 0
+  command -v curl >/dev/null 2>&1 || {
+    echo "curl not found; skipping Home Assistant webhook" >&2
+    return 0
+  }
+  curl -fsS -m 10 -H 'Content-Type: application/json' -d "$payload" "$HA_WEBHOOK_URL" >/dev/null || {
+    echo "Warning: failed to post Home Assistant webhook" >&2
+    return 0
+  }
+}
+
+freshness_command() {
+  require_cmd jq
+  require_backup_wrapper
+
+  local snapshots_json latest_time snapshot_count latest_epoch now_epoch age_seconds age_hours status exit_code summary payload
+
+  snapshots_json="$("$BACKUP_WRAPPER" snapshots --json "$@")"
+
+  snapshot_count="$(jq -r --arg host "$VERIFY_HOST" '[ .[] | select(.hostname == $host) ] | length' <<<"$snapshots_json")"
+
+  if [[ "$snapshot_count" -eq 0 ]]; then
+    status="critical"
+    exit_code=2
+    summary="No snapshots found for host '$VERIFY_HOST'"
+    payload=$(
+      cat <<EOF
+{"check":"freshness","status":"$status","host":"$(json_escape "$VERIFY_HOST")","snapshot_count":0,"message":"$(json_escape "$summary")"}
+EOF
+    )
+    echo "$summary" >&2
+    post_ha_webhook "$payload"
+    return "$exit_code"
+  fi
+
+  latest_time="$(jq -r --arg host "$VERIFY_HOST" '[ .[] | select(.hostname == $host) ] | max_by(.time) | .time' <<<"$snapshots_json")"
+  latest_epoch="$(date -u -d "$latest_time" +%s)"
+  now_epoch="$(date -u +%s)"
+  age_seconds=$(( now_epoch - latest_epoch ))
+  (( age_seconds < 0 )) && age_seconds=0
+  age_hours=$(( age_seconds / 3600 ))
+
+  if (( age_hours >= CRIT_HOURS )); then
+    status="critical"
+    exit_code=2
+  elif (( age_hours >= WARN_HOURS )); then
+    status="warning"
+    exit_code=1
+  else
+    status="ok"
+    exit_code=0
+  fi
+
+  summary="restic freshness $status: host=$VERIFY_HOST latest=$latest_time age_hours=$age_hours snapshots=$snapshot_count"
+  echo "$summary"
+
+  payload=$(
+    cat <<EOF
+{"check":"freshness","status":"$status","host":"$(json_escape "$VERIFY_HOST")","latest_snapshot_time":"$(json_escape "$latest_time")","age_hours":$age_hours,"warn_age_hours":$WARN_HOURS,"crit_age_hours":$CRIT_HOURS,"snapshot_count":$snapshot_count,"message":"$(json_escape "$summary")"}
+EOF
+  )
+  post_ha_webhook "$payload"
+  return "$exit_code"
+}
+
+check_lite_command() {
+  require_backup_wrapper
+  local status exit_code summary payload
+  if "$BACKUP_WRAPPER" check "$@"; then
+    status="ok"
+    exit_code=0
+    summary="restic check completed successfully for host context '$VERIFY_HOST'"
+  else
+    status="critical"
+    exit_code=2
+    summary="restic check failed for host context '$VERIFY_HOST'"
+  fi
+  echo "$summary"
+  payload=$(
+    cat <<EOF
+{"check":"check-lite","status":"$status","host":"$(json_escape "$VERIFY_HOST")","message":"$(json_escape "$summary")"}
+EOF
+  )
+  post_ha_webhook "$payload"
+  return "$exit_code"
+}
+
+case "$CMD" in
+  freshness)
+    freshness_command "$@"
+    ;;
+  check-lite)
+    check_lite_command "$@"
+    ;;
+  help|-h|--help)
+    usage
+    ;;
+  *)
+    echo "Unknown command: $CMD" >&2
+    usage >&2
+    exit 2
+    ;;
+esac

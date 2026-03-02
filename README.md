@@ -51,6 +51,8 @@ make setup
 make refresh-dev
 make gnome-prefs-save
 make gnome-prefs-apply
+make restic-backup-now
+make restic-systemd-enable
 make patching
 make patching-full
 ```
@@ -124,6 +126,100 @@ kube::install_kubectl
 kube::install_helm
 kube::install_k3d
 ```
+
+## Backups to Synology NAS (Restic)
+
+This repo now includes a repo-managed `restic` wrapper + user `systemd` timers so both desktop and laptop can use the same backup workflow while keeping NAS credentials local.
+
+### What is versioned vs local
+
+- Versioned in dotfiles:
+  - backup command wrapper: `bin/restic-backup`
+  - verification wrapper: `bin/restic-verify`
+  - workstation bootstrap helper: `bin/restic-workstation-setup`
+  - timer/service units: `config/systemd/user/restic-*.{service,timer}`
+- default include/exclude lists: `config/restic-backup/paths.txt`, `config/restic-backup/excludes.txt`
+- Local per machine (not in git):
+  - `~/.config/restic-backup/env`
+  - `~/.config/restic-backup/password`
+  - optional host/local overrides (`paths.local.txt`, `paths.<hostname>.txt`, etc.)
+
+### Setup (each machine)
+
+1. Link dotfiles and ensure `restic` is installed (included in `PROFILE=core|dev|full`).
+2. Bootstrap local workstation config (recommended):
+
+```bash
+./bin/restic-workstation-setup --write-ssh-config
+```
+
+This generates a dedicated SSH key (`~/.ssh/id_ed25519_home_nas_backup`), creates local `restic` config/password files, and adds a local `home-nas-backup` SSH alias block.
+
+If you prefer to avoid modifying `~/.ssh/config`, omit `--write-ssh-config` and use the printed SSH snippet/manual setup.
+
+3. (Manual alternative) Create local config files:
+
+```bash
+mkdir -p ~/.config/restic-backup
+cp ~/.config/restic-backup/env.example ~/.config/restic-backup/env
+chmod 600 ~/.config/restic-backup/env
+printf 'choose-a-strong-restic-password\n' > ~/.config/restic-backup/password
+chmod 600 ~/.config/restic-backup/password
+```
+
+4. Edit `~/.config/restic-backup/env` and set `RESTIC_REPOSITORY`.
+   Examples:
+   - `sftp:backup@nas.lan:/volume1/restic/workstations` (Synology SSH/SFTP)
+   - `sftp:backup@home-nas-backup:/volume1/Backups/restic/workstations` (recommended with local SSH alias)
+   - `/mnt/nas-backups/restic/workstations` (mounted SMB/NFS share)
+5. Review backup scope in `config/restic-backup/paths.txt` and `config/restic-backup/excludes.txt`.
+   Default is now `~` (whole home) with broad cache/build/VCS excludes.
+6. Initialize the repo once (from one machine):
+
+```bash
+~/bin/restic-backup init
+```
+
+7. Test and enable timers:
+
+```bash
+make restic-backup-dry-run
+make restic-backup-now
+make restic-verify-now
+make restic-systemd-enable
+```
+
+### Operations
+
+```bash
+make restic-snapshots
+make restic-maintenance-now
+make restic-verify-now
+journalctl --user -u restic-verify.service -f
+journalctl --user -u restic-backup.service -f
+```
+
+### Notes
+
+- The wrapper auto-loads shared + host-specific include/exclude files:
+  - `paths.txt`, `paths.<hostname>.txt`, `paths.local.txt`
+  - `excludes.txt`, `excludes.<hostname>.txt`, `excludes.local.txt`
+- Missing paths are skipped with a warning (useful when desktop/laptop differ).
+- Defaults back up `~` and exclude `.git` plus common cache/build directories to keep backups focused on durable data/state.
+- Use `excludes.<hostname>.txt` or `excludes.local.txt` for machine-specific heavy paths you do not care about (for example VM images, game libraries, media scratch dirs).
+- Verification is intentionally laptop-friendly by default: snapshot freshness warns at 7 days and goes critical at 30 days (`bin/restic-verify`).
+
+### Optional Verification + Home Assistant Webhook
+
+Add these to `~/.config/restic-backup/env` if you want freshness status pushed to Home Assistant (or any webhook-compatible receiver):
+
+```bash
+RESTIC_VERIFY_WARN_AGE_HOURS=168   # 7 days
+RESTIC_VERIFY_CRIT_AGE_HOURS=720   # 30 days
+RESTIC_HA_WEBHOOK_URL="https://homeassistant.example.com/api/webhook/your-webhook-id"
+```
+
+The weekly `restic-verify.timer` posts JSON status after each freshness check when `RESTIC_HA_WEBHOOK_URL` is set.
 
 ## Safety notes
 

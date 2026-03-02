@@ -1,0 +1,11 @@
+[Unit]
+Description=Run Restic Freshness Verification Weekly
+
+[Timer]
+OnCalendar=Sat *-*-* 04:30:00
+RandomizedDelaySec=3h
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+

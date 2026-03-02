@@ -1,0 +1,242 @@
+---
+- name: Prepare Synology NAS for restic backups over SSH
+  hosts: all
+  gather_facts: false
+  become: false
+
+  vars:
+    synology_restic_user: backup
+    synology_restic_group: users
+    synology_restic_root: /volume1/Backups
+    synology_restic_share_name: Backups
+    synology_restic_repo_parent: /volume1/Backups/restic
+    synology_restic_mode_repo_parent: "0750"
+    synology_restic_mode_ssh_dir: "0700"
+    synology_restic_mode_auth_keys: "0600"
+    synology_restic_create_user: false
+    synology_restic_manage_share_permissions: true
+    synology_restic_user_password: ""
+    synology_restic_user_full_name: "Restic Backup"
+    synology_restic_pubkey: ""
+    synology_restic_pubkey_file: "{{ lookup('env', 'HOME') + '/.ssh/id_ed25519.pub' }}"
+
+  pre_tasks:
+    - name: Resolve public key from file when not passed inline
+      ansible.builtin.set_fact:
+        _synology_restic_pubkey_resolved: >-
+          {{
+            synology_restic_pubkey
+            if (synology_restic_pubkey | trim | length) > 0
+            else lookup('file', synology_restic_pubkey_file)
+          }}
+
+    - name: Validate required inputs
+      ansible.builtin.assert:
+        that:
+          - synology_restic_root | trim | length > 1
+          - synology_restic_repo_parent | trim | length > 1
+          - synology_restic_user | trim | length > 0
+          - _synology_restic_pubkey_resolved | trim | length > 0
+        fail_msg: "Missing required variables for Synology restic setup."
+
+    - name: Prompt for backup user password when creating user and password not provided
+      ansible.builtin.pause:
+        prompt: "Enter password for Synology user '{{ synology_restic_user }}'"
+        echo: false
+      register: synology_restic_password_prompt
+      when:
+        - synology_restic_create_user | bool
+        - synology_restic_user_password | trim | length == 0
+      no_log: true
+
+    - name: Set prompted backup user password
+      ansible.builtin.set_fact:
+        synology_restic_user_password: "{{ synology_restic_password_prompt.user_input }}"
+      when:
+        - synology_restic_password_prompt is defined
+        - (synology_restic_password_prompt.user_input | default('') | trim | length) > 0
+      no_log: true
+
+  tasks:
+    - name: Check whether backup user exists
+      ansible.builtin.raw: "id -u {{ synology_restic_user }}"
+      register: synology_restic_user_check
+      changed_when: false
+      failed_when: false
+
+    - name: Detect Synology synouser CLI tool
+      ansible.builtin.raw: >-
+        sh -lc 'command -v synouser || command -v /usr/syno/sbin/synouser || true'
+      register: synology_restic_synouser_detect
+      changed_when: false
+      failed_when: false
+
+    - name: Detect Synology synogroup CLI tool
+      ansible.builtin.raw: >-
+        sh -lc 'command -v synogroup || command -v /usr/syno/sbin/synogroup || true'
+      register: synology_restic_synogroup_detect
+      changed_when: false
+      failed_when: false
+
+    - name: Detect Synology synoshare CLI tool
+      ansible.builtin.raw: >-
+        sh -lc 'command -v synoshare || command -v /usr/syno/sbin/synoshare || true'
+      register: synology_restic_synoshare_detect
+      changed_when: false
+      failed_when: false
+
+    - name: Parse Synology CLI tool paths
+      ansible.builtin.set_fact:
+        synology_synouser_cmd: "{{ (synology_restic_synouser_detect.stdout | default('')) | trim }}"
+        synology_synogroup_cmd: "{{ (synology_restic_synogroup_detect.stdout | default('')) | trim }}"
+        synology_synoshare_cmd: "{{ (synology_restic_synoshare_detect.stdout | default('')) | trim }}"
+
+    - name: Validate password provided when auto-creating user
+      ansible.builtin.assert:
+        that:
+          - synology_restic_user_password | trim | length > 0
+        fail_msg: >-
+          synology_restic_user_password is required when synology_restic_create_user=true.
+      when:
+        - synology_restic_user_check.rc != 0
+        - synology_restic_create_user | bool
+
+    - name: Optionally create backup user via Synology CLI
+      ansible.builtin.raw: >-
+        {{ synology_synouser_cmd }} --add '{{ synology_restic_user }}' '{{ synology_restic_user_password }}'
+        '{{ synology_restic_user_full_name }}' 0 '' 0
+      when:
+        - synology_restic_user_check.rc != 0
+        - synology_restic_create_user | bool
+        - synology_synouser_cmd | length > 0
+      register: synology_restic_user_create_synology
+      changed_when: synology_restic_user_create_synology.rc == 0
+      no_log: true
+
+    - name: Ensure backup user is in target group (Synology CLI)
+      ansible.builtin.raw: >-
+        {{ synology_synogroup_cmd }} --memberadd '{{ synology_restic_group }}' '{{ synology_restic_user }}'
+      when:
+        - synology_restic_user_check.rc != 0
+        - synology_restic_create_user | bool
+        - synology_synogroup_cmd | length > 0
+      register: synology_restic_group_add
+      changed_when: synology_restic_group_add.rc == 0
+      failed_when: false
+
+    - name: Optionally create backup user (generic Linux fallback)
+      ansible.builtin.raw: >-
+        useradd -m -s /bin/sh {{ synology_restic_user }}
+      when:
+        - synology_restic_user_check.rc != 0
+        - synology_restic_create_user | bool
+        - synology_synouser_cmd | length == 0
+      register: synology_restic_user_create
+      changed_when: synology_restic_user_create.rc == 0
+
+    - name: Re-check backup user after optional creation
+      ansible.builtin.raw: "id -u {{ synology_restic_user }}"
+      register: synology_restic_user_check_after
+      changed_when: false
+      failed_when: false
+
+    - name: Fail if backup user is still missing after creation attempt
+      ansible.builtin.fail:
+        msg: >-
+          User {{ synology_restic_user }} does not exist on the NAS.
+          Create it in DSM first, or re-run with:
+          -e synology_restic_create_user=true
+          -e synology_restic_user_password='...'
+      when:
+        - (synology_restic_user_check_after.rc | default(synology_restic_user_check.rc)) != 0
+
+    - name: Warn if Synology group add may have failed
+      ansible.builtin.debug:
+        msg: >-
+          synogroup membership update for {{ synology_restic_user }} may need manual verification.
+          Command output: {{ synology_restic_group_add.stderr | default(synology_restic_group_add.stdout | default('')) }}
+      when:
+        - synology_restic_group_add is defined
+        - synology_restic_group_add.rc is defined
+        - synology_restic_group_add.rc != 0
+
+    - name: Grant DSM shared-folder RW permission to backup user
+      ansible.builtin.raw: >-
+        {{ synology_synoshare_cmd }} --setuser '{{ synology_restic_share_name }}' RW + '{{ synology_restic_user }}'
+      when:
+        - synology_restic_manage_share_permissions | bool
+        - synology_synoshare_cmd | length > 0
+      register: synology_restic_share_perm
+      changed_when: synology_restic_share_perm.rc == 0
+      failed_when: false
+
+    - name: Warn if DSM shared-folder permission update may have failed
+      ansible.builtin.debug:
+        msg: >-
+          Could not automatically grant RW on shared folder '{{ synology_restic_share_name }}'
+          to user '{{ synology_restic_user }}'. Configure in DSM UI.
+          Output: {{ synology_restic_share_perm.stderr | default(synology_restic_share_perm.stdout | default('')) }}
+      when:
+        - synology_restic_manage_share_permissions | bool
+        - synology_restic_share_perm is defined
+        - synology_restic_share_perm.rc is defined
+        - synology_restic_share_perm.rc != 0
+
+    - name: Set password if provided (optional)
+      ansible.builtin.raw: >-
+        printf '%s:%s\n' '{{ synology_restic_user }}' '{{ synology_restic_user_password }}' | chpasswd
+      when:
+        - synology_restic_user_password | trim | length > 0
+        - synology_synouser_cmd | length == 0
+      no_log: true
+
+    - name: Ensure backup root and repo parent directories exist
+      ansible.builtin.raw: >-
+        sh -lc 'changed=0;
+        [ -d "{{ synology_restic_root }}" ] || { mkdir -p "{{ synology_restic_root }}"; changed=1; };
+        [ -d "{{ synology_restic_repo_parent }}" ] || { mkdir -p "{{ synology_restic_repo_parent }}"; changed=1; };
+        chown {{ synology_restic_user }}:{{ synology_restic_group }} "{{ synology_restic_repo_parent }}";
+        chmod {{ synology_restic_mode_repo_parent }} "{{ synology_restic_repo_parent }}";
+        [ "$changed" -eq 0 ] || echo CHANGED'
+      register: synology_restic_dirs
+      changed_when: "'CHANGED' in synology_restic_dirs.stdout"
+
+    - name: Ensure SSH directory exists for backup user
+      ansible.builtin.raw: >-
+        sh -lc 'HOME_DIR="$(awk -F: '"'"'"'"'"'"'"'"'$1=="{{ synology_restic_user }}"{print $6}'"'"'"'"'"'"'"'"' /etc/passwd)";
+        test -n "$HOME_DIR";
+        if [ ! -d "$HOME_DIR/.ssh" ]; then mkdir -p "$HOME_DIR/.ssh"; echo CHANGED; fi;
+        chown {{ synology_restic_user }}:{{ synology_restic_group }} "$HOME_DIR/.ssh";
+        chmod {{ synology_restic_mode_ssh_dir }} "$HOME_DIR/.ssh"'
+      register: synology_restic_ssh_dir
+      changed_when: "'CHANGED' in synology_restic_ssh_dir.stdout"
+
+    - name: Install authorized key for backup user (idempotent append)
+      ansible.builtin.raw: |
+        HOME_DIR="$(awk -F: -v u='{{ synology_restic_user }}' '$1==u{print $6}' /etc/passwd)"
+        test -n "$HOME_DIR"
+        mkdir -p "$HOME_DIR/.ssh"
+        AUTH_KEYS="$HOME_DIR/.ssh/authorized_keys"
+        KEY_B64='{{ _synology_restic_pubkey_resolved | trim | b64encode }}'
+        KEY="$(printf '%s' "$KEY_B64" | (base64 -d 2>/dev/null || base64 -D 2>/dev/null))"
+        test -n "$KEY"
+        touch "$AUTH_KEYS"
+        if ! grep -qxF "$KEY" "$AUTH_KEYS"; then
+          printf '%s\n' "$KEY" >> "$AUTH_KEYS"
+          echo CHANGED
+        fi
+        chown {{ synology_restic_user }}:{{ synology_restic_group }} "$HOME_DIR/.ssh"
+        chmod {{ synology_restic_mode_ssh_dir }} "$HOME_DIR/.ssh"
+        chown {{ synology_restic_user }}:{{ synology_restic_group }} "$AUTH_KEYS"
+        chmod {{ synology_restic_mode_auth_keys }} "$AUTH_KEYS"
+      register: synology_restic_authkey
+      changed_when: "'CHANGED' in synology_restic_authkey.stdout"
+
+    - name: Print repository recommendation
+      ansible.builtin.debug:
+        msg:
+          - "NAS path prepared at {{ synology_restic_repo_parent }}"
+          - "Single shared repo example:"
+          - "  sftp:{{ synology_restic_user }}@home-nas:{{ synology_restic_repo_parent }}/workstations"
+          - "Per-machine repo example (one repo per host):"
+          - "  sftp:{{ synology_restic_user }}@home-nas:{{ synology_restic_root }}/$(hostname -s)"

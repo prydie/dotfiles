@@ -1,0 +1,11 @@
+[Unit]
+Description=Run Restic Retention/Prune Weekly
+
+[Timer]
+OnCalendar=Sun *-*-* 03:30:00
+RandomizedDelaySec=2h
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+

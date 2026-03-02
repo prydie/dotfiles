@@ -1,0 +1,13 @@
+[Unit]
+Description=Restic Backup (NAS)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=-%h/.config/restic-backup/env
+ExecStart=/usr/bin/env zsh -lc 'source "$HOME/.zshrc.local" >/dev/null 2>&1 || true; exec "$HOME/bin/restic-backup" backup'
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+

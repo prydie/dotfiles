@@ -1,0 +1,43 @@
+# Restic exclude patterns (one per line).
+
+# Caches and temporary data
+**/.cache
+**/Cache
+**/tmp
+**/.tmp
+**/.thumbnails
+**/.local/share/Trash
+**/.npm
+**/.yarn/cache
+**/.pnpm-store
+**/.cargo/registry
+**/.cargo/git
+**/.rustup/toolchains
+**/.local/state/nvim
+**/.local/share/nvim/swap
+**/.local/share/containers/storage
+**/.docker/buildx
+**/.mozilla/firefox/*/cache2
+**/.config/google-chrome/**/Cache
+**/.config/BraveSoftware/**/Cache
+
+# Large/generated developer directories
+**/node_modules
+**/.venv
+**/venv
+**/dist
+**/build
+**/.next
+**/target
+**/.terraform
+**/.tox
+**/.pytest_cache
+**/.mypy_cache
+**/.ruff_cache
+**/.gradle
+
+# VCS metadata (usually reconstructable via remote)
+**/.git
+
+# Restic/cache internals (avoid backing up backup metadata/cache)
+**/.cache/restic
