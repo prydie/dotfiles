@@ -1,2 +1,3 @@
-EXCLUDES="README.md LICENSE requirements.txt pyvenv.cfg kube-ps1.sh headphones.py *.log"
+EXCLUDES="README.md LICENSE requirements.txt pyvenv.cfg headphones.py *.log"
 DOTFILES_DIRS="$HOME/.dotfiles"
+UNDOTTED="bin"
