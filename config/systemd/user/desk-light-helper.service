@@ -1,0 +1,14 @@
+[Unit]
+Description=Desk Light Helper (Home Assistant tray app)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=-%h/.config/desk-light-helper/env
+ExecStart=/usr/bin/env zsh -lc 'source "$HOME/.zshrc.local" >/dev/null 2>&1 || true; exec "$HOME/bin/desk-light-helper"'
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

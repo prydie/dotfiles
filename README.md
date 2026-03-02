@@ -127,6 +127,44 @@ kube::install_helm
 kube::install_k3d
 ```
 
+## Desk light helper (Home Assistant + tray icon)
+
+`$HOME/bin/desk-light-helper` can auto-toggle your desk LED strip when all are true:
+
+- your laptop appears docked (via configurable `lsusb` regex)
+- Home Assistant is reachable
+
+Repo-managed config lives at `config/desk-light-helper/config.toml` and defaults to:
+
+- HA URL: `https://hass.prydie.co.uk/`
+- light entity: `light.office_player_sk6812_light`
+- HA token from env var `HOME_ASSISTANT_TOKEN`
+
+Setup:
+
+```bash
+make up
+export HOME_ASSISTANT_TOKEN='your-long-lived-access-token'
+$HOME/bin/desk-light-helper
+```
+
+It also installs an autostart entry at `config/autostart/desk-light-helper.desktop`.
+Use `$HOME/bin/desk-light-helper` for manual runs if `~/bin` is not on `PATH`.
+Use tray menu options to switch between automatic mode and manual force on/off.
+Logs are emitted to stderr/stdout so they are visible in terminal runs and in
+`journalctl` when run via systemd.
+
+Optional (recommended) user service:
+
+1. Ensure `HOME_ASSISTANT_TOKEN` is exported in `~/.zshrc.local`
+   (or set it in `~/.config/desk-light-helper/env`).
+2. Disable desktop autostart entry if you only want systemd-managed startup.
+3. Enable and start:
+   `systemctl --user daemon-reload`
+   `systemctl --user enable --now desk-light-helper.service`
+4. Follow logs:
+   `journalctl --user -u desk-light-helper.service -f`
+
 ## Backups to Synology NAS (Restic)
 
 This repo now includes a repo-managed `restic` wrapper + user `systemd` timers so both desktop and laptop can use the same backup workflow while keeping NAS credentials local.

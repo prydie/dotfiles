@@ -1,0 +1,18 @@
+poll_seconds = 10
+ha_timeout_seconds = 3
+
+[home_assistant]
+url = "http://192.168.1.252:8123"
+# Use env var for token to avoid committing secrets.
+token = "env:HOME_ASSISTANT_TOKEN"
+light_entity_id = "light.office_player_sk6812_light"
+
+[detection]
+# Command output should include a dock-identifying string.
+dock_detection_command = ["lsusb"]
+dock_regex = "Dell|WD19|D6000"
+
+[icon]
+on = "desk-light-on"
+off = "desk-light-off"
+error = "dialog-warning-symbolic"

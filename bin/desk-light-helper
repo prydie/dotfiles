@@ -1,0 +1,369 @@
+#!/usr/bin/env python3
+
+import json
+import logging
+import os
+import re
+import subprocess
+import sys
+import tomllib
+import urllib.error
+import urllib.parse
+import urllib.request
+from dataclasses import dataclass, field
+from typing import Optional
+
+try:
+    import gi
+
+    gi.require_version("Gtk", "3.0")
+    try:
+        gi.require_version("AyatanaAppIndicator3", "0.1")
+        from gi.repository import AyatanaAppIndicator3 as AppIndicator
+    except ValueError:
+        gi.require_version("AppIndicator3", "0.1")
+        from gi.repository import AppIndicator3 as AppIndicator
+    from gi.repository import GLib, Gtk
+except Exception as exc:  # pragma: no cover
+    print(
+        "desk-light-helper requires python3-gi and appindicator bindings: "
+        f"{exc}",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+
+
+CONFIG_PATH = os.path.expanduser(
+    os.environ.get("DESK_LIGHT_CONFIG", "~/.config/desk-light-helper/config.toml")
+)
+ICON_PATH = os.path.expanduser("~/.config/desk-light-helper/icons")
+LOGGER = logging.getLogger("desk-light-helper")
+
+
+def describe_http_error(exc: urllib.error.HTTPError) -> str:
+    try:
+        body = exc.read().decode("utf-8", errors="replace").strip()
+    except Exception:
+        body = ""
+    if body:
+        body = " ".join(body.split())
+        return f"HTTP {exc.code} {exc.reason}: {body[:240]}"
+    return f"HTTP {exc.code} {exc.reason}"
+
+
+@dataclass
+class Config:
+    ha_url: str
+    ha_token: str
+    light_entity_id: str
+    poll_seconds: int = 10
+    ha_timeout_seconds: int = 3
+
+    dock_detection_command: list[str] = field(default_factory=lambda: ["lsusb"])
+    dock_regex: str = r"Dell|WD19|D6000"
+
+    icon_on: str = "desk-light-on"
+    icon_off: str = "desk-light-off"
+    icon_error: str = "dialog-warning-symbolic"
+
+
+class HAClient:
+    def __init__(self, cfg: Config):
+        self.cfg = cfg
+        self.base = cfg.ha_url.rstrip("/")
+
+    def _request(self, method: str, path: str, payload: Optional[dict] = None) -> tuple[int, str]:
+        url = f"{self.base}{path}"
+        data = None
+        headers = {
+            "Authorization": f"Bearer {self.cfg.ha_token}",
+            "Content-Type": "application/json",
+        }
+        if payload is not None:
+            data = json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(url=url, data=data, headers=headers, method=method)
+        with urllib.request.urlopen(req, timeout=self.cfg.ha_timeout_seconds) as resp:
+            return resp.getcode(), resp.read().decode("utf-8", errors="replace")
+
+    def reachable(self) -> bool:
+        try:
+            code, _ = self._request("GET", "/api/")
+            return code == 200
+        except urllib.error.HTTPError as exc:
+            LOGGER.warning("Home Assistant is unreachable: %s", describe_http_error(exc))
+            return False
+        except Exception as exc:
+            LOGGER.warning("Home Assistant is unreachable: %s", exc)
+            return False
+
+    def set_light(self, on: bool) -> bool:
+        service = "/api/services/light/turn_on" if on else "/api/services/light/turn_off"
+        try:
+            code, _ = self._request("POST", service, {"entity_id": self.cfg.light_entity_id})
+            return 200 <= code < 300
+        except urllib.error.HTTPError as exc:
+            LOGGER.error(
+                "Failed to set light %s: %s",
+                "on" if on else "off",
+                describe_http_error(exc),
+            )
+            return False
+        except Exception as exc:
+            LOGGER.error("Failed to set light %s: %s", "on" if on else "off", exc)
+            return False
+
+
+class DeskLightHelper:
+    def __init__(self, cfg: Config):
+        self.cfg = cfg
+        self.ha = HAClient(cfg)
+
+        self.auto_mode = True
+        self.manual_state: Optional[bool] = None
+        self.last_applied: Optional[bool] = None
+
+        self.last_summary = "Initializing"
+        self.last_ok = False
+        self.icon_on = self.resolve_icon(
+            cfg.icon_on,
+            ["night-light-symbolic", "display-brightness-symbolic", "changes-allow-symbolic"],
+            "dialog-warning-symbolic",
+        )
+        self.icon_off = self.resolve_icon(
+            cfg.icon_off,
+            ["night-light-disabled-symbolic", "display-brightness-symbolic", "changes-prevent-symbolic"],
+            "process-stop-symbolic",
+        )
+        self.icon_error = self.resolve_icon(
+            cfg.icon_error,
+            ["dialog-warning-symbolic", "process-stop-symbolic"],
+            "process-stop-symbolic",
+        )
+        LOGGER.info(
+            "Resolved tray icons: on=%s off=%s error=%s",
+            self.icon_on,
+            self.icon_off,
+            self.icon_error,
+        )
+
+        self.indicator = AppIndicator.Indicator.new(
+            "desk-light-helper",
+            self.icon_off,
+            AppIndicator.IndicatorCategory.APPLICATION_STATUS,
+        )
+        if os.path.isdir(ICON_PATH):
+            self.indicator.set_icon_theme_path(ICON_PATH)
+        self.indicator.set_status(AppIndicator.IndicatorStatus.ACTIVE)
+
+        self.status_item = Gtk.MenuItem(label="Starting…")
+        self.status_item.set_sensitive(False)
+
+        self.auto_item = Gtk.CheckMenuItem(label="Automatic mode")
+        self.auto_item.set_active(True)
+        self.auto_item.connect("toggled", self.on_auto_toggled)
+
+        force_on_item = Gtk.MenuItem(label="Force light ON")
+        force_on_item.connect("activate", lambda *_: self.force_state(True))
+
+        force_off_item = Gtk.MenuItem(label="Force light OFF")
+        force_off_item.connect("activate", lambda *_: self.force_state(False))
+
+        refresh_item = Gtk.MenuItem(label="Refresh now")
+        refresh_item.connect("activate", lambda *_: self.evaluate_and_apply())
+
+        quit_item = Gtk.MenuItem(label="Quit")
+        quit_item.connect("activate", self.on_quit)
+
+        menu = Gtk.Menu()
+        for item in [
+            self.status_item,
+            Gtk.SeparatorMenuItem(),
+            self.auto_item,
+            force_on_item,
+            force_off_item,
+            refresh_item,
+            Gtk.SeparatorMenuItem(),
+            quit_item,
+        ]:
+            menu.append(item)
+        menu.show_all()
+
+        self.indicator.set_menu(menu)
+
+    def run(self) -> None:
+        LOGGER.info("Starting helper with poll=%ss", self.cfg.poll_seconds)
+        self.evaluate_and_apply()
+        GLib.timeout_add_seconds(max(3, int(self.cfg.poll_seconds)), self.on_tick)
+        Gtk.main()
+
+    def on_tick(self) -> bool:
+        self.evaluate_and_apply()
+        return True
+
+    def on_auto_toggled(self, widget: Gtk.CheckMenuItem) -> None:
+        self.auto_mode = widget.get_active()
+        LOGGER.info("Automatic mode set to %s", self.auto_mode)
+        if self.auto_mode:
+            self.manual_state = None
+            self.evaluate_and_apply()
+
+    def force_state(self, on: bool) -> None:
+        self.auto_mode = False
+        self.manual_state = on
+        self.auto_item.set_active(False)
+        ok = self.ha.set_light(on)
+        if ok:
+            self.last_applied = on
+        self.last_summary = f"Manual {'ON' if on else 'OFF'} ({'ok' if ok else 'failed'})"
+        self.last_ok = ok
+        LOGGER.info(self.last_summary)
+        self.refresh_ui()
+
+    def on_quit(self, *_args) -> None:
+        Gtk.main_quit()
+
+    def evaluate_and_apply(self) -> None:
+        ha_reachable = self.ha.reachable()
+        docked = self.is_docked()
+        desired_auto = docked and ha_reachable
+
+        if self.auto_mode:
+            desired = desired_auto
+        else:
+            desired = bool(self.manual_state)
+
+        ok = True
+        if self.last_applied is None or desired != self.last_applied:
+            ok = self.ha.set_light(desired)
+            if ok:
+                self.last_applied = desired
+
+        mode = "auto" if self.auto_mode else "manual"
+        self.last_summary = (
+            f"{mode} | dock={docked} ha={ha_reachable} "
+            f"-> light={'on' if desired else 'off'}"
+        )
+        self.last_ok = ok
+        LOGGER.info(self.last_summary)
+        self.refresh_ui()
+
+    def refresh_ui(self) -> None:
+        status = self.last_summary
+        self.status_item.set_label(status)
+
+        if not self.last_ok:
+            icon = self.icon_error
+        else:
+            icon = self.icon_on if self.last_applied else self.icon_off
+        self.indicator.set_icon_full(icon, status)
+
+    @staticmethod
+    def resolve_icon(preferred: str, fallbacks: list[str], hard_fallback: str) -> str:
+        if preferred.startswith("desk-light-"):
+            return preferred
+        theme = Gtk.IconTheme.get_default()
+        if not theme:
+            LOGGER.warning(
+                "GTK icon theme unavailable during icon resolution; using configured icon '%s'",
+                preferred,
+            )
+            return preferred
+        for name in [preferred, *fallbacks]:
+            if name and theme and theme.has_icon(name):
+                return name
+        LOGGER.warning(
+            "No configured/fallback tray icon found for '%s'; using '%s'",
+            preferred,
+            hard_fallback,
+        )
+        return hard_fallback
+
+    def is_docked(self) -> bool:
+        out = self.run_cmd(self.cfg.dock_detection_command)
+        if out is None:
+            return False
+        return re.search(self.cfg.dock_regex, out, flags=re.IGNORECASE) is not None
+
+    @staticmethod
+    def run_cmd(cmd: list[str]) -> Optional[str]:
+        try:
+            out = subprocess.check_output(cmd, stderr=subprocess.DEVNULL)
+            return out.decode("utf-8", errors="replace")
+        except Exception as exc:
+            LOGGER.warning("Command failed for dock detection (%s): %s", " ".join(cmd), exc)
+            return None
+
+def load_config(path: str) -> Config:
+    with open(path, "rb") as f:
+        raw = tomllib.load(f)
+
+    ha = raw.get("home_assistant", {})
+    detection = raw.get("detection", {})
+    icon = raw.get("icon", {})
+
+    token = str(ha.get("token", "")).strip()
+    if token.startswith("env:"):
+        token = os.environ.get(token.split(":", 1)[1], "").strip()
+
+    cfg = Config(
+        ha_url=str(ha.get("url", "")).strip(),
+        ha_token=token,
+        light_entity_id=str(ha.get("light_entity_id", "")).strip(),
+        poll_seconds=int(raw.get("poll_seconds", 10)),
+        ha_timeout_seconds=int(raw.get("ha_timeout_seconds", 3)),
+        dock_detection_command=list(detection.get("dock_detection_command", ["lsusb"])),
+        dock_regex=str(detection.get("dock_regex", r"Dell|WD19|D6000")),
+        icon_on=str(icon.get("on", "desk-light-on")),
+        icon_off=str(icon.get("off", "desk-light-off")),
+        icon_error=str(icon.get("error", "dialog-warning-symbolic")),
+    )
+
+    missing = []
+    if not cfg.ha_url:
+        missing.append("home_assistant.url")
+    if not cfg.ha_token:
+        missing.append("home_assistant.token")
+    if not cfg.light_entity_id:
+        missing.append("home_assistant.light_entity_id")
+    if missing:
+        raise SystemExit(f"Missing required config keys: {', '.join(missing)}")
+
+    LOGGER.info("Loaded config from %s", path)
+    return cfg
+
+
+def setup_logging() -> None:
+    formatter = logging.Formatter("%(asctime)s %(levelname)s %(message)s")
+    stream_handler = logging.StreamHandler(sys.stderr)
+    stream_handler.setFormatter(formatter)
+    LOGGER.setLevel(logging.INFO)
+    LOGGER.handlers.clear()
+    LOGGER.addHandler(stream_handler)
+    LOGGER.propagate = False
+    LOGGER.info("Logging initialized to stderr")
+
+
+def main() -> int:
+    setup_logging()
+    gtk_ok, _ = Gtk.init_check()
+    if not gtk_ok:
+        LOGGER.error("No graphical display available; cannot start tray indicator")
+        return 1
+
+    if not os.path.exists(CONFIG_PATH):
+        LOGGER.error("Config not found: %s", CONFIG_PATH)
+        print(
+            f"Config not found: {CONFIG_PATH}\n"
+            "Create it from ~/.dotfiles/config/desk-light-helper/config.toml and run make up.",
+            file=sys.stderr,
+        )
+        return 1
+
+    cfg = load_config(CONFIG_PATH)
+    app = DeskLightHelper(cfg)
+    app.run()
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
