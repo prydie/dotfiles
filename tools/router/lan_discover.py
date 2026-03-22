@@ -2,6 +2,7 @@
 
 import argparse
 import getpass
+import ipaddress
 import json
 import os
 from pathlib import Path
@@ -238,10 +239,20 @@ def merge_devices(*maps: dict[str, Device]) -> list[Device]:
                 sources.append(incoming.source)
                 current.source = ",".join(sources)
 
-    return sorted(
-        merged.values(),
-        key=lambda item: tuple(int(part) for part in item.ip.split(".")) if item.ip else (999, 999, 999, 999),
-    )
+    return sorted(merged.values(), key=device_sort_key)
+
+
+def device_sort_key(item: Device) -> tuple[int, int, bytes, str]:
+    if not item.ip:
+        return (2, 0, b"", "")
+
+    try:
+        parsed = ipaddress.ip_address(item.ip)
+    except ValueError:
+        return (3, 0, b"", item.ip)
+
+    family_rank = 0 if parsed.version == 4 else 1
+    return (family_rank, int(parsed), parsed.packed, item.ip)
 
 
 def render_table(devices: list[Device]) -> None:
