@@ -2,3 +2,5 @@ build.log
 venv/
 .nvimlog
 */__pycache__/*
+__pycache__/
+*.py[cod]

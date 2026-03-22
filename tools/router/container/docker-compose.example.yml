@@ -1,0 +1,14 @@
+services:
+  router-metrics-exporter:
+    build:
+      context: /volume1/path/to/your/dotfiles
+      dockerfile: tools/router/container/Dockerfile
+    container_name: router-metrics-exporter
+    restart: unless-stopped
+    environment:
+      ROUTER_EXPORTER_USERNAME: admin
+      ROUTER_EXPORTER_PASSWORD: ${ROUTER_EXPORTER_PASSWORD}
+      ROUTER_EXPORTER_ROUTER_URL: https://192.168.1.1
+      ROUTER_EXPORTER_VERIFY_TLS: "0"
+    ports:
+      - "9787:9787"

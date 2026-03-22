@@ -216,6 +216,119 @@ Optional (recommended) user service:
 4. Follow logs:
    `journalctl --user -u desk-light-helper.service -f`
 
+## LAN device discovery (router API)
+
+`$HOME/bin/lan-discover` reads device inventory directly from a Sagemcom router API instead of probing the LAN.
+
+The current implementation is router-first and uses:
+
+- `POST /api/v1/login`
+- `GET /api/v1/hosts`
+- `GET /api/v1/dhcp/clients`
+- optional `GET /api/v1/hosts/arp_table`
+
+Keep credentials out of this repo. Store them in a local config file or environment variables instead:
+
+```toml
+# ~/.config/lan-discover/config.toml
+[router]
+url = "https://192.168.1.1"
+username = "admin"
+password_env = "LAN_DISCOVER_ROUTER_PASSWORD"
+```
+
+Then export the password outside the repo, for example in `~/.zshrc.local`:
+
+```bash
+export LAN_DISCOVER_ROUTER_PASSWORD='your-router-password'
+```
+
+Usage:
+
+```bash
+$HOME/bin/lan-discover
+$HOME/bin/lan-discover --active-only
+$HOME/bin/lan-discover --include-arp
+$HOME/bin/lan-discover --json
+```
+
+Notes:
+
+- TLS verification is off by default because local router certs are commonly self-signed.
+- The script keeps the router session cookie in memory only.
+- `hosts` is treated as the primary inventory; `dhcp/clients` is merged in for reservation and naming data.
+- DHCP reservations are preserved separately from current live IPs.
+
+## Router Prometheus exporter
+
+`$HOME/bin/router-metrics-exporter` exposes a small Prometheus endpoint for the Sagemcom/YouFibre router.
+
+It currently exports:
+
+- WAN up/down state
+- WAN RX/TX packets, bytes, errors, discards
+- Per-interface counters and link state from `lan/stats`
+- Session count
+- Network info labels (public IPv4/IPv6, gateways, MAC)
+- Host inventory counts
+- Host inventory grouped by link/type/device type
+- DHCP reservation counts
+
+It uses the same local-only credentials pattern as `lan-discover`; do not commit secrets.
+
+Authentication notes:
+
+- The exporter mirrors the router web UI login flow rather than posting the raw password directly.
+- It first calls `/api/v1/login-params`, then derives the challenge response expected by `/api/v1/login`.
+- Login attempts back off exponentially on HTTP `429` so a rate-limited router is not hammered every scrape.
+
+One-shot test:
+
+```bash
+ROUTER_EXPORTER_USERNAME=admin \
+ROUTER_EXPORTER_PASSWORD='your-router-password' \
+$HOME/bin/router-metrics-exporter --once
+```
+
+Server mode:
+
+```bash
+ROUTER_EXPORTER_USERNAME=admin \
+ROUTER_EXPORTER_PASSWORD='your-router-password' \
+$HOME/bin/router-metrics-exporter
+```
+
+The default listener is `0.0.0.0:9787` and the default path is `/metrics`.
+
+The default metric set is intentionally low-cardinality for long-term Prometheus use; it exports host counts and grouped summaries rather than one time series per device.
+
+The script is also structured to be imported if needed:
+
+- Shared API logic lives in the local `tools/router/router_api/` package and is used by both `lan-discover` and the exporter.
+- The import surface is re-exported from `tools/router/router_api/__init__.py`, with the implementation in `tools/router/router_api/client.py`.
+- `RouterClient` can be reused by other local tools that need authenticated API access
+- `render_metrics()` can be called directly if you want to expose the same metric set from another entrypoint
+- The module has no side effects on import; network access only starts when the client is used
+
+Logging:
+
+- The exporter now uses Python's standard logging module instead of ad-hoc `print()` calls.
+- Set `ROUTER_EXPORTER_LOG_LEVEL` (or pass `--log-level`) to control verbosity. The default is `INFO`.
+
+A minimal container build is included at `tools/router/container/` with:
+
+- `tools/router/container/Dockerfile`
+- `tools/router/container/docker-compose.example.yml`
+
+Prometheus scrape example:
+
+```yaml
+- job_name: 'router'
+  metrics_path: /metrics
+  static_configs:
+    - targets: ['router-metrics-exporter:9787']
+```
+
 ## Backups to Synology NAS (Restic)
 
 This repo now includes a repo-managed `restic` wrapper + user `systemd` timers so both desktop and laptop can use the same backup workflow while keeping NAS credentials local.
