@@ -1,8 +1,70 @@
 local project_env = require "project_env"
+local lspconfig = require "plugins.configs.lspconfig"
+
+local function project_root()
+  return vim.fs.root(vim.api.nvim_buf_get_name(0), { "go.work", "go.mod", ".git" }) or vim.fn.getcwd()
+end
+
+local function project_golangci_lint()
+  local local_bin = project_root() .. "/bin/golangci-lint"
+  if vim.fn.executable(local_bin) == 1 then
+    return local_bin
+  end
+  return "golangci-lint"
+end
+
+local function golangci_command()
+  local root = project_root()
+  local local_bin = root .. "/bin/golangci-lint"
+
+  if vim.fn.filereadable(root .. "/.custom-gcl.yml") == 1 then
+    if vim.fn.executable(local_bin) == 1 then
+      return { local_bin, "run", "./..." }
+    end
+
+    vim.notify(
+      "Project uses a custom golangci-lint plugin build. Run `make golangci-lint` in the repo first.",
+      vim.log.levels.WARN,
+      { title = "GoLint" }
+    )
+    return nil
+  end
+
+  return { project_golangci_lint(), "run", "./..." }
+end
 
 -- mason, write correct names only
 vim.api.nvim_create_user_command("MasonInstallAll", function()
-  vim.cmd "MasonInstall bash-language-server css-lsp dockerfile-language-server html-lsp json-lsp lua-language-server pyright yaml-language-server ansible-language-server terraform-ls helm-ls gopls clangd stylua prettier black isort shfmt shellcheck tflint hadolint delve debugpy"
+  vim.cmd "MasonInstall bash-language-server css-lsp dockerfile-language-server html-lsp json-lsp lua-language-server pyright yaml-language-server ansible-language-server terraform-ls helm-ls gopls goimports gofumpt golangci-lint clangd stylua prettier black isort shfmt shellcheck tflint hadolint delve debugpy"
+end, {})
+
+vim.api.nvim_create_user_command("GoRun", function()
+  lspconfig.go_run(vim.api.nvim_get_current_buf())
+end, {})
+
+vim.api.nvim_create_user_command("GoBuild", function()
+  lspconfig.go_build(vim.api.nvim_get_current_buf())
+end, {})
+
+vim.api.nvim_create_user_command("GoCoverage", function()
+  lspconfig.go_coverage(vim.api.nvim_get_current_buf())
+end, {})
+
+vim.api.nvim_create_user_command("GoLint", function()
+  local cwd = project_root()
+  local cmd = golangci_command()
+  if not cmd then
+    return
+  end
+
+  Snacks.terminal(cmd, {
+    cwd = cwd,
+    auto_close = false,
+    win = {
+      position = "bottom",
+      height = 0.3,
+    },
+  })
 end, {})
 
 vim.api.nvim_create_user_command("TofuFmt", function()

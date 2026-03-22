@@ -3,10 +3,19 @@
 
 export GOARCH=$(go env GOARCH 2>/dev/null || echo "amd64")
 
-_ROOT="$(dirname "${BASH_SOURCE}")/.."
+_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." && pwd)"
+if [ ! -f "${_ROOT}/hooks/os" ] && [ -f "${PWD}/hooks/os" ]; then
+  _ROOT="${PWD}"
+fi
+
+if [ -f "${XDG_CONFIG_HOME:-${HOME}/.config}/mise/config.toml" ]; then
+  export MISE_GLOBAL_CONFIG_FILE="${XDG_CONFIG_HOME:-${HOME}/.config}/mise/config.toml"
+elif [ -f "${_ROOT}/config/mise/config.toml" ]; then
+  export MISE_GLOBAL_CONFIG_FILE="${_ROOT}/config/mise/config.toml"
+fi
 
 ARCH=$([ "$(uname -m)" = "x86_64" ] && echo amd64 || echo arm64)
-export PATH="${HOME}/.local/bin:${HOME}/.cargo/bin:${PATH}"
+export PATH="${XDG_DATA_HOME:-${HOME}/.local/share}/mise/shims:${HOME}/.local/bin:${HOME}/.cargo/bin:${PATH}"
 
 log::f () {
  printf "INFO: %s $*\n" "$(date)"
@@ -14,6 +23,10 @@ log::f () {
 
 log::e () {
   printf "ERROR: %s  $*\n" "$(date)"
+}
+
+version::ge() {
+  [ "$(printf '%s\n%s\n' "$2" "$1" | sort -V | tail -n1)" = "$1" ]
 }
 
 gh::download() {
@@ -50,64 +63,92 @@ uv::tool_install() {
   uv tool install --force --upgrade "${tool}"
 }
 
-tools::install_starship() {
-  if command -v starship >/dev/null 2>&1; then
-    log::f "starship already installed: $(starship --version)"
-    return 0
+tools::mise_global_config() {
+  local global_config
+  global_config="${XDG_CONFIG_HOME:-${HOME}/.config}/mise/config.toml"
+  if [ -f "${global_config}" ]; then
+    printf '%s\n' "${global_config}"
+  else
+    printf '%s\n' "${_ROOT}/config/mise/config.toml"
   fi
-
-  log::f "Installing starship to ${HOME}/.local/bin"
-  mkdir -p "${HOME}/.local/bin"
-  curl -fsSL https://starship.rs/install.sh | sh -s -- -y -b "${HOME}/.local/bin"
 }
 
-tools::install_atuin() {
-  local version latest_json target out tmpdir bin_path
+tools::install_mise() {
+  local mise_bin
+  mise_bin="${HOME}/.local/bin/mise"
 
-  if command -v atuin >/dev/null 2>&1; then
-    log::f "atuin already installed: $(atuin --version)"
+  if command -v mise >/dev/null 2>&1; then
+    log::f "mise already installed: $(mise --version 2>/dev/null | head -n1)"
     return 0
   fi
 
-  case "${ARCH}" in
-    amd64)
-      target="x86_64-unknown-linux-gnu"
-      ;;
-    arm64)
-      target="aarch64-unknown-linux-gnu"
-      ;;
-    *)
-      log::f "Skipping atuin install: unsupported ARCH=${ARCH}"
-      return 0
-      ;;
-  esac
+  log::f "Installing mise"
+  curl https://mise.run | sh
 
-  if [ -n "${ATUIN_VERSION:-}" ]; then
-    version="${ATUIN_VERSION}"
-  else
-    latest_json="$(curl -fsSL https://api.github.com/repos/atuinsh/atuin/releases/latest || true)"
-    version="$(printf '%s\n' "${latest_json}" | sed -n 's/.*"tag_name":[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)"
-    version="${version:-v18.8.0}"
+  if [ ! -x "${mise_bin}" ]; then
+    log::e "mise installation completed but ${mise_bin} was not created"
+    return 1
   fi
+}
 
-  out="$(mktemp)"
-  tmpdir="$(mktemp -d)"
-  gh::download "atuinsh/atuin" "${version}" "atuin-${target}.tar.gz" "${out}"
-  tar -xzf "${out}" -C "${tmpdir}"
+tools::install_mise_tools() {
+  local config_file
+  config_file="$(tools::mise_global_config)"
 
-  bin_path="$(find "${tmpdir}" -type f -name atuin | head -n1)"
-  if [ -z "${bin_path}" ]; then
-    log::e "atuin binary not found in downloaded archive"
-    rm -rf "${tmpdir}"
-    rm -f "${out}"
+  if [ ! -f "${config_file}" ]; then
+    log::e "mise config not found at ${config_file}"
     return 1
   fi
 
-  mkdir -p "${HOME}/.local/bin"
-  install -m 0755 "${bin_path}" "${HOME}/.local/bin/atuin"
-  rm -rf "${tmpdir}"
-  rm -f "${out}"
-  log::f "Installed atuin ${version} to ${HOME}/.local/bin/atuin"
+  tools::install_mise
+  MISE_GLOBAL_CONFIG_FILE="${config_file}" mise install "$@"
+}
+
+tools::install_mise_core_tools() {
+  tools::install_mise_tools starship atuin kubectl vale
+}
+
+tools::install_mise_dev_tools() {
+  tools::install_mise_tools \
+    neovim \
+    helm \
+    kubebuilder \
+    doctl \
+    pipx:awscli \
+    pipx:esptool \
+    pipx:black \
+    pipx:isort \
+    pipx:mypy \
+    pipx:ruff
+}
+
+tools::install_mise_full_tools() {
+  tools::install_mise_tools \
+    pipx:oci-cli \
+    pipx:autopep8 \
+    nerdctl \
+    regctl \
+    github:tsenart/vegeta
+}
+
+tools::sync_vale_styles() {
+  local vale_config
+  vale_config="${XDG_CONFIG_HOME:-${HOME}/.config}/vale/vale.ini"
+  if [ ! -f "${vale_config}" ] && [ -f "${_ROOT}/config/vale/vale.ini" ]; then
+    vale_config="${_ROOT}/config/vale/vale.ini"
+  fi
+
+  if ! command -v vale >/dev/null 2>&1; then
+    log::f "Skipping vale sync: vale not on PATH"
+    return 0
+  fi
+
+  if [ ! -f "${vale_config}" ]; then
+    log::f "Skipping vale sync: no Vale config found"
+    return 0
+  fi
+
+  VALE_CONFIG_PATH="${vale_config}" vale sync
 }
 
 nvm::ensure_installed() {
@@ -622,13 +663,13 @@ kube::binaries() {
   BIN_DIR="${HOME}/bin"
   mkdir -p "${BIN_DIR}"
 
-  # Reuse the canonical installer implementation.
+  # Reuse the canonical completion implementation.
   # shellcheck source=hooks/kubernetes
   . "${kube_hooks}"
-  kube::install_kubectl
+  kube::install_zsh_completion kubectl
 
-  log::f "Installed kubectl to ${BIN_DIR}/kubectl"
-  log::f "To install helm/k3d safely, source hooks/kubernetes and run kube::install_helm / kube::install_k3d"
+  log::f "Installed core mise-managed CLIs from $(tools::mise_global_config)"
+  log::f "For extra Kubernetes tools, source hooks/kubernetes and run kube::install_k3d"
 }
 
 os::ubuntu::install_packages() {
@@ -699,12 +740,13 @@ os::ubuntu::install_packages_core() {
   desktop::apply_gnome_extension_preferences
 
   uv::ensure_installed
-  tools::install_starship
-  tools::install_atuin
+  tools::install_mise
+  tools::install_mise_core_tools
+  kube::binaries
+  tools::sync_vale_styles
   fonts::install_nerd_font
   terminal::configure_gnome_terminal_font
   nvm::install_node_default
-  sudo apt install -y --no-install-recommends python3-neovim || true
 
   # Ubuntu names the package fd-find but many tools expect fd.
   if command -v fdfind >/dev/null 2>&1 && ! command -v fd >/dev/null 2>&1; then
@@ -723,7 +765,6 @@ os::ubuntu::install_packages_core() {
 
   if command -v snap >/dev/null 2>&1; then
     log::f "Installing snap packages"
-    sudo snap install go --classic
     sudo snap install firefox
     sudo snap connect firefox:u2f-devices # Yubikey support
   fi
@@ -744,9 +785,17 @@ os::ubuntu::install_packages_dev() {
   sudo apt install -y --no-install-recommends "${dev_packages[@]}"
   tools::install_opentofu
   go::ensure_installed
-  tools::install_awscli
+  tools::install_mise_dev_tools
+  go::install_developer_tools
+  if [ -f "${_ROOT}/hooks/kubernetes" ]; then
+    BIN_DIR="${HOME}/bin"
+    mkdir -p "${BIN_DIR}"
+    # shellcheck source=hooks/kubernetes
+    . "${_ROOT}/hooks/kubernetes"
+    kube::install_zsh_completion kubebuilder
+    kube::install_zsh_completion helm
+  fi
   tools::install_esp_tools
-  tools::doctl
 
   # Keep fast-moving JS/Python tooling current from upstream registries.
   nvm::install_node_default
@@ -762,10 +811,6 @@ os::ubuntu::install_packages_dev() {
     pyright \
     vscode-langservers-extracted \
     yaml-language-server
-  uv::tool_install black
-  uv::tool_install isort
-  uv::tool_install ruff
-
   tools::verify_dev_cli
 }
 
@@ -774,28 +819,84 @@ os::set_zoom_scaling_factor () {
 }
 
 go::install_developer_tools() {
-  local modvendor_version golangci_lint_version
+  local modvendor_version golangci_lint_version gopls_version
   modvendor_version="${MODVENDOR_VERSION:-v0.5.0}"
-  golangci_lint_version="${GOLANGCI_LINT_VERSION:-v1.52.2}"
+  golangci_lint_version="${GOLANGCI_LINT_VERSION:-v2.8.0}"
+  gopls_version="${GPLS_VERSION:-latest}"
 
   go install "github.com/goware/modvendor@${modvendor_version}"
-  go install "github.com/golangci/golangci-lint/cmd/golangci-lint@${golangci_lint_version}"
+  go install "github.com/golangci/golangci-lint/v2/cmd/golangci-lint@${golangci_lint_version}"
+  go install "golang.org/x/tools/gopls@${gopls_version}"
+}
+
+go::install_local() {
+  local version min_version arch os_name tmpdir tarball install_root download_version
+  min_version="${GO_MIN_VERSION:-1.23.0}"
+  version="${GO_VERSION:-}"
+  arch="${ARCH}"
+  os_name="linux"
+  install_root="${HOME}/.local/opt/go"
+  local opt_root
+  opt_root="${HOME}/.local/opt"
+
+  case "${arch}" in
+    amd64|arm64) ;;
+    *)
+      log::e "Unsupported architecture for local Go install: ${arch}"
+      return 1
+      ;;
+  esac
+
+  if [ -z "${version}" ]; then
+    version="$(curl -fsSL 'https://go.dev/VERSION?m=text' | sed -n '1s/^go//p')"
+  fi
+
+  if [[ "${version}" == go* ]]; then
+    version="${version#go}"
+  fi
+
+  if ! version::ge "${version}" "${min_version}"; then
+    log::e "Resolved Go version ${version} is below required minimum ${min_version}"
+    return 1
+  fi
+
+  download_version="go${version}"
+  tmpdir="$(mktemp -d)"
+  tarball="${tmpdir}/${download_version}.${os_name}-${arch}.tar.gz"
+
+  log::f "Installing ${download_version} to ${install_root}"
+  curl -fsSL -o "${tarball}" "https://go.dev/dl/${download_version}.${os_name}-${arch}.tar.gz"
+  rm -rf "${install_root}"
+  mkdir -p "${opt_root}" "${HOME}/.local/bin"
+  tar -xzf "${tarball}" -C "${opt_root}"
+  ln -sf "${install_root}/bin/go" "${HOME}/.local/bin/go"
+  ln -sf "${install_root}/bin/gofmt" "${HOME}/.local/bin/gofmt"
+  rm -rf "${tmpdir}"
 }
 
 go::ensure_installed() {
+  local current_version min_version
+  min_version="${GO_MIN_VERSION:-1.23.0}"
+
   if command -v go >/dev/null 2>&1; then
-    log::f "Go already installed: $(go version)"
+    current_version="$(go version | awk '{print $3}' | sed 's/^go//')"
+    if version::ge "${current_version}" "${min_version}"; then
+      log::f "Go already installed: $(go version)"
+      return 0
+    fi
+
+    log::f "Go ${current_version} detected; upgrading to >= ${min_version}"
+  else
+    log::f "Go not found; installing >= ${min_version}"
+  fi
+
+  if go::install_local; then
+    log::f "Using Go $(go version)"
     return 0
   fi
 
-  if command -v snap >/dev/null 2>&1; then
-    log::f "Installing go from snap"
-    sudo snap install go --classic
-  else
-    log::f "Installing go from apt"
-    sudo apt update
-    sudo apt install -y --no-install-recommends golang-go
-  fi
+  log::e "Failed to install Go from official binaries"
+  return 1
 }
 
 
@@ -812,42 +913,10 @@ tools::install_terraform() {
   sudo unzip "${out}" -d /usr/local/bin/
 }
 
-tools::install_awscli() {
-  if command -v aws >/dev/null 2>&1; then
-    log::f "AWS CLI already installed: $(aws --version 2>&1 | head -n1)"
-    return 0
-  fi
-
-  if command -v snap >/dev/null 2>&1; then
-    log::f "Installing AWS CLI from snap"
-    sudo snap install aws-cli --classic
-    return 0
-  fi
-
-  log::f "Installing AWS CLI via uv tool"
-  uv::tool_install awscli
-}
-
 tools::install_ansible() {
   # sudo apt-add-repository -y ppa:ansible/ansible
   sudo apt update
   sudo apt install -y ansible
-}
-
-tools::install_vegeta() {
-  local vegeta_version fallback_version fallback_module
-  vegeta_version="${VEGETA_VERSION:-latest}"
-  fallback_version="${VEGETA_FALLBACK_VERSION:-v12.11.1}"
-  fallback_module="${VEGETA_FALLBACK_MODULE:-github.com/tsenart/vegeta/v12}"
-
-  if go install "github.com/tsenart/vegeta@${vegeta_version}"; then
-    return 0
-  fi
-
-  log::f "vegeta@${vegeta_version} install failed; retrying ${fallback_module}@${fallback_version} for older Go toolchains"
-  if ! go install "${fallback_module}@${fallback_version}"; then
-    log::f "Skipping vegeta install: compatible version could not be installed with current Go toolchain"
-  fi
 }
 
 tools::wireshark() {
@@ -855,35 +924,6 @@ tools::wireshark() {
   sudo apt update
   echo "wireshark-common wireshark-common/install-setuid boolean true" | sudo debconf-set-selections
   DEBIAN_FRONTEND=noninteractive sudo apt install -y wireshark
-}
-
-tools::nerdctl() {
-  local VERSION=v1.3.1
-
-  local out
-  out="$(mktemp)"
-
-  gh::download "containerd/nerdctl" "${VERSION}" "nerdctl-${VERSION:1}-linux-${ARCH}.tar.gz" "${out}"
-
-  sudo tar Cxzvvf /usr/local/bin "${out}"
-}
-
-tools::doctl() {
-  local VERSION latest_json
-  if [ -n "${DOCTL_VERSION:-}" ]; then
-    VERSION="${DOCTL_VERSION}"
-  else
-    latest_json="$(curl -fsSL https://api.github.com/repos/digitalocean/doctl/releases/latest)"
-    VERSION="$(printf '%s\n' "${latest_json}" | sed -n 's/.*"tag_name":[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)"
-    VERSION="${VERSION:-v1.94.0}"
-  fi
-
-  local out
-  out="$(mktemp)"
-
-  gh::download "digitalocean/doctl" "${VERSION}" "doctl-${VERSION:1}-linux-${ARCH}.tar.gz" "${out}"
-
-  sudo tar Cxzvvf /usr/local/bin "${out}"
 }
 
 tools::install_opentofu() {
@@ -899,8 +939,7 @@ tools::install_opentofu() {
 }
 
 tools::install_esp_tools() {
-  log::f "Installing ESP tools"
-  uv::tool_install esptool
+  log::f "Bootstrapping ESP-IDF helpers"
 
   local idf_root
   idf_root="${HOME}/.espressif/esp-idf"
@@ -933,64 +972,15 @@ tools::verify_one() {
 
 tools::verify_dev_cli() {
   log::f "Verifying key dev CLIs"
+  tools::verify_one "mise" "mise" "mise --version"
   tools::verify_one "Codex CLI" "codex" "codex --version"
   tools::verify_one "Gemini CLI" "gemini" "gemini --version"
   tools::verify_one "OpenTofu" "tofu" "tofu --version"
   tools::verify_one "doctl" "doctl" "doctl version"
   tools::verify_one "AWS CLI" "aws" "aws --version"
-}
-
-tools::dive() {
-  local VERSION=v0.10.0
-
-  local out
-  out="$(mktemp)"
-
-  gh::download "wagoodman/dive" "${VERSION}" "dive_${VERSION:1}_linux_${ARCH}.deb" "${out}"
-
-  sudo dpkg -i "${out}"
-}
-
-tools::buildkit() {
-  local VERSION=v0.11.6
-
-  local out
-  out="$(mktemp)"
-
-  gh::download "moby/buildkit" "${VERSION}" "buildkit-${VERSION}.linux-${ARCH}.tar.gz" "${out}"
-
-  sudo tar -C /usr/local/bin -xzvv --strip-components 1 -f "${out}"
-}
-
-tools::regctl() {
-  local VERSION=v0.4.8
-
-  local out
-  out="$(mktemp)"
-
-  gh::download "regclient/regclient" "${VERSION}" "regctl-linux-${ARCH}" "${out}"
-
-  chmod +x "${out}"
-  sudo mv "${out}" /usr/local/bin/regctl
-}
-
-tools::cf-terraforming() {
-  local VERSION=v0.12.0
-
-  local out
-  out="$(mktemp)"
-
-  gh::download "cloudflare/cf-terraforming" "${VERSION}" "cf-terraforming_${VERSION:1}_linux_${ARCH}.tar.gz" "${out}"
-
-  sudo tar Cxzvvf /usr/local/bin "${out}"
-}
-
-tools::uv_basics() {
-  uv::ensure_installed
-  uv::tool_install oci-cli
-  tools::install_yubikey_manager
-  uv::tool_install isort
-  uv::tool_install autopep8
+  tools::verify_one "Helm" "helm" "helm version --short"
+  tools::verify_one "Kubebuilder" "kubebuilder" "kubebuilder version"
+  tools::verify_one "Vale" "vale" "vale --version"
 }
 
 tools::install_yubikey_manager() {
@@ -1017,14 +1007,10 @@ tools::install_yubikey_manager() {
 tools::full_install() {
   go::install_developer_tools
   tools::install_ansible
-  tools::install_vegeta
   tools::wireshark
-  # tools::dive # FIXME(apryde): dive only supports docker and that's verboten
-  tools::buildkit
-  tools::regctl
-  tools::doctl
-  tools::cf-terraforming
-  tools::uv_basics
+  uv::ensure_installed
+  tools::install_mise_full_tools
+  tools::install_yubikey_manager
 }
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then

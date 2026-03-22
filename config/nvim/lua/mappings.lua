@@ -27,7 +27,15 @@ end
 
 -- diagnostics
 map("n", "<Leader>ds", vim.diagnostic.open_float, { desc = "Show diagnostic" })
-map("n", "<leader>q", vim.diagnostic.setloclist, { desc = "Open diagnostic quickfix list" })
+map("n", "<leader>q", function()
+  vim.diagnostic.setloclist { open = true }
+end, { desc = "Open buffer diagnostics" })
+map("n", "<leader>Q", function()
+  require("trouble").toggle {
+    mode = "diagnostics",
+    filter = { buf = 0 },
+  }
+end, { desc = "Workspace diagnostics (Trouble)" })
 
 -- bufferline, cycle buffers
 map("n", "<Tab>", "<cmd>BufferLineCycleNext<CR>")
@@ -104,9 +112,14 @@ vim.api.nvim_create_autocmd("FileType", {
   pattern = "go",
   callback = function(ev)
     local opts = { buffer = ev.buf, silent = true }
-    map("n", "<leader>r", "<cmd>!go run %<CR>", vim.tbl_extend("force", opts, { desc = "Go Run file" }))
-    map("n", "<leader>b", "<cmd>!go build ./...<CR>", vim.tbl_extend("force", opts, { desc = "Go Build project" }))
-    map("n", "<leader>t", "<cmd>!go test ./...<CR>", vim.tbl_extend("force", opts, { desc = "Go Test project" }))
-    map("n", "<leader>c", "<cmd>!go test -cover ./...<CR>", vim.tbl_extend("force", opts, { desc = "Go Coverage" }))
+    map("n", "<leader>rr", "<cmd>GoRun<CR>", vim.tbl_extend("force", opts, { desc = "Go Run package" }))
+    map("n", "<leader>rb", "<cmd>GoBuild<CR>", vim.tbl_extend("force", opts, { desc = "Go Build workspace" }))
+    map("n", "<leader>rc", "<cmd>GoCoverage<CR>", vim.tbl_extend("force", opts, { desc = "Go Coverage" }))
+    map("n", "<leader>td", function()
+      require("neotest").run.run { strategy = "dap" }
+    end, vim.tbl_extend("force", opts, { desc = "Debug nearest test" }))
+    map("n", "<leader>tD", function()
+      require("neotest").run.run { vim.fn.expand "%", strategy = "dap" }
+    end, vim.tbl_extend("force", opts, { desc = "Debug file" }))
   end,
 })

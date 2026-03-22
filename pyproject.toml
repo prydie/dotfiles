@@ -4,6 +4,7 @@ version = "0.0.1"
 dependencies = [
     "matplotlib",
     "pandas",
+    "websockets>=15.0.1,<16",
 ]
 
 [tool.uv]

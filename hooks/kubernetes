@@ -19,11 +19,46 @@ kube::arch() {
   esac
 }
 
+kube::os() {
+  case "$(uname -s)" in
+    Linux) echo "linux" ;;
+    Darwin) echo "darwin" ;;
+    *)
+      echo "unsupported OS: $(uname -s)" >&2
+      return 1
+      ;;
+  esac
+}
+
 kube::require_bin() {
   command -v "$1" >/dev/null 2>&1 || {
     echo "missing required command: $1" >&2
     return 1
   }
+}
+
+kube::completion_dir() {
+  printf '%s\n' "${XDG_DATA_HOME:-${HOME}/.local/share}/zsh/site-functions"
+}
+
+kube::install_zsh_completion() {
+  local tool completion_dir completion_file bin_path
+  tool="$1"
+  completion_dir="$(kube::completion_dir)"
+  completion_file="${completion_dir}/_${tool}"
+  bin_path="${BIN_DIR}/${tool}"
+
+  if [ ! -x "${bin_path}" ]; then
+    bin_path="$(command -v "${tool}" 2>/dev/null || true)"
+  fi
+
+  if [ -z "${bin_path}" ] || [ ! -x "${bin_path}" ]; then
+    echo "missing ${tool} binary for completion generation" >&2
+    return 1
+  fi
+
+  mkdir -p "${completion_dir}"
+  "${bin_path}" completion zsh > "${completion_file}"
 }
 
 kube::install_cni_plugins() {
@@ -41,37 +76,6 @@ kube::install_cni_plugins() {
   sudo tar -xzf "${out}" -C "${CNI_PATH}"
 }
 
-
-kube::install_kubectl() {
-  local out
-  out="$(mktemp)"
-  curl -fsSL -o "${out}" "https://dl.k8s.io/release/$(curl -fsSL https://dl.k8s.io/release/stable.txt)/bin/linux/$(kube::arch)/kubectl"
-  chmod +x "${out}"
-  sudo install -m 0755 "${out}" "${BIN_DIR}/kubectl"
-}
-
-kube::install_helm() {
-  kube::require_bin curl
-  kube::require_bin sha256sum
-  kube::require_bin tar
-
-  local version arch tmp checksum_file tarball expected
-  version="${HELM_VERSION:-v3.17.0}"
-  arch="$(kube::arch)"
-  tmp="$(mktemp -d)"
-  tarball="${tmp}/helm.tar.gz"
-  checksum_file="${tmp}/helm.sha256"
-
-  curl -fsSL -o "${tarball}" "https://get.helm.sh/helm-${version}-linux-${arch}.tar.gz"
-  curl -fsSL -o "${checksum_file}" "https://get.helm.sh/helm-${version}-linux-${arch}.tar.gz.sha256sum"
-
-  expected="$(awk '{print $1}' "${checksum_file}")"
-  printf "%s  %s\n" "${expected}" "${tarball}" | sha256sum -c -
-
-  tar -xzf "${tarball}" -C "${tmp}"
-  sudo install -m 0755 "${tmp}/linux-${arch}/helm" "${BIN_DIR}/helm"
-  rm -rf "${tmp}"
-}
 
 kube::install_k3d() {
   kube::require_bin curl
@@ -101,13 +105,17 @@ kube::install_k3d() {
 
 kube::install_notes() {
   cat <<'EOF'
-Installers are explicit and never auto-run:
-  - kube::install_kubectl
-  - kube::install_helm
+Installers available from this hook:
   - kube::install_k3d
 
 Example:
   source hooks/kubernetes
-  kube::install_helm
+  kube::install_k3d
+
+The normal setup flow installs kubectl, helm, kubebuilder, and related CLI tools via mise.
+It also writes Zsh completions to:
+  ${XDG_DATA_HOME:-$HOME/.local/share}/zsh/site-functions/_kubectl
+  ${XDG_DATA_HOME:-$HOME/.local/share}/zsh/site-functions/_kubebuilder
+  ${XDG_DATA_HOME:-$HOME/.local/share}/zsh/site-functions/_helm
 EOF
 }

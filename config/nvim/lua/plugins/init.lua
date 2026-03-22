@@ -45,6 +45,7 @@ return {
       indent = { enabled = true },
       input = { enabled = true },
       picker = { enabled = true },
+      terminal = { enabled = true },
       notifier = { enabled = vim.fn.has "nvim-0.11" == 1 },
       quickfile = { enabled = true },
       scope = { enabled = true },
@@ -227,22 +228,37 @@ return {
     "mfussenegger/nvim-lint",
     config = function()
       local lint = require "lint"
+      lint.linters.mypy = vim.tbl_extend("force", lint.linters.mypy or {}, {
+        cmd = "uv",
+        args = {
+          "run",
+          "mypy",
+          "--show-column-numbers",
+          "--show-error-end",
+          "--hide-error-context",
+          "--no-color-output",
+          "--no-error-summary",
+          "--no-pretty",
+        },
+      })
       lint.linters_by_ft = {
-        python = { "ruff" },
-        go = { "golangcilint" },
+        python = { "ruff", "mypy" },
+        markdown = { "vale" },
         javascript = { "eslint_d" },
         javascriptreact = { "eslint_d" },
         typescript = { "eslint_d" },
         typescriptreact = { "eslint_d" },
         sh = { "shellcheck" },
         lua = { "selene" },
+        text = { "vale" },
         terraform = { "tflint" },
         dockerfile = { "hadolint" },
+        gitcommit = { "vale" },
       }
 
       vim.api.nvim_create_autocmd({ "BufWritePost", "InsertLeave" }, {
-        callback = function()
-          lint.try_lint()
+        callback = function(args)
+          lint.try_lint(nil, { ignore_errors = true })
         end,
       })
     end,
@@ -273,8 +289,18 @@ return {
 
   -- Notes / tests
   {
+    "bullets-vim/bullets.vim",
+    ft = { "markdown", "text", "gitcommit", "vimwiki" },
+    init = function()
+      vim.g.bullets_enabled_file_types = { "markdown", "text", "gitcommit", "vimwiki" }
+    end,
+  },
+  {
     "vimwiki/vimwiki",
     init = function()
+      vim.g.vimwiki_global_ext = 0
+      vim.g.vimwiki_listsyms = " .oOX"
+      vim.g.vimwiki_key_mappings = { lists_return = 0 }
       vim.g.vimwiki_list = {
         {
           path = "~/vimwiki/",

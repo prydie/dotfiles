@@ -10,7 +10,7 @@ return {
     markdown = { "prettier" },
     python = { "isort", "black" },
     sh = { "shfmt" },
-    go = { "goimports", "gofmt" },
+    go = { "goimports", "gofumpt" },
     terraform = { "terraform_fmt" },
     hcl = { "terraform_fmt" },
     tfvars = { "terraform_fmt" },

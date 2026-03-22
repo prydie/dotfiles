@@ -1,6 +1,12 @@
 command_timeout = 1000
 scan_timeout = 10
 
+[python]
+python_binary = "python3"
+detect_files = []
+detect_extensions = []
+detect_folders = []
+
 [kubernetes]
 format = '[$symbol$context( \($namespace\))]($style) in '
 disabled = false

@@ -1,3 +1,3 @@
-EXCLUDES="README.md LICENSE requirements.txt pyvenv.cfg headphones.py *.log"
+EXCLUDES="README.md LICENSE requirements.txt pyvenv.cfg headphones.py *.log config/go/telemetry config/nvim/lazy-lock.json"
 DOTFILES_DIRS="$HOME/.dotfiles"
 UNDOTTED="bin"
