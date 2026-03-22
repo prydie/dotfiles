@@ -57,6 +57,40 @@ make patching
 make patching-full
 ```
 
+## Home Assistant
+
+`bin/ha` is the general Home Assistant CLI for reading entity state, searching
+entities, calling services, and fetching dashboard config.
+
+`bin/ha-dashboard` updates Lovelace dashboards through the Home Assistant websocket
+API instead of editing `.storage` files and restarting Home Assistant.
+
+It expects:
+
+- `HOME_ASSISTANT_TOKEN` to contain a long-lived access token
+- `HOME_ASSISTANT_URL` to point at your instance
+
+Examples:
+
+```bash
+uv run bin/ha state sensor.battery_soc
+uv run bin/ha attrs media_player.downstairs
+uv run bin/ha search predbat
+uv run bin/ha dashboard get-config --pretty
+```
+
+```bash
+uv run bin/ha-dashboard get-config --pretty
+```
+
+```bash
+uv run bin/ha-dashboard upsert-card \
+  --view-title Home \
+  --title "Home NAS" \
+  --after-title "Predbat" \
+  --card-file /tmp/home-nas-card.json
+```
+
 ## Setup profiles
 
 `hooks/post-up` is profile-driven. By default, `PROFILE=link`, which does not install host packages.
