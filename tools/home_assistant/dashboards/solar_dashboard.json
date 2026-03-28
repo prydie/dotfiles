@@ -1,0 +1,558 @@
+{
+  "views": [
+    {
+      "path": "default_view",
+      "title": "Solar",
+      "icon": "mdi:solar-power-variant",
+      "type": "custom:grid-layout",
+      "layout": {
+        "grid-template-columns": "repeat(12, minmax(0, 1fr))",
+        "grid-template-areas": "\"tariff_heading tariff_heading tariff_heading tariff_heading tariff_heading tariff_heading tariff_heading tariff_heading tariff_heading tariff_heading tariff_heading tariff_heading\" \"tariff_summary tariff_summary tariff_summary tariff_summary tariff_delta tariff_delta tariff_delta tariff_delta tariff_delta tariff_delta tariff_delta tariff_delta\" \"tariff_detail tariff_detail tariff_detail tariff_detail tariff_delta tariff_delta tariff_delta tariff_delta tariff_delta tariff_delta tariff_delta tariff_delta\" \"tariff_history tariff_history tariff_history tariff_history tariff_history tariff_history tariff_history tariff_history tariff_history tariff_history tariff_history tariff_history\" \"pv_heading pv_heading pv_heading pv_heading pv_heading pv_heading pv_heading pv_heading pv_heading pv_heading pv_heading pv_heading\" \"pv_today pv_today pv_today pv_today pv_today pv_today pv_accuracy pv_accuracy pv_accuracy pv_accuracy pv_accuracy pv_accuracy\" \"pv_chart pv_chart pv_chart pv_chart pv_chart pv_chart pv_chart pv_chart pv_chart pv_chart pv_chart pv_chart\" \"pv_totals pv_totals pv_totals pv_totals pv_totals pv_totals pv_totals pv_totals pv_totals pv_totals pv_totals pv_totals\" \"load_heading load_heading load_heading load_heading load_heading load_heading load_heading load_heading load_heading load_heading load_heading load_heading\" \"predbat predbat predbat predbat predbat predbat load_chart load_chart load_chart load_chart load_chart load_chart\"",
+        "grid-gap": "16px",
+        "margin": "0",
+        "padding": "12px 8px 24px 8px",
+        "mediaquery": {
+          "(max-width: 1000px)": {
+            "grid-template-columns": "repeat(2, minmax(0, 1fr))",
+            "grid-template-areas": "\"tariff_heading tariff_heading\" \"tariff_summary tariff_summary\" \"tariff_detail tariff_detail\" \"tariff_delta tariff_delta\" \"tariff_history tariff_history\" \"pv_heading pv_heading\" \"pv_today pv_accuracy\" \"pv_chart pv_chart\" \"pv_totals pv_totals\" \"load_heading load_heading\" \"predbat predbat\" \"load_chart load_chart\""
+          },
+          "(max-width: 700px)": {
+            "grid-template-columns": "1fr",
+            "grid-template-areas": "\"tariff_heading\" \"tariff_summary\" \"tariff_detail\" \"tariff_delta\" \"tariff_history\" \"pv_heading\" \"pv_today\" \"pv_accuracy\" \"pv_chart\" \"pv_totals\" \"load_heading\" \"predbat\" \"load_chart\""
+          }
+        }
+      },
+      "cards": [
+        {
+          "type": "markdown",
+          "content": "## Tariff Decision\nUse the rolling 7-day average chart to see whether the ranking is genuinely shifting over time. Use the daily chart to check whether one unusually cheap or expensive day is doing most of the work.",
+          "view_layout": {
+            "grid-area": "tariff_heading"
+          }
+        },
+        {
+          "type": "entities",
+          "title": "Tariff Summary",
+          "show_header_toggle": false,
+          "state_color": false,
+          "entities": [
+            {
+              "entity": "sensor.tariff_compare_best_7d_average",
+              "name": "Best tariff (7d)"
+            },
+            {
+              "entity": "sensor.tariff_compare_best_7d_average_cost",
+              "name": "Best average cost"
+            },
+            {
+              "entity": "sensor.tariff_current_7d_average_projected_cost",
+              "name": "Current tariff"
+            }
+          ],
+          "view_layout": {
+            "grid-area": "tariff_summary"
+          }
+        },
+        {
+          "type": "custom:apexcharts-card",
+          "header": {
+            "show": true,
+            "title": "Rolling 7d Average Cost Trend"
+          },
+          "graph_span": "7d",
+          "span": {
+            "end": "day"
+          },
+          "apex_config": {
+            "chart": {
+              "height": 260
+            },
+            "legend": {
+              "show": true,
+              "position": "bottom"
+            },
+            "tooltip": {
+              "shared": true,
+              "intersect": false
+            },
+            "stroke": {
+              "width": [
+                3,
+                3,
+                3
+              ]
+            },
+            "xaxis": {
+              "type": "datetime"
+            },
+            "annotations": {
+              "yaxis": [
+                {
+                  "y": 0,
+                  "borderColor": "#94a3b8"
+                }
+              ]
+            }
+          },
+          "series": [
+            {
+              "entity": "sensor.tariff_current_7d_average_projected_cost",
+              "name": "Current",
+              "type": "line",
+              "color": "#475569",
+              "float_precision": 1,
+              "curve": "smooth",
+              "show": {
+                "legend_value": false,
+                "in_header": false
+              }
+            },
+            {
+              "entity": "sensor.tariff_agile_outgoing_7d_average_projected_cost",
+              "name": "Agile + Outgoing",
+              "type": "line",
+              "color": "#2563eb",
+              "float_precision": 1,
+              "curve": "smooth",
+              "show": {
+                "legend_value": false,
+                "in_header": false
+              }
+            },
+            {
+              "entity": "sensor.tariff_flux_7d_average_projected_cost",
+              "name": "Flux",
+              "type": "line",
+              "color": "#0f766e",
+              "float_precision": 1,
+              "curve": "smooth",
+              "show": {
+                "legend_value": false,
+                "in_header": false
+              }
+            },
+            {
+              "entity": "sensor.tariff_flexible_outgoing_7d_average_projected_cost",
+              "name": "Flexible + Outgoing",
+              "type": "line",
+              "color": "#16a34a",
+              "float_precision": 1,
+              "curve": "smooth",
+              "show": {
+                "legend_value": false,
+                "in_header": false
+              }
+            }
+          ],
+          "view_layout": {
+            "grid-area": "tariff_delta"
+          }
+        },
+        {
+          "type": "custom:apexcharts-card",
+          "header": {
+            "show": true,
+            "title": "Daily Tariff Comparison"
+          },
+          "graph_span": "7d",
+          "span": {
+            "end": "day"
+          },
+          "apex_config": {
+            "chart": {
+              "height": 280
+            },
+            "legend": {
+              "show": true,
+              "position": "bottom"
+            },
+            "plotOptions": {
+              "bar": {
+                "columnWidth": "55%"
+              }
+            },
+            "tooltip": {
+              "shared": true,
+              "intersect": false
+            },
+            "xaxis": {
+              "type": "datetime"
+            },
+            "yaxis": {
+              "decimalsInFloat": 0
+            }
+          },
+          "series": [
+            {
+              "entity": "predbat.compare_tariff_current",
+              "name": "Current",
+              "type": "column",
+              "color": "#475569",
+              "group_by": {
+                "func": "last",
+                "duration": "1d",
+                "fill": "null"
+              },
+              "show": {
+                "legend_value": false,
+                "in_header": false
+              },
+              "float_precision": 1
+            },
+            {
+              "entity": "predbat.compare_tariff_agile_outgoing",
+              "name": "Agile + Outgoing",
+              "type": "column",
+              "color": "#2563eb",
+              "group_by": {
+                "func": "last",
+                "duration": "1d",
+                "fill": "null"
+              },
+              "show": {
+                "legend_value": false,
+                "in_header": false
+              },
+              "float_precision": 1
+            },
+            {
+              "entity": "predbat.compare_tariff_flux",
+              "name": "Flux",
+              "type": "column",
+              "color": "#0f766e",
+              "group_by": {
+                "func": "last",
+                "duration": "1d",
+                "fill": "null"
+              },
+              "show": {
+                "legend_value": false,
+                "in_header": false
+              },
+              "float_precision": 1
+            },
+            {
+              "entity": "predbat.compare_tariff_flexible_outgoing",
+              "name": "Flexible + Outgoing",
+              "type": "column",
+              "color": "#16a34a",
+              "group_by": {
+                "func": "last",
+                "duration": "1d",
+                "fill": "null"
+              },
+              "show": {
+                "legend_value": false,
+                "in_header": false
+              },
+              "float_precision": 1
+            }
+          ],
+          "view_layout": {
+            "grid-area": "tariff_history"
+          }
+        },
+        {
+          "type": "markdown",
+          "content": "{% set current = states('sensor.tariff_current_7d_average_projected_cost') | float(0) %}\n{% set agile = states('sensor.tariff_agile_outgoing_7d_average_projected_cost') | float(0) %}\n{% set flux = states('sensor.tariff_flux_7d_average_projected_cost') | float(0) %}\n{% set flexible = states('sensor.tariff_flexible_outgoing_7d_average_projected_cost') | float(0) %}\n{% set rows = [\n  {'name':'Agile + Outgoing','cost':agile},\n  {'name':'Flux','cost':flux},\n  {'name':'Flexible + Outgoing','cost':flexible},\n  {'name':'Current tariff','cost':current}\n] | sort(attribute='cost') %}\n{% set best = rows[0].cost %}\n| Tariff | rolling 7d cost | vs best | vs current |\n|---|---:|---:|---:|\n{% for row in rows %}| **{{ row.name }}** | {{ '%.1f'|format(row.cost) }}p | {{ '%+.1f'|format(row.cost - best) }}p | {{ '%+.1f'|format(row.cost - current) }}p |\n{% endfor %}\n\nRead this with the charts: use the trend chart for the rolling ranking, and the daily chart to see whether that ranking is being driven by one or two standout days.",
+          "view_layout": {
+            "grid-area": "tariff_detail"
+          }
+        },
+        {
+          "type": "markdown",
+          "content": "## PV Forecast Fit\nUse the live curve to judge shape and timing. Use the summary card to judge whether Predbat's adjusted estimate is adding value over raw Solcast. Intraday gap metrics are progress-to-forecast, not end-of-day error.",
+          "view_layout": {
+            "grid-area": "pv_heading"
+          }
+        },
+        {
+          "type": "entities",
+          "title": "PV Snapshot",
+          "show_header_toggle": false,
+          "entities": [
+            {
+              "entity": "sensor.pv_power",
+              "name": "Actual PV now"
+            },
+            {
+              "entity": "sensor.solcast_pv_forecast_power_now_damped_kw",
+              "name": "Solcast damped now"
+            },
+            {
+              "entity": "sensor.solcast_pv_forecast_power_now_kw",
+              "name": "Solcast raw now"
+            },
+            {
+              "entity": "select.predbat_mode",
+              "name": "Predbat mode"
+            },
+            {
+              "entity": "switch.predbat_set_read_only",
+              "name": "Read only"
+            },
+            {
+              "entity": "binary_sensor.predbat_components_healthy",
+              "name": "Components healthy"
+            }
+          ],
+          "view_layout": {
+            "grid-area": "pv_today"
+          }
+        },
+        {
+          "type": "entities",
+          "title": "PV Evaluation",
+          "show_header_toggle": false,
+          "entities": [
+            {
+              "entity": "sensor.solar_energy_today",
+              "name": "Actual generation so far"
+            },
+            {
+              "entity": "sensor.solcast_pv_forecast_forecast_today",
+              "name": "Solcast raw forecast"
+            },
+            {
+              "entity": "sensor.predbat_pv_forecast_constrained_today",
+              "name": "Predbat adjusted forecast"
+            },
+            {
+              "entity": "sensor.solar_forecast_raw_error_today",
+              "name": "Raw forecast gap vs actual so far"
+            },
+            {
+              "entity": "sensor.solar_forecast_constrained_error_today",
+              "name": "Constrained gap vs actual so far"
+            },
+            {
+              "entity": "sensor.solar_forecast_damping_delta_today",
+              "name": "Adjustment delta"
+            },
+            {
+              "entity": "sensor.solar_forecast_damping_ratio_today",
+              "name": "Adjustment ratio"
+            }
+          ],
+          "view_layout": {
+            "grid-area": "pv_accuracy"
+          }
+        },
+        {
+          "type": "custom:apexcharts-card",
+          "header": {
+            "show": true,
+            "title": "PV Generation Curve (Today + Forecast Ahead)"
+          },
+          "graph_span": "24h",
+          "span": {
+            "start": "day"
+          },
+          "now": {
+            "show": true
+          },
+          "apex_config": {
+            "chart": {
+              "height": 340
+            },
+            "legend": {
+              "show": true
+            },
+            "tooltip": {
+              "shared": true,
+              "intersect": false,
+              "x": {
+                "show": true
+              }
+            },
+            "stroke": {
+              "width": [
+                3,
+                2,
+                2
+              ],
+              "dashArray": [
+                0,
+                0,
+                6
+              ]
+            },
+            "xaxis": {
+              "type": "datetime"
+            }
+          },
+          "series": [
+            {
+              "entity": "sensor.pv_power",
+              "name": "Actual PV",
+              "type": "line",
+              "unit": "kW",
+              "show": {
+                "legend_value": false,
+                "in_header": false
+              },
+              "extend_to": false,
+              "fill_raw": "null",
+              "float_precision": 2,
+              "stroke_width": 3,
+              "curve": "smooth"
+            },
+            {
+              "entity": "sensor.solcast_pv_forecast_forecast_today",
+              "name": "Solcast damped",
+              "type": "line",
+              "unit": "kW",
+              "show": {
+                "legend_value": false,
+                "in_header": false
+              },
+              "color": "#d97706",
+              "float_precision": 2,
+              "data_generator": "return (entity.attributes.detailedForecast || []).map((point) => [new Date(point.period_start).getTime(), Number((point.pv_estimate || 0).toFixed(3))]);"
+            },
+            {
+              "entity": "sensor.solcast_pv_forecast_forecast_today",
+              "name": "Solcast raw",
+              "type": "line",
+              "unit": "kW",
+              "show": {
+                "legend_value": false,
+                "in_header": false
+              },
+              "color": "#2563eb",
+              "float_precision": 2,
+              "data_generator": "return (entity.attributes.detailedForecast || []).map((point) => { const estimate = Number(point.pv_estimate || 0); const factor = Number(point.dampening_factor || 1); const raw = factor > 0 ? estimate / factor : estimate; return [new Date(point.period_start).getTime(), Number(raw.toFixed(3))]; });"
+            }
+          ],
+          "view_layout": {
+            "grid-area": "pv_chart"
+          }
+        },
+        {
+          "type": "custom:apexcharts-card",
+          "header": {
+            "show": true,
+            "title": "Daily Generation (Last 7 Days)"
+          },
+          "graph_span": "7d",
+          "span": {
+            "end": "day"
+          },
+          "apex_config": {
+            "chart": {
+              "height": 260
+            },
+            "legend": {
+              "show": false
+            },
+            "plotOptions": {
+              "bar": {
+                "columnWidth": "45%"
+              }
+            },
+            "xaxis": {
+              "type": "datetime"
+            }
+          },
+          "series": [
+            {
+              "entity": "sensor.solar_energy_today",
+              "name": "Daily total",
+              "type": "column",
+              "unit": "kWh",
+              "color": "#f59e0b",
+              "group_by": {
+                "func": "max",
+                "duration": "1d"
+              },
+              "show": {
+                "legend_value": false,
+                "in_header": false
+              },
+              "float_precision": 2
+            }
+          ],
+          "view_layout": {
+            "grid-area": "pv_totals"
+          }
+        },
+        {
+          "type": "markdown",
+          "content": "## Load Forecast Fit\nJudge Predbat on whether adjusted load error stays lower than raw over completed days. Treat the control-state fields as readiness checks before enabling live automation.",
+          "view_layout": {
+            "grid-area": "load_heading"
+          }
+        },
+        {
+          "type": "entities",
+          "title": "Predbat Evaluation",
+          "show_header_toggle": false,
+          "entities": [
+            {
+              "entity": "sensor.predbat_load_raw_mae_completed_days",
+              "name": "Raw load MAE"
+            },
+            {
+              "entity": "sensor.predbat_load_adjusted_mae_completed_days",
+              "name": "Adjusted load MAE"
+            },
+            {
+              "entity": "sensor.predbat_load_raw_error_yesterday",
+              "name": "Yesterday raw error"
+            },
+            {
+              "entity": "sensor.predbat_load_adjusted_error_yesterday",
+              "name": "Yesterday adjusted error"
+            },
+            {
+              "entity": "predbat.load_inday_adjustment",
+              "name": "In-day adjustment"
+            },
+            {
+              "entity": "sensor.predbat_foxess_0_inverter_mode",
+              "name": "Inverter mode"
+            },
+            {
+              "entity": "switch.predbat_compare_active",
+              "name": "Compare active"
+            },
+            {
+              "entity": "switch.predbat_active",
+              "name": "Active"
+            },
+            {
+              "entity": "predbat.status",
+              "name": "Predbat status"
+            }
+          ],
+          "view_layout": {
+            "grid-area": "predbat"
+          }
+        },
+        {
+          "type": "history-graph",
+          "title": "Load Forecast vs Actual (7 days, daily cumulative)",
+          "hours_to_show": 168,
+          "refresh_interval": 0,
+          "entities": [
+            {
+              "entity": "predbat.load_energy_actual",
+              "name": "Actual"
+            },
+            {
+              "entity": "predbat.load_energy_predicted",
+              "name": "Raw forecast"
+            },
+            {
+              "entity": "predbat.load_energy_adjusted",
+              "name": "Adjusted forecast"
+            }
+          ],
+          "view_layout": {
+            "grid-area": "load_chart"
+          }
+        }
+      ]
+    }
+  ]
+}

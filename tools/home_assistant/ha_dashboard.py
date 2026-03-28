@@ -48,6 +48,15 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Pretty-print the returned JSON",
     )
+    set_config = subparsers.add_parser("set-config", help="Save a full Lovelace dashboard config")
+    set_config.add_argument(
+        "--dashboard",
+        default="",
+        help="Dashboard URL path (`lovelace` is accepted as an alias for the default dashboard)",
+    )
+    config_group = set_config.add_mutually_exclusive_group(required=True)
+    config_group.add_argument("--config-file", help="Path to a JSON file containing a full dashboard config")
+    config_group.add_argument("--config-json", help="Inline JSON containing a full dashboard config")
 
     upsert_card = subparsers.add_parser("upsert-card", help="Insert or replace a card by title")
     upsert_card.add_argument(
@@ -105,6 +114,20 @@ def load_card(args: argparse.Namespace) -> dict[str, Any]:
     if not isinstance(card, dict):
         raise SystemExit("card JSON must describe a single object")
     return card
+
+
+def load_dashboard_config(args: argparse.Namespace) -> dict[str, Any]:
+    raw = args.config_json
+    if args.config_file:
+        raw = Path(args.config_file).read_text()
+    assert raw is not None
+    try:
+        config = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise SystemExit(f"invalid dashboard JSON: {exc}") from exc
+    if not isinstance(config, dict):
+        raise SystemExit("dashboard config JSON must describe a single object")
+    return config
 
 
 def resolve_websocket_url(base_url: str) -> str:
@@ -254,6 +277,13 @@ async def run(args: argparse.Namespace) -> int:
         config = await fetch_dashboard_config(args.url, token, args.dashboard)
         dump = json.dumps(config, indent=2 if args.pretty else None)
         print(dump)
+        return 0
+
+    if args.command == "set-config":
+        config = load_dashboard_config(args)
+        await save_dashboard_config(args.url, token, args.dashboard, config)
+        target = args.dashboard or "lovelace"
+        print(f"Updated dashboard {target!r}.")
         return 0
 
     if args.command == "upsert-card":

@@ -12,6 +12,7 @@ import argparse
 import asyncio
 import json
 import os
+from pathlib import Path
 import re
 import sys
 from typing import Any
@@ -64,6 +65,15 @@ def parse_args() -> argparse.Namespace:
         help="Dashboard URL path (`lovelace` is accepted as an alias for the default dashboard)",
     )
     get_config.add_argument("--pretty", action="store_true", help="Pretty-print the returned JSON")
+    set_config = dashboard_subparsers.add_parser("set-config", help="Save dashboard config")
+    set_config.add_argument(
+        "--dashboard",
+        default="",
+        help="Dashboard URL path (`lovelace` is accepted as an alias for the default dashboard)",
+    )
+    group = set_config.add_mutually_exclusive_group(required=True)
+    group.add_argument("--config-file", help="Path to a JSON file containing the full dashboard config")
+    group.add_argument("--config-json", help="Inline JSON containing the full dashboard config")
 
     return parser.parse_args()
 
@@ -152,6 +162,33 @@ async def fetch_dashboard_config(base_url: str, token: str, dashboard: str) -> d
     return response["result"]
 
 
+async def save_dashboard_config(
+    base_url: str,
+    token: str,
+    dashboard: str,
+    config: dict[str, Any],
+) -> None:
+    message: dict[str, Any] = {"type": "lovelace/config/save", "config": config}
+    normalized = normalize_dashboard(dashboard)
+    if normalized:
+        message["url_path"] = normalized
+    await websocket_request(base_url, token, message)
+
+
+def load_dashboard_config(args: argparse.Namespace) -> dict[str, Any]:
+    raw = args.config_json
+    if args.config_file:
+        raw = Path(args.config_file).read_text()
+    assert raw is not None
+    try:
+        config = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise SystemExit(f"invalid dashboard JSON: {exc}") from exc
+    if not isinstance(config, dict):
+        raise SystemExit("dashboard config JSON must describe an object")
+    return config
+
+
 def print_json(value: Any, *, pretty: bool = True) -> None:
     print(json.dumps(value, indent=2 if pretty else None, sort_keys=pretty))
 
@@ -218,11 +255,17 @@ def run_service(args: argparse.Namespace, token: str) -> int:
 
 
 async def run_dashboard(args: argparse.Namespace, token: str) -> int:
-    if args.dashboard_command != "get-config":
-        raise SystemExit(f"unsupported dashboard command: {args.dashboard_command}")
-    config = await fetch_dashboard_config(args.url, token, args.dashboard)
-    print(json.dumps(config, indent=2 if args.pretty else None))
-    return 0
+    if args.dashboard_command == "get-config":
+        config = await fetch_dashboard_config(args.url, token, args.dashboard)
+        print(json.dumps(config, indent=2 if args.pretty else None))
+        return 0
+    if args.dashboard_command == "set-config":
+        config = load_dashboard_config(args)
+        await save_dashboard_config(args.url, token, args.dashboard, config)
+        target = args.dashboard or "lovelace"
+        print(f"Updated dashboard {target!r}.")
+        return 0
+    raise SystemExit(f"unsupported dashboard command: {args.dashboard_command}")
 
 
 async def run(args: argparse.Namespace) -> int:
