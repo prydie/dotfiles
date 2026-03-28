@@ -199,21 +199,19 @@ export HOME_ASSISTANT_TOKEN='your-long-lived-access-token'
 $HOME/bin/desk-light-helper
 ```
 
-It also installs an autostart entry at `config/autostart/desk-light-helper.desktop`.
 Use `$HOME/bin/desk-light-helper` for manual runs if `~/bin` is not on `PATH`.
 Use tray menu options to switch between automatic mode and manual force on/off.
 Logs are emitted to stderr/stdout so they are visible in terminal runs and in
 `journalctl` when run via systemd.
 
-Optional (recommended) user service:
+Recommended startup via user service:
 
 1. Ensure `HOME_ASSISTANT_TOKEN` is exported in `~/.zshrc.local`
    (or set it in `~/.config/desk-light-helper/env`).
-2. Disable desktop autostart entry if you only want systemd-managed startup.
-3. Enable and start:
+2. Enable and start:
    `systemctl --user daemon-reload`
    `systemctl --user enable --now desk-light-helper.service`
-4. Follow logs:
+3. Follow logs:
    `journalctl --user -u desk-light-helper.service -f`
 
 ## LAN device discovery (router API)
