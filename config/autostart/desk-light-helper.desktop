@@ -1,7 +1,0 @@
-[Desktop Entry]
-Type=Application
-Name=Desk Light Helper
-Comment=Auto-control office LED strip from desk presence
-Exec=/usr/bin/env bash -lc '$HOME/bin/desk-light-helper'
-Terminal=false
-X-GNOME-Autostart-enabled=true
