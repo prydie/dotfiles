@@ -25,6 +25,31 @@ else
   map("n", "<leader>p", "<cmd>echo 'fzf-lua unavailable'<CR>", { desc = "FZF Files" })
 end
 
+map("n", "<leader>gb", function()
+  local blame_wins = {}
+  for _, win in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
+    local buf = vim.api.nvim_win_get_buf(win)
+    if vim.bo[buf].filetype == "gitsigns-blame" then
+      table.insert(blame_wins, win)
+    end
+  end
+
+  if #blame_wins > 0 then
+    for _, win in ipairs(blame_wins) do
+      if vim.api.nvim_win_is_valid(win) then
+        vim.api.nvim_win_close(win, true)
+      end
+    end
+    return
+  end
+
+  local current_win = vim.api.nvim_get_current_win()
+  vim.cmd "Gitsigns blame"
+  if vim.api.nvim_win_is_valid(current_win) then
+    vim.api.nvim_set_current_win(current_win)
+  end
+end, { desc = "Git Blame" })
+
 -- diagnostics
 map("n", "<Leader>ds", vim.diagnostic.open_float, { desc = "Show diagnostic" })
 map("n", "<leader>q", function()
