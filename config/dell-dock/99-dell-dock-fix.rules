@@ -1,0 +1,2 @@
+ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="0bda", TEST=="power/control", ATTR{power/control}="on"
+ACTION=="add", SUBSYSTEM=="net", DRIVERS=="r8152", RUN+="/usr/local/sbin/dell-dock-fix apply $name"

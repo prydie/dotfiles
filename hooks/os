@@ -1004,6 +1004,20 @@ tools::install_yubikey_manager() {
   fi
 }
 
+os::install_dell_dock_fix() {
+  log::f "Installing managed Dell dock mitigation hooks"
+
+  sudo install -m 0755 -D "${_ROOT}/tools/dell_dock_fix.sh" /usr/local/sbin/dell-dock-fix
+  sudo install -m 0755 -D "${_ROOT}/config/dell-dock/99-dell-dock-fix.dispatcher" /etc/NetworkManager/dispatcher.d/99-dell-dock-fix
+  sudo install -m 0644 -D "${_ROOT}/config/dell-dock/99-dell-dock-fix.rules" /etc/udev/rules.d/99-dell-dock-fix.rules
+  sudo install -m 0755 -D "${_ROOT}/config/dell-dock/99-dell-dock-fix.sleep" /usr/lib/systemd/system-sleep/99-dell-dock-fix
+
+  sudo udevadm control --reload
+  if command -v udevadm >/dev/null 2>&1; then
+    sudo udevadm trigger --subsystem-match=net --action=add || true
+  fi
+}
+
 tools::full_install() {
   go::install_developer_tools
   tools::install_ansible
@@ -1011,6 +1025,7 @@ tools::full_install() {
   uv::ensure_installed
   tools::install_mise_full_tools
   tools::install_yubikey_manager
+  os::install_dell_dock_fix
 }
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
@@ -1018,12 +1033,15 @@ if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
     full-install)
       tools::full_install
       ;;
+    install-dell-dock-fix)
+      os::install_dell_dock_fix
+      ;;
     "")
-      echo "No action selected. Use: $0 full-install"
+      echo "No action selected. Use: $0 full-install | install-dell-dock-fix"
       ;;
     *)
       echo "Unknown action: $1"
-      echo "Usage: $0 full-install"
+      echo "Usage: $0 full-install | install-dell-dock-fix"
       exit 1
       ;;
   esac

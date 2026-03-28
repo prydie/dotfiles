@@ -1,0 +1,11 @@
+#!/bin/sh
+set -eu
+
+case "${1:-}" in
+  pre)
+    /usr/local/sbin/dell-dock-fix pre-sleep
+    ;;
+  post)
+    /usr/local/sbin/dell-dock-fix post-sleep
+    ;;
+esac

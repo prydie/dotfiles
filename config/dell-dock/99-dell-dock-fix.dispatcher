@@ -1,0 +1,15 @@
+#!/bin/bash
+set -eu
+
+interface="${1:-}"
+status="${2:-}"
+
+if [ "${status}" != "up" ]; then
+  exit 0
+fi
+
+case "${interface}" in
+  en*|eth*)
+    /usr/local/sbin/dell-dock-fix apply "${interface}"
+    ;;
+esac
