@@ -1,8 +1,13 @@
 [project]
 name = ""
 version = "0.0.1"
+requires-python = ">=3.11"
 dependencies = [
+    "aiohttp",
+    "librespot>=0.0.10",
     "matplotlib",
+    "music-assistant-client",
+    "mutagen",
     "pandas",
     "websockets>=15.0.1,<16",
 ]
