@@ -687,6 +687,7 @@ os::ubuntu::install_packages_core() {
   local core_packages=(
     binutils
     build-essential
+    colord
     cpu-checker
     curl
     dnsutils
