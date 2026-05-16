@@ -91,6 +91,32 @@ uv run bin/ha-dashboard upsert-card \
   --card-file /tmp/home-nas-card.json
 ```
 
+### Lawn timelapse
+
+`bin/lawn-timelapse` manages the rear lawn growth timelapse snapshots and
+rendering.
+
+```bash
+bin/lawn-timelapse snapshot
+bin/lawn-timelapse status
+bin/lawn-timelapse install-renderer
+bin/lawn-timelapse mount-command
+bin/lawn-timelapse render-local
+bin/lawn-timelapse render-local-smooth
+bin/lawn-timelapse render-nas
+bin/lawn-timelapse render-nas-smooth
+```
+
+The Home Assistant automation stores 4K snapshots under
+`/config/www/lawn-timelapse`, which maps to
+`/mnt/home-nas/docker/homeassistant/www/lawn-timelapse` when the NAS
+`/volume1` export is mounted locally at `/mnt/home-nas`. Local rendering uses
+the workstation ffmpeg and produces MP4 when `libx264` is available. The
+Synology ffmpeg build can render an MJPEG AVI fallback.
+
+The smoothed render uses the same timestamp across days, defaulting to
+`14:00:00`, and writes `lawn-timelapse-smooth-latest.mp4`.
+
 ### Monitor colour
 
 `bin/monitor-colour` inspects GNOME/colord display profiles and can reapply

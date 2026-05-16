@@ -1,0 +1,132 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+NAS_HOST="${LAWN_TIMELAPSE_NAS_HOST:-home-nas}"
+REMOTE_DIR="${LAWN_TIMELAPSE_REMOTE_DIR:-/volume1/docker/homeassistant/www/lawn-timelapse}"
+LOCAL_DIR="${LAWN_TIMELAPSE_LOCAL_DIR:-/mnt/home-nas/docker/homeassistant/www/lawn-timelapse}"
+HA_DIR="${LAWN_TIMELAPSE_HA_DIR:-/config/www/lawn-timelapse}"
+CAMERA_ENTITY="${LAWN_TIMELAPSE_CAMERA_ENTITY:-camera.rear}"
+REMOTE_RENDERER="${LAWN_TIMELAPSE_REMOTE_RENDERER:-/volume1/docker/homeassistant/bin/render_lawn_timelapse.sh}"
+
+usage() {
+  cat <<EOF
+Usage: bin/lawn-timelapse <command>
+
+Commands:
+  snapshot          Take a timestamped Home Assistant camera snapshot now
+  status            Show NAS encoder support and captured snapshot count
+  install-renderer  Install the repo render helper onto the NAS
+  render-nas        Render a timelapse video on the NAS
+  render-nas-smooth Render a smoothed same-time timelapse video on the NAS
+  render-local      Render a timelapse video with local ffmpeg via the NFS mount
+  render-local-smooth
+                    Render a smoothed same-time timelapse video locally
+  mount-command     Print the sudo commands for the persistent NFS mount
+
+Environment:
+  LAWN_TIMELAPSE_NAS_HOST=$NAS_HOST
+  LAWN_TIMELAPSE_REMOTE_DIR=$REMOTE_DIR
+  LAWN_TIMELAPSE_LOCAL_DIR=$LOCAL_DIR
+  LAWN_TIMELAPSE_HA_DIR=$HA_DIR
+  LAWN_TIMELAPSE_CAMERA_ENTITY=$CAMERA_ENTITY
+  LAWN_TIMELAPSE_REMOTE_RENDERER=$REMOTE_RENDERER
+  LAWN_TIMELAPSE_SMOOTH_TIME=${LAWN_TIMELAPSE_SMOOTH_TIME:-140000}
+EOF
+}
+
+snapshot() {
+  local stamp
+  stamp="$(date +%Y%m%d_%H%M%S)"
+  uv run "$ROOT/bin/ha" service camera.snapshot \
+    --data "{\"entity_id\":\"$CAMERA_ENTITY\",\"filename\":\"$HA_DIR/rear_lawn_$stamp.jpg\"}"
+}
+
+status() {
+  echo "local_dir=$LOCAL_DIR"
+  if command -v ffmpeg >/dev/null 2>&1; then
+    echo "local_ffmpeg=$(command -v ffmpeg)"
+    echo "local_encoders:"
+    ffmpeg -hide_banner -encoders 2>/dev/null | grep -E 'libx264|libx265| h264| hevc' || true
+  fi
+  if command -v findmnt >/dev/null 2>&1; then
+    findmnt /mnt/home-nas || true
+  fi
+  ssh "$NAS_HOST" "set -eu
+    echo \"snapshot_dir=$REMOTE_DIR\"
+    echo \"snapshot_count=\$(find '$REMOTE_DIR' -maxdepth 1 -type f -name 'rear_lawn_*.jpg' 2>/dev/null | wc -l | tr -d ' ')\"
+    echo \"ffmpeg=\$(command -v ffmpeg || true)\"
+    if command -v ffmpeg >/dev/null 2>&1; then
+      echo 'encoders:'
+      ffmpeg -hide_banner -encoders 2>/dev/null | grep -E 'libx264|libx265| h264| hevc| mpeg4 | mjpeg ' || true
+    fi"
+}
+
+install_renderer() {
+  ssh "$NAS_HOST" "mkdir -p '$(dirname "$REMOTE_RENDERER")' '$REMOTE_DIR' && cat > '$REMOTE_RENDERER' && chmod +x '$REMOTE_RENDERER'" \
+    < "$ROOT/tools/home_assistant/lawn_timelapse_render.sh"
+}
+
+render_nas() {
+  ssh "$NAS_HOST" "$REMOTE_RENDERER '$REMOTE_DIR'"
+}
+
+render_nas_smooth() {
+  local smooth_time="${LAWN_TIMELAPSE_SMOOTH_TIME:-140000}"
+  ssh "$NAS_HOST" "SMOOTH=1 TIME_FILTER='$smooth_time' OUTPUT_BASENAME='lawn-timelapse-smooth' '$REMOTE_RENDERER' '$REMOTE_DIR'"
+}
+
+render_local() {
+  "$ROOT/tools/home_assistant/lawn_timelapse_render.sh" "$LOCAL_DIR"
+}
+
+render_local_smooth() {
+  local smooth_time="${LAWN_TIMELAPSE_SMOOTH_TIME:-140000}"
+  SMOOTH=1 TIME_FILTER="$smooth_time" OUTPUT_BASENAME="lawn-timelapse-smooth" \
+    "$ROOT/tools/home_assistant/lawn_timelapse_render.sh" "$LOCAL_DIR"
+}
+
+mount_command() {
+  cat <<EOF
+sudo mkdir -p /mnt/home-nas
+sudo cp /etc/fstab /etc/fstab.bak-\$(date +%Y%m%d-home-nas)
+grep -qE '^[^#]+[[:space:]]+/mnt/home-nas[[:space:]]+' /etc/fstab || \\
+  echo '192.168.1.143:/volume1 /mnt/home-nas nfs4 rw,_netdev,nofail,x-systemd.automount,x-systemd.idle-timeout=600,vers=4.1,proto=tcp 0 0' | sudo tee -a /etc/fstab
+sudo systemctl daemon-reload
+sudo mount /mnt/home-nas
+EOF
+}
+
+case "${1:-}" in
+  snapshot)
+    snapshot
+    ;;
+  status)
+    status
+    ;;
+  install-renderer)
+    install_renderer
+    ;;
+  render-nas)
+    render_nas
+    ;;
+  render-nas-smooth)
+    render_nas_smooth
+    ;;
+  render-local)
+    render_local
+    ;;
+  render-local-smooth)
+    render_local_smooth
+    ;;
+  mount-command)
+    mount_command
+    ;;
+  -h|--help|help|"")
+    usage
+    ;;
+  *)
+    usage >&2
+    exit 2
+    ;;
+esac
