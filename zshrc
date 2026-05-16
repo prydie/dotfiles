@@ -15,6 +15,10 @@ fpath=("${XDG_DATA_HOME:-$HOME/.local/share}/zsh/site-functions" $fpath)
 
 # zmodload zsh/zprof
 
+if [ -x "$HOME/.local/bin/mise" ]; then
+  eval "$("$HOME/.local/bin/mise" activate zsh)"
+fi
+
 source ~/.zplug/init.zsh
 
 zplug "zsh-users/zsh-syntax-highlighting", defer:2
@@ -139,10 +143,6 @@ export PYENV_ROOT="$HOME/.pyenv"
 [[ -d $PYENV_ROOT/bin ]] && path=("$PYENV_ROOT/bin" $path)
 if command -v pyenv >/dev/null 2>&1; then
   eval "$(pyenv init -)"
-fi
-
-if [ -x "$HOME/.local/bin/mise" ]; then
-  eval "$("$HOME/.local/bin/mise" activate zsh)"
 fi
 
 [ -f ~/.zshrc.local ] && source ~/.zshrc.local
