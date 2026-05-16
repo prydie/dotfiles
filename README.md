@@ -91,6 +91,20 @@ uv run bin/ha-dashboard upsert-card \
   --card-file /tmp/home-nas-card.json
 ```
 
+### Monitor colour
+
+`bin/monitor-colour` inspects GNOME/colord display profiles and can reapply
+the standard sRGB profile to the desk monitors.
+
+```bash
+bin/monitor-colour list
+bin/monitor-colour apply-srgb
+```
+
+Run `apply-srgb` after the Dell S2725QS and BenQ EL2870U are connected and
+visible in GNOME Displays. The monitors themselves should also be set to sRGB
+mode in their OSD menus.
+
 ## Setup profiles
 
 `hooks/post-up` is profile-driven. By default, `PROFILE=link`, which does not install host packages.
