@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage: uni-clone-projects [destination-directory]
+
+Clone nscaledev repositories tagged with the unikorn topic using SSH URLs.
+Existing destination directories are skipped.
+
+Environment:
+  UNI_GITHUB_ORG         GitHub org to search (default: nscaledev)
+  UNI_GITHUB_TOPIC       Repository topic to search (default: unikorn)
+  UNI_GITHUB_REPO_LIMIT  Maximum repositories to fetch (default: 200)
+EOF
+}
+
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+  usage
+  exit 0
+fi
+
+command -v gh >/dev/null 2>&1 || {
+  echo "gh not found on PATH; install gh via mise" >&2
+  exit 1
+}
+
+command -v git >/dev/null 2>&1 || {
+  echo "git not found on PATH" >&2
+  exit 1
+}
+
+gh auth status >/dev/null 2>&1 || {
+  echo "GitHub CLI is not authenticated; run: gh auth login" >&2
+  exit 1
+}
+
+org="${UNI_GITHUB_ORG:-nscaledev}"
+topic="${UNI_GITHUB_TOPIC:-unikorn}"
+limit="${UNI_GITHUB_REPO_LIMIT:-200}"
+destination="${1:-${UNI_PROJECTS_DIR:-$PWD}}"
+
+mkdir -p "${destination}"
+
+gh repo list "${org}" \
+  --topic "${topic}" \
+  --limit "${limit}" \
+  --json sshUrl \
+  --jq '.[].sshUrl' |
+  while IFS= read -r url; do
+    [[ -n "${url}" ]] || continue
+    repo_name="${url##*/}"
+    repo_name="${repo_name%.git}"
+    target="${destination%/}/${repo_name}"
+
+    if [[ -e "${target}" ]]; then
+      echo "Skipping existing ${target}"
+      continue
+    fi
+
+    git clone "${url}" "${target}"
+  done

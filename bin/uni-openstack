@@ -1,0 +1,68 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage: uni-openstack [openstack args...]
+
+Runs OpenStack CLI against the UNI dev cloud, resolving the username and
+password from 1Password at runtime.
+
+Environment:
+  UNI_OPENSTACK_ITEM  1Password item reference prefix
+                      (default: op://Employee/unikorn-dev-openstack)
+  OS_*                If set to concrete values, override wrapper defaults
+EOF
+}
+
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help-wrapper" ]]; then
+  usage
+  exit 0
+fi
+
+command -v openstack >/dev/null 2>&1 || {
+  echo "openstack not found on PATH; install pipx:python-openstackclient via mise and reload your shell" >&2
+  exit 1
+}
+
+item="${UNI_OPENSTACK_ITEM:-op://Employee/unikorn-dev-openstack}"
+
+export OS_AUTH_URL="${OS_AUTH_URL:-https://compute.glo1.dev.nscale.com:5000/v3}"
+export OS_USERNAME="${OS_USERNAME:-${item}/username}"
+export OS_PASSWORD="${OS_PASSWORD:-${item}/password}"
+export OS_PROJECT_NAME="${OS_PROJECT_NAME:-${OS_USERNAME}}"
+export OS_USER_DOMAIN_NAME="${OS_USER_DOMAIN_NAME:-${OS_USERNAME}}"
+export OS_PROJECT_DOMAIN_NAME="${OS_PROJECT_DOMAIN_NAME:-${OS_PROJECT_NAME}}"
+export OS_REGION_NAME="${OS_REGION_NAME:-RegionOne}"
+export OS_INTERFACE="${OS_INTERFACE:-public}"
+export OS_IDENTITY_API_VERSION="${OS_IDENTITY_API_VERSION:-3}"
+export OS_AUTH_TYPE="${OS_AUTH_TYPE:-password}"
+
+needs_op_run=0
+for value in \
+  "${OS_AUTH_URL}" \
+  "${OS_USERNAME}" \
+  "${OS_PASSWORD}" \
+  "${OS_PROJECT_NAME}" \
+  "${OS_USER_DOMAIN_NAME}" \
+  "${OS_PROJECT_DOMAIN_NAME}" \
+  "${OS_REGION_NAME}" \
+  "${OS_INTERFACE}" \
+  "${OS_IDENTITY_API_VERSION}" \
+  "${OS_AUTH_TYPE}"; do
+  if [[ "${value}" == op://* ]]; then
+    needs_op_run=1
+    break
+  fi
+done
+
+if ((needs_op_run)); then
+  command -v op >/dev/null 2>&1 || {
+    echo "op not found on PATH; install 1password-cli from the official apt package and enable 1Password CLI access" >&2
+    exit 1
+  }
+
+  exec op run -- openstack "$@"
+fi
+
+exec openstack "$@"

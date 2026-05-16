@@ -114,11 +114,15 @@ tools::install_mise_dev_tools() {
     helm \
     kubebuilder \
     doctl \
+    gh \
+    kubectx \
+    kubens \
     pipx:awscli \
     pipx:esptool \
     pipx:black \
     pipx:isort \
     pipx:mypy \
+    pipx:python-openstackclient \
     pipx:ruff
 }
 
@@ -971,6 +975,14 @@ tools::verify_one() {
   fi
 }
 
+tools::verify_openstack_octavia() {
+  if openstack loadbalancer list --help >/dev/null 2>&1; then
+    log::f "OpenStack Octavia plugin: loadbalancer commands available"
+  else
+    log::e "OpenStack Octavia plugin not found; reinstall pipx:python-openstackclient from mise"
+  fi
+}
+
 tools::verify_dev_cli() {
   log::f "Verifying key dev CLIs"
   tools::verify_one "mise" "mise" "mise --version"
@@ -979,6 +991,8 @@ tools::verify_dev_cli() {
   tools::verify_one "OpenTofu" "tofu" "tofu --version"
   tools::verify_one "doctl" "doctl" "doctl version"
   tools::verify_one "AWS CLI" "aws" "aws --version"
+  tools::verify_one "OpenStack CLI" "openstack" "openstack --version"
+  tools::verify_openstack_octavia
   tools::verify_one "Helm" "helm" "helm version --short"
   tools::verify_one "Kubebuilder" "kubebuilder" "kubebuilder version"
   tools::verify_one "Vale" "vale" "vale --version"
