@@ -72,6 +72,10 @@ setopt NO_BEEP
 export VISUAL=nvim
 export EDITOR=$VISUAL
 
+if [[ -t 0 ]]; then
+  export GPG_TTY="$(tty)"
+fi
+
 
 # Command history
 #################

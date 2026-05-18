@@ -6,7 +6,7 @@
 [alias]
     lastcommit = rev-parse --short HEAD
 [core]
-    excludesfile = /home/andrew/.gitignore
+    excludesfile = ~/.gitignore
     abbrev = 8
 	editor = nvim
 
@@ -19,9 +19,23 @@
 
 [include]
     path = ~/.gitconfig.local
+[includeIf "hasconfig:remote.*.url:git@github.com:nscaledev/**"]
+    path = ~/.gitconfig.nscaledev
+[includeIf "hasconfig:remote.*.url:ssh://git@github.com/nscaledev/**"]
+    path = ~/.gitconfig.nscaledev
+[includeIf "hasconfig:remote.*.url:https://github.com/nscaledev/**"]
+    path = ~/.gitconfig.nscaledev
+[includeIf "hasconfig:remote.*.url:gh:nscaledev/**"]
+    path = ~/.gitconfig.nscaledev
 [url "ssh://git@bitbucket.oci.oraclecorp.com:7999"]
 	insteadOf = https://bitbucket.oci.oraclecorp.com/scm
 [url "ssh://git@bitbucket.aka.lgl.grungy.us:7999"]
 	insteadOf = https://bitbucket.aka.lgl.grungy.us/scm
 [url "ssh://git@bitbucket.oci.oraclecorp.com:7999"]
 	insteadOf = https://bitbucket.oci.oraclecorp.com
+[credential "https://github.com"]
+	helper =
+	helper = !$HOME/.local/share/mise/shims/gh auth git-credential
+[credential "https://gist.github.com"]
+	helper =
+	helper = !$HOME/.local/share/mise/shims/gh auth git-credential
