@@ -150,19 +150,19 @@ mode in their OSD menus.
 - Python tooling via `uv`.
 - Node tooling via `nvm`.
 - `PROFILE=core|dev|full` bootstraps zplug plugins and TPM.
-- `PROFILE=dev|full` installs pinned Neovim from [config/mise/config.toml](/home/andrew/.dotfiles/config/mise/config.toml) and runs headless lazy.nvim sync.
+- `PROFILE=dev|full` installs pinned Neovim from [config/mise/config.toml](config/mise/config.toml) and runs headless lazy.nvim sync.
 
 ### Profiles
 
 - `link`: no host package/tool installs; dotfiles only.
 - `core`: infra/network baseline (`tailscale`, `cloudflared`, `openconnect`, `wireguard-tools`, `nmap`, `tcpdump`, `dnsutils`, `jq`, `yq`, `traceroute`, `ufw`, `rsync`, `restic`, `rclone`) and Docker Compose v2 (`docker compose`).
-- `core` also installs `mise`, then installs Atuin, Starship, `kubectl`, and `vale` from [config/mise/config.toml](/home/andrew/.dotfiles/config/mise/config.toml), bootstraps `FiraCode Nerd Font` into `~/.local/share/fonts/NerdFonts/FiraCode` (override with `NERD_FONT_NAME` / `NERD_FONT_VERSION`), and configures GNOME Terminal default font to `FiraCode Nerd Font Mono 11` (override with `TERMINAL_FONT_SPEC`).
-- Vale uses the repo-managed global config at [config/vale/vale.ini](/home/andrew/.dotfiles/config/vale/vale.ini), with the `general` profile: `Vale + write-good + alex`.
+- `core` also installs `mise`, then installs Atuin, Starship, `kubectl`, and `vale` from [config/mise/config.toml](config/mise/config.toml), bootstraps `FiraCode Nerd Font` into `~/.local/share/fonts/NerdFonts/FiraCode` (override with `NERD_FONT_NAME` / `NERD_FONT_VERSION`), and configures GNOME Terminal default font to `FiraCode Nerd Font Mono 11` (override with `TERMINAL_FONT_SPEC`).
+- Vale uses the repo-managed global config at [config/vale/vale.ini](config/vale/vale.ini), with the `general` profile: `Vale + write-good + alex`.
 - `core` writes Zsh completions for `kubectl` to `${XDG_DATA_HOME:-$HOME/.local/share}/zsh/site-functions/_kubectl`.
-- `PROFILE=dev|full` also installs Neovim, Helm, `kubebuilder`, `doctl`, `gh`, `kubectx`, `kubens`, `awscli`, `python-openstackclient` with `python-octaviaclient`, `esptool`, `black`, `isort`, `mypy`, and `ruff` from [config/mise/config.toml](/home/andrew/.dotfiles/config/mise/config.toml), installs Go developer tools via `go install`, and writes Zsh completions for `kubectl`, `kubebuilder`, and Helm.
+- `PROFILE=dev|full` also installs Neovim, Helm, `kubebuilder`, `doctl`, `gh`, `kubectx`, `kubens`, `awscli`, `python-openstackclient` with `python-octaviaclient`, `esptool`, `black`, `isort`, `mypy`, and `ruff` from [config/mise/config.toml](config/mise/config.toml), installs Go developer tools via `go install`, and writes Zsh completions for `kubectl`, `kubebuilder`, and Helm.
 - `dev`: `core` + developer tools such as `ansible`, `go`, `tofu` (OpenTofu), `doctl`, `gh`, `aws`, `openstack`, `hugo`, `picocom`, Codex CLI (`@openai/codex`), Gemini CLI (`@google/gemini-cli`), and ESP tooling (`esptool` + `idf.py` bootstrap), plus Neovim bootstrap.
 - Go is installed from the official tarball into `~/.local/opt/go` with `~/.local/bin/go` symlinked ahead of system Go, so the repo can enforce a minimum version.
-- `full`: `dev` + heavier extras such as `nerdctl`, `regctl`, `vegeta`, `oci-cli`, `autopep8`, and YubiKey tooling from [hooks/os](/home/andrew/.dotfiles/hooks/os).
+- `full`: `dev` + heavier extras such as `nerdctl`, `regctl`, `vegeta`, `oci-cli`, `autopep8`, and YubiKey tooling from [hooks/os](hooks/os).
 
 Use OpenTofu (`tofu`) instead of Terraform.
 
@@ -199,7 +199,7 @@ This stores/loads:
 
 ## Kubernetes installers (no `curl | bash`)
 
-Fast-moving CLI tools are managed centrally via [config/mise/config.toml](/home/andrew/.dotfiles/config/mise/config.toml). Update versions there, then run:
+Fast-moving CLI tools are managed centrally via [config/mise/config.toml](config/mise/config.toml). Update versions there, then run:
 
 ```bash
 mise install
@@ -215,7 +215,7 @@ kube::install_k3d
 `kubectl` and `vale` are installed automatically by `make setup PROFILE=core|dev|full`.
 Helm, `kubebuilder`, `gh`, `kubectx`, `kubens`, `awscli`, `python-openstackclient` with the Octavia plugin, `esptool`, `black`, `isort`, `mypy`, and `ruff` are installed automatically by `make setup PROFILE=dev|full`.
 `oci-cli` and `autopep8` are installed automatically by the `full` profile extras from the same mise config.
-The repo-managed [config/mise/config.toml](/home/andrew/.dotfiles/config/mise/config.toml) is linked to `~/.config/mise/config.toml`, and the shell/hooks also export `MISE_GLOBAL_CONFIG_FILE` as a fallback when needed.
+The repo-managed [config/mise/config.toml](config/mise/config.toml) is linked to `~/.config/mise/config.toml`, and the shell/hooks also export `MISE_GLOBAL_CONFIG_FILE` as a fallback when needed.
 Vale's global config lives at `~/.config/vale/vale.ini` and setup runs `vale sync` to install the configured style packages.
 
 ## UNI helpers

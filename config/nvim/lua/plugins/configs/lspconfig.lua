@@ -1,3 +1,4 @@
+local home = vim.fn.expand "~"
 local root_markers = { "go.work", "go.mod", ".git" }
 
 local function go_buf_dir(bufnr)
@@ -166,7 +167,7 @@ local server_configs = {
       "--completion-style=detailed",
       "--function-arg-placeholders",
       "--fallback-style=llvm",
-      "--query-driver=/home/andrew/.espressif/tools/xtensa-esp32-elf/**/bin/*gcc",
+      "--query-driver=" .. home .. "/.espressif/tools/xtensa-esp32-elf/**/bin/*gcc",
     },
   },
 }
