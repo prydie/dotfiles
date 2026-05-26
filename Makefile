@@ -75,8 +75,13 @@ patching: sys-info ## Run apt patch cycle and reboot
 	@sudo apt update -y
 	@sudo apt upgrade -y
 	@sudo apt autoremove -y
+	@$(MAKE) firmware-overrides
 	@sudo update-grub
 	@sudo shutdown -r now
+
+.PHONY: firmware-overrides
+firmware-overrides: ## Install managed local firmware overrides
+	@tools/xe_lnl_guc_firmware_override.sh install
 
 .PHONY: refresh-dev
 refresh-dev: ## Refresh user-level tooling/plugins (zplug, tmux TPM, Neovim lazy)
@@ -130,6 +135,7 @@ patching-full: refresh-dev sys-info ## Refresh user plugins, patch apt packages,
 	@sudo apt update -y
 	@sudo apt upgrade -y
 	@sudo apt autoremove -y
+	@$(MAKE) firmware-overrides
 	@sudo update-grub
 	@sudo shutdown -r now
 
