@@ -52,20 +52,8 @@ local function setup_gopls(bufnr, client)
     vim.lsp.inlay_hint.enable(true, { bufnr = bufnr })
   end
 
-  if client.server_capabilities.codeLensProvider then
-    local group = vim.api.nvim_create_augroup("GoCodeLens" .. bufnr, { clear = true })
-
-    vim.api.nvim_create_autocmd({ "BufEnter", "CursorHold", "InsertLeave" }, {
-      buffer = bufnr,
-      group = group,
-      callback = function()
-        pcall(vim.lsp.codelens.refresh)
-      end,
-    })
-
-    vim.schedule(function()
-      pcall(vim.lsp.codelens.refresh)
-    end)
+  if client.server_capabilities.codeLensProvider and vim.lsp.codelens and vim.lsp.codelens.enable then
+    vim.lsp.codelens.enable(true, { bufnr = bufnr })
   end
 end
 

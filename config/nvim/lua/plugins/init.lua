@@ -19,6 +19,7 @@ return {
         { "<leader>f", group = "Find/Format" },
         { "<leader>g", group = "Git" },
         { "<leader>k", group = "Kubernetes" },
+        { "<leader>r", group = "Run/Go" },
         { "<leader>s", group = "Search" },
         { "<leader>t", group = "Test/Tofu" },
         { "<leader>x", group = "Trouble/Todo" },

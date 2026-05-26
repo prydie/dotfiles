@@ -58,6 +58,7 @@ local path_sep = is_windows and ";" or ":"
 local path_parts = {
   vim.fn.expand "~/.local/share/mise/shims",
   vim.fn.expand "~/.local/bin",
+  vim.fn.expand "~/go/bin",
   vim.fn.expand "~/.local/opt/go/bin",
   vim.env.PATH,
   vim.fn.stdpath "data" .. "/mason/bin",

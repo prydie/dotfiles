@@ -2,7 +2,7 @@
 # vim: set ft=sh sw=2:
 
 set -euo pipefail
-export PATH="${HOME}/.local/bin:${HOME}/.cargo/bin:${PATH}"
+export PATH="${HOME}/.local/bin:${HOME}/go/bin:${HOME}/.cargo/bin:${PATH}"
 
 nvim::resolve_bin() {
   if [ -x "${HOME}/.local/bin/nvim" ]; then

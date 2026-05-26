@@ -86,6 +86,24 @@ tracked by this public repo. Superpowers scratch state under `.superpowers/` is
 also ignored; deliberate specs/plans under `docs/superpowers/` remain visible to
 Git review.
 
+## Neovim Go workflow
+
+Go formatting is handled by Conform (`goimports`, then `gofumpt`). Live Go
+diagnostics come from `gopls`, including Staticcheck and vulnerability import
+analysis. Go linting and full validation are explicit terminal commands rather
+than save-time lint hooks:
+
+- `:GoLint` runs `golangci-lint run ./...`, respecting project-local config and
+  custom local `bin/golangci-lint` builds.
+- `:GoVet` runs `go vet ./...`.
+- `:GoVulnCheck` runs `govulncheck ./...`.
+- `:GoVerify` runs `go test ./...`, `go vet ./...`, `govulncheck ./...`, and
+  `golangci-lint run ./...`.
+
+Those commands are the same command-line tools made available to agents by the
+dev setup: `go`, `gopls`, `golangci-lint`, and `govulncheck` are installed on
+PATH, with `~/go/bin` included for Go tools installed via `go install`.
+
 ## Home Assistant
 
 `bin/ha` is the general Home Assistant CLI for reading entity state, searching
@@ -172,6 +190,7 @@ mode in their OSD menus.
 - `GO_MIN_VERSION=<version>` (optional; default `1.23.0`)
 - `GO_VERSION=<version>` (optional; pin the exact Go release to install locally, e.g. `1.23.12`)
 - `GOLANGCI_LINT_VERSION=<tag>` (optional; default `v2.8.0`)
+- `GOVULNCHECK_VERSION=<version>` (optional; default `latest`)
 - `GPLS_VERSION=<version>` (optional; default `latest`)
 
 ### What gets configured

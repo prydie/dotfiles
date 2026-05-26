@@ -15,7 +15,7 @@ elif [ -f "${_ROOT}/config/mise/config.toml" ]; then
 fi
 
 ARCH=$([ "$(uname -m)" = "x86_64" ] && echo amd64 || echo arm64)
-export PATH="${XDG_DATA_HOME:-${HOME}/.local/share}/mise/shims:${HOME}/.local/bin:${HOME}/.cargo/bin:${PATH}"
+export PATH="${XDG_DATA_HOME:-${HOME}/.local/share}/mise/shims:${HOME}/.local/bin:${HOME}/go/bin:${HOME}/.cargo/bin:${PATH}"
 
 log::f () {
  printf "INFO: %s $*\n" "$(date)"
@@ -902,13 +902,15 @@ tools::verify_codex_superpowers() {
 }
 
 go::install_developer_tools() {
-  local modvendor_version golangci_lint_version gopls_version
+  local modvendor_version golangci_lint_version govulncheck_version gopls_version
   modvendor_version="${MODVENDOR_VERSION:-v0.5.0}"
   golangci_lint_version="${GOLANGCI_LINT_VERSION:-v2.8.0}"
+  govulncheck_version="${GOVULNCHECK_VERSION:-latest}"
   gopls_version="${GPLS_VERSION:-latest}"
 
   go install "github.com/goware/modvendor@${modvendor_version}"
   go install "github.com/golangci/golangci-lint/v2/cmd/golangci-lint@${golangci_lint_version}"
+  go install "golang.org/x/vuln/cmd/govulncheck@${govulncheck_version}"
   go install "golang.org/x/tools/gopls@${gopls_version}"
 }
 
@@ -1067,6 +1069,10 @@ tools::verify_dev_cli() {
   tools::verify_one "Codex CLI" "codex" "codex --version"
   tools::verify_codex_superpowers
   tools::verify_one "Gemini CLI" "gemini" "gemini --version"
+  tools::verify_one "Go" "go" "go version"
+  tools::verify_one "gopls" "gopls" "gopls version"
+  tools::verify_one "golangci-lint" "golangci-lint" "golangci-lint --version"
+  tools::verify_one "govulncheck" "govulncheck" "govulncheck -version"
   tools::verify_one "OpenTofu" "tofu" "tofu --version"
   tools::verify_one "doctl" "doctl" "doctl version"
   tools::verify_one "AWS CLI" "aws" "aws --version"

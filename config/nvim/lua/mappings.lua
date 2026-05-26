@@ -140,6 +140,10 @@ vim.api.nvim_create_autocmd("FileType", {
     map("n", "<leader>rr", "<cmd>GoRun<CR>", vim.tbl_extend("force", opts, { desc = "Go Run package" }))
     map("n", "<leader>rb", "<cmd>GoBuild<CR>", vim.tbl_extend("force", opts, { desc = "Go Build workspace" }))
     map("n", "<leader>rc", "<cmd>GoCoverage<CR>", vim.tbl_extend("force", opts, { desc = "Go Coverage" }))
+    map("n", "<leader>rv", "<cmd>GoVet<CR>", vim.tbl_extend("force", opts, { desc = "Go Vet workspace" }))
+    map("n", "<leader>rl", "<cmd>GoLint<CR>", vim.tbl_extend("force", opts, { desc = "Go Lint workspace" }))
+    map("n", "<leader>rV", "<cmd>GoVulnCheck<CR>", vim.tbl_extend("force", opts, { desc = "Go vulnerability check" }))
+    map("n", "<leader>ra", "<cmd>GoVerify<CR>", vim.tbl_extend("force", opts, { desc = "Go verify all" }))
     map("n", "<leader>td", function()
       require("neotest").run.run { strategy = "dap" }
     end, vim.tbl_extend("force", opts, { desc = "Debug nearest test" }))

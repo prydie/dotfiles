@@ -33,6 +33,32 @@ local function golangci_command()
   return { project_golangci_lint(), "run", "./..." }
 end
 
+local function shell_join(cmd)
+  local escaped = {}
+  for _, arg in ipairs(cmd) do
+    table.insert(escaped, vim.fn.shellescape(arg))
+  end
+  return table.concat(escaped, " ")
+end
+
+local function run_terminal(cmd, opts)
+  opts = opts or {}
+  local executable = cmd[1]
+  if vim.fn.executable(executable) ~= 1 then
+    vim.notify(executable .. " is not available on PATH", vim.log.levels.ERROR, { title = opts.title or "Command" })
+    return
+  end
+
+  Snacks.terminal(cmd, {
+    cwd = opts.cwd or project_root(),
+    auto_close = false,
+    win = {
+      position = "bottom",
+      height = 0.3,
+    },
+  })
+end
+
 -- mason, write correct names only
 vim.api.nvim_create_user_command("MasonInstallAll", function()
   vim.cmd "MasonInstall bash-language-server css-lsp dockerfile-language-server html-lsp json-lsp lua-language-server pyright yaml-language-server ansible-language-server terraform-ls helm-ls gopls goimports gofumpt golangci-lint clangd stylua prettier black isort shfmt shellcheck tflint hadolint delve debugpy"
@@ -50,6 +76,10 @@ vim.api.nvim_create_user_command("GoCoverage", function()
   lspconfig.go_coverage(vim.api.nvim_get_current_buf())
 end, {})
 
+vim.api.nvim_create_user_command("GoVet", function()
+  run_terminal({ "go", "vet", "./..." }, { title = "GoVet" })
+end, {})
+
 vim.api.nvim_create_user_command("GoLint", function()
   local cwd = project_root()
   local cmd = golangci_command()
@@ -57,14 +87,41 @@ vim.api.nvim_create_user_command("GoLint", function()
     return
   end
 
-  Snacks.terminal(cmd, {
-    cwd = cwd,
-    auto_close = false,
-    win = {
-      position = "bottom",
-      height = 0.3,
-    },
-  })
+  run_terminal(cmd, { cwd = cwd, title = "GoLint" })
+end, {})
+
+vim.api.nvim_create_user_command("GoVulnCheck", function()
+  run_terminal({ "govulncheck", "./..." }, { title = "GoVulnCheck" })
+end, {})
+
+vim.api.nvim_create_user_command("GoVerify", function()
+  local cwd = project_root()
+  local lint_cmd = golangci_command()
+  if not lint_cmd then
+    return
+  end
+
+  local commands = {
+    { "go", "test", "./..." },
+    { "go", "vet", "./..." },
+    { "govulncheck", "./..." },
+    lint_cmd,
+  }
+
+  for _, cmd in ipairs(commands) do
+    local executable = cmd[1]
+    if vim.fn.executable(executable) ~= 1 then
+      vim.notify(executable .. " is not available on PATH", vim.log.levels.ERROR, { title = "GoVerify" })
+      return
+    end
+  end
+
+  local parts = {}
+  for _, cmd in ipairs(commands) do
+    table.insert(parts, shell_join(cmd))
+  end
+
+  run_terminal({ "bash", "-lc", table.concat(parts, " && ") }, { cwd = cwd, title = "GoVerify" })
 end, {})
 
 vim.api.nvim_create_user_command("TofuFmt", function()
