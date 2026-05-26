@@ -113,6 +113,7 @@ tools::install_mise_dev_tools() {
     neovim \
     helm \
     kubebuilder \
+    kind \
     doctl \
     gh \
     kubectx \
@@ -820,6 +821,7 @@ os::ubuntu::install_packages_dev() {
     . "${_ROOT}/hooks/kubernetes"
     kube::install_zsh_completion kubebuilder
     kube::install_zsh_completion helm
+    kube::install_zsh_completion kind
   fi
   tools::install_esp_tools
 
@@ -1080,6 +1082,7 @@ tools::verify_dev_cli() {
   tools::verify_openstack_octavia
   tools::verify_one "Helm" "helm" "helm version --short"
   tools::verify_one "Kubebuilder" "kubebuilder" "kubebuilder version"
+  tools::verify_one "kind" "kind" "kind version"
   tools::verify_one "Vale" "vale" "vale --version"
 }
 

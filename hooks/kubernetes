@@ -112,10 +112,11 @@ Example:
   source hooks/kubernetes
   kube::install_k3d
 
-The normal setup flow installs kubectl, helm, kubebuilder, and related CLI tools via mise.
+The normal setup flow installs kubectl, helm, kubebuilder, kind, and related CLI tools via mise.
 It also writes Zsh completions to:
   ${XDG_DATA_HOME:-$HOME/.local/share}/zsh/site-functions/_kubectl
   ${XDG_DATA_HOME:-$HOME/.local/share}/zsh/site-functions/_kubebuilder
   ${XDG_DATA_HOME:-$HOME/.local/share}/zsh/site-functions/_helm
+  ${XDG_DATA_HOME:-$HOME/.local/share}/zsh/site-functions/_kind
 EOF
 }

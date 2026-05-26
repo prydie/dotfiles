@@ -1,0 +1,295 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+CONFIG_FILE="${NKS_DEV_CONFIG_FILE:-${XDG_CONFIG_HOME:-${HOME}/.config}/nks-dev/env}"
+STATE_DIR="${NKS_DEV_STATE_DIR:-${XDG_STATE_HOME:-${HOME}/.local/state}/nks-dev}"
+
+if [[ -f "${CONFIG_FILE}" ]]; then
+  # shellcheck source=/dev/null
+  source "${CONFIG_FILE}"
+fi
+
+if command -v mise >/dev/null 2>&1; then
+  kind_bin="$(mise which kind 2>/dev/null || true)"
+  if [[ -n "${kind_bin}" ]]; then
+    PATH="$(dirname "${kind_bin}"):${PATH}"
+    export PATH
+  fi
+  unset kind_bin
+fi
+
+cluster_name="${NKS_DEV_CLUSTER_NAME:-nks-dev}"
+kind_image="${NKS_DEV_KIND_IMAGE:-kindest/node:v1.35.0@sha256:452d707d4862f52530247495d180205e029056831160e22870e37e3f6c1ac31f}"
+kind_control_planes="${NKS_DEV_KIND_CONTROL_PLANES:-1}"
+kind_workers="${NKS_DEV_KIND_WORKERS:-2}"
+kind_wait="${NKS_DEV_KIND_WAIT:-5m}"
+node_wait="${NKS_DEV_NODE_WAIT:-3m}"
+registry_enabled="${NKS_DEV_REGISTRY_ENABLED:-1}"
+registry_name="${NKS_DEV_REGISTRY_NAME:-nks-dev-registry}"
+registry_port="${NKS_DEV_REGISTRY_PORT:-5001}"
+kind_network="${NKS_DEV_KIND_NETWORK:-kind}"
+
+usage() {
+  cat <<'EOF'
+Usage: nks-dev <command> [args...]
+
+Generic local NKS development helper. Machine-specific values are read from:
+  ~/.config/nks-dev/env
+
+Commands:
+  doctor              Check required local tools and Docker access
+  config-path         Print the private config path
+  config-template     Print an example private config
+  kind-create         Create the local kind management cluster
+  kind-delete         Delete the local kind management cluster
+  kind-load IMAGE...  Load local image tags into the kind cluster
+  tunnel              Start the configured reverse SSH tunnel
+  tunnel-command      Print the configured reverse SSH tunnel command
+EOF
+}
+
+die() {
+  printf 'nks-dev: %s\n' "$*" >&2
+  exit 1
+}
+
+need() {
+  command -v "$1" >/dev/null 2>&1 || die "missing required command: $1"
+}
+
+bool_true() {
+  case "${1}" in
+    1|true|TRUE|yes|YES|on|ON) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+config_template() {
+  cat <<'EOF'
+# Copy to ~/.config/nks-dev/env and edit locally.
+# Keep real hostnames, ports, project IDs, credentials, and laptop-specific
+# values out of this public dotfiles repository.
+
+NKS_DEV_CLUSTER_NAME=nks-dev
+NKS_DEV_KIND_IMAGE=kindest/node:v1.35.0@sha256:452d707d4862f52530247495d180205e029056831160e22870e37e3f6c1ac31f
+NKS_DEV_KIND_CONTROL_PLANES=1
+NKS_DEV_KIND_WORKERS=2
+NKS_DEV_KIND_WAIT=5m
+NKS_DEV_NODE_WAIT=3m
+
+NKS_DEV_REGISTRY_ENABLED=1
+NKS_DEV_REGISTRY_NAME=nks-dev-registry
+NKS_DEV_REGISTRY_PORT=5001
+
+# Optional: wrapper command for dev OpenStack checks, for example:
+# NKS_DEV_OPENSTACK_CMD=uni-openstack
+
+# Optional: reverse SSH tunnel for dev OpenStack instances that need to reach
+# a service running on this workstation.
+# NKS_DEV_TUNNEL_TARGET=dev-bastion.example
+# NKS_DEV_TUNNEL_REMOTE_BIND=127.0.0.1
+# NKS_DEV_TUNNEL_REMOTE_PORT=9443
+# NKS_DEV_TUNNEL_LOCAL_HOST=127.0.0.1
+# NKS_DEV_TUNNEL_LOCAL_PORT=9443
+EOF
+}
+
+doctor() {
+  local ok=0
+
+  printf 'config: %s' "${CONFIG_FILE}"
+  if [[ -f "${CONFIG_FILE}" ]]; then
+    printf ' (found)\n'
+  else
+    printf ' (missing; create it with: nks-dev config-template > %s)\n' "${CONFIG_FILE}"
+  fi
+
+  for tool in docker kind kubectl ssh; do
+    if command -v "${tool}" >/dev/null 2>&1; then
+      printf '%s: %s\n' "${tool}" "$(command -v "${tool}")"
+    else
+      printf '%s: missing\n' "${tool}"
+      ok=1
+    fi
+  done
+
+  if command -v docker >/dev/null 2>&1; then
+    if docker info >/dev/null 2>&1; then
+      printf 'docker access: ok\n'
+    else
+      printf 'docker access: failed; add this user to the docker group, then log out and back in\n'
+      ok=1
+    fi
+  fi
+
+  if [[ -n "${NKS_DEV_OPENSTACK_CMD:-}" ]]; then
+    if command -v "${NKS_DEV_OPENSTACK_CMD}" >/dev/null 2>&1; then
+      printf 'openstack wrapper: %s\n' "$(command -v "${NKS_DEV_OPENSTACK_CMD}")"
+    else
+      printf 'openstack wrapper: missing (%s)\n' "${NKS_DEV_OPENSTACK_CMD}"
+      ok=1
+    fi
+  fi
+
+  return "${ok}"
+}
+
+write_kind_config() {
+  mkdir -p "${STATE_DIR}"
+  local config="${STATE_DIR}/kind-${cluster_name}.yaml"
+
+  {
+    printf 'kind: Cluster\n'
+    printf 'apiVersion: kind.x-k8s.io/v1alpha4\n'
+    if bool_true "${registry_enabled}"; then
+      printf 'containerdConfigPatches:\n'
+      printf -- '- |-\n'
+      printf '  [plugins."io.containerd.grpc.v1.cri".registry]\n'
+      printf '    config_path = "/etc/containerd/certs.d"\n'
+    fi
+    printf 'nodes:\n'
+    for ((i = 0; i < kind_control_planes; i++)); do
+      printf -- '- role: control-plane\n'
+      printf '  image: %s\n' "${kind_image}"
+    done
+    for ((i = 0; i < kind_workers; i++)); do
+      printf -- '- role: worker\n'
+      printf '  image: %s\n' "${kind_image}"
+    done
+  } > "${config}"
+
+  printf '%s\n' "${config}"
+}
+
+ensure_registry() {
+  need docker
+
+  if [[ "$(docker inspect -f '{{.State.Running}}' "${registry_name}" 2>/dev/null || true)" != "true" ]]; then
+    if docker inspect "${registry_name}" >/dev/null 2>&1; then
+      docker start "${registry_name}" >/dev/null
+    else
+      docker run \
+        -d \
+        --restart=always \
+        -p "127.0.0.1:${registry_port}:5000" \
+        --network bridge \
+        --name "${registry_name}" \
+        registry:3 >/dev/null
+    fi
+  fi
+}
+
+connect_registry_to_cluster() {
+  local node registry_dir
+  registry_dir="/etc/containerd/certs.d/localhost:${registry_port}"
+
+  for node in $(kind get nodes --name "${cluster_name}"); do
+    docker exec "${node}" mkdir -p "${registry_dir}"
+    printf '[host."http://%s:5000"]\n' "${registry_name}" |
+      docker exec -i "${node}" cp /dev/stdin "${registry_dir}/hosts.toml"
+  done
+
+  if [[ "$(docker inspect -f='{{json .NetworkSettings.Networks.'"${kind_network}"'}}' "${registry_name}")" == "null" ]]; then
+    docker network connect "${kind_network}" "${registry_name}"
+  fi
+
+  kubectl --context "kind-${cluster_name}" apply -f - <<EOF
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: local-registry-hosting
+  namespace: kube-public
+data:
+  localRegistryHosting.v1: |
+    host: "localhost:${registry_port}"
+    help: "https://kind.sigs.k8s.io/docs/user/local-registry/"
+EOF
+}
+
+kind_create() {
+  need docker
+  need kind
+  need kubectl
+
+  if bool_true "${registry_enabled}"; then
+    ensure_registry
+  fi
+
+  if kind get clusters | grep -Fxq "${cluster_name}"; then
+    printf 'kind cluster already exists: %s\n' "${cluster_name}"
+  else
+    kind create cluster \
+      --name "${cluster_name}" \
+      --config "$(write_kind_config)" \
+      --wait "${kind_wait}"
+  fi
+
+  if bool_true "${registry_enabled}"; then
+    connect_registry_to_cluster
+  fi
+
+  kubectl --context "kind-${cluster_name}" wait --for=condition=Ready node --all --timeout="${node_wait}"
+  kubectl --context "kind-${cluster_name}" get nodes
+}
+
+kind_delete() {
+  need kind
+  kind delete cluster --name "${cluster_name}"
+}
+
+kind_load() {
+  [[ "$#" -gt 0 ]] || die "usage: nks-dev kind-load IMAGE..."
+  need kind
+  kind load docker-image --name "${cluster_name}" "$@"
+}
+
+tunnel_args() {
+  local target remote_bind remote_port local_host local_port
+  target="${NKS_DEV_TUNNEL_TARGET:-}"
+  remote_bind="${NKS_DEV_TUNNEL_REMOTE_BIND:-127.0.0.1}"
+  remote_port="${NKS_DEV_TUNNEL_REMOTE_PORT:-}"
+  local_host="${NKS_DEV_TUNNEL_LOCAL_HOST:-127.0.0.1}"
+  local_port="${NKS_DEV_TUNNEL_LOCAL_PORT:-}"
+
+  [[ -n "${target}" ]] || die "set NKS_DEV_TUNNEL_TARGET in ${CONFIG_FILE}"
+  [[ -n "${remote_port}" ]] || die "set NKS_DEV_TUNNEL_REMOTE_PORT in ${CONFIG_FILE}"
+  [[ -n "${local_port}" ]] || die "set NKS_DEV_TUNNEL_LOCAL_PORT in ${CONFIG_FILE}"
+
+  printf '%s\0%s:%s:%s:%s\0' "${target}" "${remote_bind}" "${remote_port}" "${local_host}" "${local_port}"
+}
+
+tunnel_command() {
+  local target forward
+  IFS= read -r -d '' target
+  IFS= read -r -d '' forward
+
+  printf 'ssh -N -o ExitOnForwardFailure=yes -R %q %q\n' "${forward}" "${target}"
+}
+
+tunnel() {
+  need ssh
+  local target forward
+  IFS= read -r -d '' target
+  IFS= read -r -d '' forward
+
+  exec ssh -N -o ExitOnForwardFailure=yes -R "${forward}" "${target}"
+}
+
+cmd="${1:-}"
+if [[ -z "${cmd}" || "${cmd}" == "-h" || "${cmd}" == "--help" ]]; then
+  usage
+  exit 0
+fi
+shift
+
+case "${cmd}" in
+  doctor) doctor ;;
+  config-path) printf '%s\n' "${CONFIG_FILE}" ;;
+  config-template) config_template ;;
+  kind-create) kind_create ;;
+  kind-delete) kind_delete ;;
+  kind-load) kind_load "$@" ;;
+  tunnel-command) tunnel_args | tunnel_command ;;
+  tunnel) tunnel_args | tunnel ;;
+  *) usage >&2; exit 2 ;;
+esac

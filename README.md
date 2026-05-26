@@ -57,6 +57,9 @@ make restic-backup-now
 make restic-systemd-enable
 make patching
 make patching-full
+nks-dev doctor
+nks-dev kind-create
+nks-dev tunnel
 ```
 
 ## Codex instructions
@@ -208,7 +211,7 @@ mode in their OSD menus.
 - `core` installs the repo-managed AppArmor profile at [config/apparmor/bwrap](config/apparmor/bwrap) so Ubuntu 24.04's unprivileged user namespace restriction permits Bubblewrap-based sandboxes used by Codex CLI.
 - Vale uses the repo-managed global config at [config/vale/vale.ini](config/vale/vale.ini), with the `general` profile: `Vale + write-good + alex`.
 - `core` writes Zsh completions for `kubectl` to `${XDG_DATA_HOME:-$HOME/.local/share}/zsh/site-functions/_kubectl`.
-- `PROFILE=dev|full` also installs Neovim, Helm, `kubebuilder`, `doctl`, `gh`, `kubectx`, `kubens`, `awscli`, `python-openstackclient` with `python-octaviaclient`, `esptool`, `black`, `isort`, `mypy`, and `ruff` from [config/mise/config.toml](config/mise/config.toml), installs Go developer tools via `go install`, and writes Zsh completions for `kubectl`, `kubebuilder`, and Helm.
+- `PROFILE=dev|full` also installs Neovim, Helm, `kubebuilder`, `kind`, `doctl`, `gh`, `kubectx`, `kubens`, `awscli`, `python-openstackclient` with `python-octaviaclient`, `esptool`, `black`, `isort`, `mypy`, and `ruff` from [config/mise/config.toml](config/mise/config.toml), installs Go developer tools (`gopls`, `golangci-lint`, `govulncheck`, `modvendor`) via `go install`, and writes Zsh completions for `kubectl`, `kubebuilder`, Helm, and `kind`.
 - `dev`: `core` + developer tools such as `ansible`, `go`, `tofu` (OpenTofu), `doctl`, `gh`, `aws`, `openstack`, `hugo`, `picocom`, Codex CLI (`@openai/codex`), Gemini CLI (`@google/gemini-cli`), and ESP tooling (`esptool` + `idf.py` bootstrap), plus Neovim bootstrap.
 - Go is installed from the official tarball into `~/.local/opt/go` with `~/.local/bin/go` symlinked ahead of system Go, so the repo can enforce a minimum version.
 - `full`: `dev` + heavier extras such as `nerdctl`, `regctl`, `vegeta`, `oci-cli`, `autopep8`, and YubiKey tooling from [hooks/os](hooks/os).
@@ -254,6 +257,10 @@ Fast-moving CLI tools are managed centrally via [config/mise/config.toml](config
 mise install
 ```
 
+`kind` is the default local Kubernetes cluster tool for controller-manager
+development. It is installed by the `dev` and `full` profiles through mise and
+is managed by `nks-dev` for NKS-specific local clusters.
+
 Manual Kubernetes installers remain available for `k3d` only:
 
 ```bash
@@ -262,10 +269,50 @@ kube::install_k3d
 ```
 
 `kubectl` and `vale` are installed automatically by `make setup PROFILE=core|dev|full`.
-Helm, `kubebuilder`, `gh`, `kubectx`, `kubens`, `awscli`, `python-openstackclient` with the Octavia plugin, `esptool`, `black`, `isort`, `mypy`, and `ruff` are installed automatically by `make setup PROFILE=dev|full`.
+Helm, `kubebuilder`, `kind`, `gh`, `kubectx`, `kubens`, `awscli`, `python-openstackclient` with the Octavia plugin, `esptool`, `black`, `isort`, `mypy`, and `ruff` are installed automatically by `make setup PROFILE=dev|full`.
 `oci-cli` and `autopep8` are installed automatically by the `full` profile extras from the same mise config.
 The repo-managed [config/mise/config.toml](config/mise/config.toml) is linked to `~/.config/mise/config.toml`, and the shell/hooks also export `MISE_GLOBAL_CONFIG_FILE` as a fallback when needed.
 Vale's global config lives at `~/.config/vale/vale.ini` and setup runs `vale sync` to install the configured style packages.
+
+## NKS local development
+
+`nks-dev` manages the generic local NKS development loop without committing
+work-specific values to this public repo. It reads private settings from
+`~/.config/nks-dev/env`; a placeholder template lives at
+[config/nks-dev/env.example](config/nks-dev/env.example).
+
+Bootstrap a private config:
+
+```bash
+mkdir -p ~/.config/nks-dev
+nks-dev config-template > ~/.config/nks-dev/env
+chmod 0600 ~/.config/nks-dev/env
+$EDITOR ~/.config/nks-dev/env
+```
+
+Check the workstation and create a local management cluster:
+
+```bash
+nks-dev doctor
+nks-dev kind-create
+kubectl --context kind-nks-dev get nodes
+```
+
+The default cluster is one control-plane node plus two workers using a
+digest-pinned `kindest/node` image and a local registry on `localhost:5001`.
+Override those values in `~/.config/nks-dev/env`, not in this repo.
+
+For dev OpenStack instances that need to reach a local service, configure the
+reverse SSH tunnel variables in `~/.config/nks-dev/env`, then run:
+
+```bash
+nks-dev tunnel-command
+nks-dev tunnel
+```
+
+On a replacement laptop, run the normal setup profile, restore
+`~/.config/nks-dev/env` and any credentials from the private source of truth,
+then recreate the cluster with `nks-dev kind-create`.
 
 ## UNI helpers
 
