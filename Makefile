@@ -27,6 +27,14 @@ up: ## Symlink dotfiles with rcm (rcup)
 setup: ## Run host setup profile (PROFILE=link|core|dev|full)
 	@PROFILE="$(PROFILE)" SHELL_DEFAULT="$(SHELL_DEFAULT)" NODE_VERSION="$(NODE_VERSION)" bash hooks/post-up
 
+.PHONY: codex-sandbox-fix
+codex-sandbox-fix: ## Install AppArmor profile needed by Codex CLI bubblewrap sandbox
+	@bash -lc 'source hooks/os; os::ubuntu::ensure_bwrap_apparmor_profile'
+
+.PHONY: codex-superpowers
+codex-superpowers: ## Install/enable the Codex Superpowers plugin
+	@bash hooks/os codex-superpowers
+
 .PHONY: bootstrap
 bootstrap: ## Install bootstrap deps, link dotfiles, and run setup profile (PROFILE=link|core|dev|full)
 	@bash install.sh

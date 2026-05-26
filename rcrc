@@ -1,3 +1,3 @@
-EXCLUDES="README.md LICENCE Makefile install.sh rcrc go.mod go.sum pyproject.toml uv.lock pyvenv.cfg *.log __pycache__ *.pyc ansible data-analysis python tools config/nvim/lazy-lock.json"
+EXCLUDES="README.md LICENCE Makefile install.sh rcrc ./AGENTS.md go.mod go.sum pyproject.toml uv.lock pyvenv.cfg *.log __pycache__ *.pyc ansible data-analysis python tools config/nvim/lazy-lock.json"
 DOTFILES_DIRS="$HOME/.dotfiles"
 UNDOTTED="bin"

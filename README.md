@@ -48,6 +48,8 @@ make help
 make up
 make bootstrap
 make setup
+make codex-sandbox-fix
+make codex-superpowers
 make refresh-dev
 make gnome-prefs-save
 make gnome-prefs-apply
@@ -56,6 +58,33 @@ make restic-systemd-enable
 make patching
 make patching-full
 ```
+
+## Codex instructions
+
+This repo manages only the public-safe global Codex guidance file:
+
+- `codex/AGENTS.md` links to `~/.codex/AGENTS.md`
+
+The rest of `~/.codex` is intentionally local and untracked because it can
+contain auth state, logs, history, caches, memories, per-repo trust settings, and
+other private or machine-specific data. Keep private host-specific guidance in
+`~/.codex/AGENTS.override.md`.
+
+The repo-root `AGENTS.md` is project guidance for this dotfiles repo only and is
+excluded from `rcm` linking so it is not installed as `~/.AGENTS.md`.
+
+`make setup PROFILE=dev|full` installs Codex CLI and enables the curated
+`superpowers@openai-curated` plugin in local `~/.codex` state. To refresh or
+install only that plugin, run:
+
+```bash
+make codex-superpowers
+```
+
+Generated Codex plugin cache/config remains local to `~/.codex` and is not
+tracked by this public repo. Superpowers scratch state under `.superpowers/` is
+also ignored; deliberate specs/plans under `docs/superpowers/` remain visible to
+Git review.
 
 ## Home Assistant
 
@@ -157,6 +186,7 @@ mode in their OSD menus.
 - `link`: no host package/tool installs; dotfiles only.
 - `core`: infra/network baseline (`tailscale`, `cloudflared`, `openconnect`, `wireguard-tools`, `nmap`, `tcpdump`, `dnsutils`, `jq`, `yq`, `traceroute`, `ufw`, `rsync`, `restic`, `rclone`) and Docker Compose v2 (`docker compose`).
 - `core` also installs `mise`, then installs Atuin, Starship, `kubectl`, and `vale` from [config/mise/config.toml](config/mise/config.toml), bootstraps `FiraCode Nerd Font` into `~/.local/share/fonts/NerdFonts/FiraCode` (override with `NERD_FONT_NAME` / `NERD_FONT_VERSION`), and configures GNOME Terminal default font to `FiraCode Nerd Font Mono 11` (override with `TERMINAL_FONT_SPEC`).
+- `core` installs the repo-managed AppArmor profile at [config/apparmor/bwrap](config/apparmor/bwrap) so Ubuntu 24.04's unprivileged user namespace restriction permits Bubblewrap-based sandboxes used by Codex CLI.
 - Vale uses the repo-managed global config at [config/vale/vale.ini](config/vale/vale.ini), with the `general` profile: `Vale + write-good + alex`.
 - `core` writes Zsh completions for `kubectl` to `${XDG_DATA_HOME:-$HOME/.local/share}/zsh/site-functions/_kubectl`.
 - `PROFILE=dev|full` also installs Neovim, Helm, `kubebuilder`, `doctl`, `gh`, `kubectx`, `kubens`, `awscli`, `python-openstackclient` with `python-octaviaclient`, `esptool`, `black`, `isort`, `mypy`, and `ruff` from [config/mise/config.toml](config/mise/config.toml), installs Go developer tools via `go install`, and writes Zsh completions for `kubectl`, `kubebuilder`, and Helm.

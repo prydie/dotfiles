@@ -522,6 +522,26 @@ os::ubuntu::apt_repo_hygiene() {
   fi
 }
 
+os::ubuntu::ensure_bwrap_apparmor_profile() {
+  local profile_src profile_dst
+  profile_src="${_ROOT}/config/apparmor/bwrap"
+  profile_dst="/etc/apparmor.d/bwrap"
+
+  if [ ! -f "${profile_src}" ]; then
+    log::e "bwrap AppArmor profile not found at ${profile_src}"
+    return 1
+  fi
+
+  if ! command -v apparmor_parser >/dev/null 2>&1; then
+    log::f "Skipping bwrap AppArmor profile: apparmor_parser not found"
+    return 0
+  fi
+
+  sudo install -m 0644 "${profile_src}" "${profile_dst}"
+  sudo apparmor_parser -r "${profile_dst}"
+  log::f "Installed AppArmor profile for bubblewrap: ${profile_dst}"
+}
+
 os::get_distro() {
   local uname_lc
   # Determine OS platform
@@ -685,6 +705,7 @@ os::ubuntu::install_packages_core() {
 
   os::ubuntu::ensure_bootstrap_tools
   os::ubuntu::apt_repo_hygiene
+  os::ubuntu::ensure_bwrap_apparmor_profile
   os::ubuntu::ensure_cloudflared_repo
   os::ubuntu::ensure_tailscale_repo
 
@@ -816,11 +837,68 @@ os::ubuntu::install_packages_dev() {
     pyright \
     vscode-langservers-extracted \
     yaml-language-server
+  tools::install_codex_superpowers
   tools::verify_dev_cli
 }
 
 os::set_zoom_scaling_factor () {
   perl -i -pe 's/scaleFactor=2/scaleFactor=1/' ~/.config/zoomus.conf
+}
+
+tools::install_codex_superpowers() {
+  local codex_bin
+
+  if ! codex_bin="$(tools::plugin_capable_codex_bin)"; then
+    log::e "No Codex CLI with plugin install support found"
+    log::e "Update Codex first, then rerun: make codex-superpowers"
+    return 1
+  fi
+
+  if "${codex_bin}" plugin list 2>/dev/null | grep -q "superpowers@openai-curated (installed, enabled)"; then
+    log::f "Codex Superpowers plugin already installed"
+    return 0
+  fi
+
+  "${codex_bin}" plugin add superpowers@openai-curated
+}
+
+tools::plugin_capable_codex_bin() {
+  local candidate resolved
+
+  resolved="$(command -v codex 2>/dev/null || true)"
+  for candidate in \
+    "${resolved}" \
+    "${HOME}"/.nvm/versions/node/*/bin/codex \
+    "${HOME}/.local/bin/codex"
+  do
+    if [ -z "${candidate}" ] || [ ! -x "${candidate}" ]; then
+      continue
+    fi
+
+    if "${candidate}" plugin --help 2>/dev/null | grep -q "^  add "; then
+      printf "%s\n" "${candidate}"
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+tools::verify_codex_superpowers() {
+  local codex_bin
+
+  if ! codex_bin="$(tools::plugin_capable_codex_bin)"; then
+    log::e "Codex plugin-capable CLI not found"
+    return 1
+  fi
+
+  if "${codex_bin}" plugin list 2>/dev/null | grep -q "superpowers@openai-curated (installed, enabled)"; then
+    log::f "Codex Superpowers plugin: installed and enabled"
+    return 0
+  fi
+
+  log::e "Codex Superpowers plugin not installed"
+  return 1
 }
 
 go::install_developer_tools() {
@@ -987,6 +1065,7 @@ tools::verify_dev_cli() {
   log::f "Verifying key dev CLIs"
   tools::verify_one "mise" "mise" "mise --version"
   tools::verify_one "Codex CLI" "codex" "codex --version"
+  tools::verify_codex_superpowers
   tools::verify_one "Gemini CLI" "gemini" "gemini --version"
   tools::verify_one "OpenTofu" "tofu" "tofu --version"
   tools::verify_one "doctl" "doctl" "doctl version"
@@ -1045,6 +1124,9 @@ tools::full_install() {
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
   case "${1:-}" in
+    codex-superpowers)
+      tools::install_codex_superpowers
+      ;;
     full-install)
       tools::full_install
       ;;
