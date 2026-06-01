@@ -116,6 +116,7 @@ tools::install_mise_dev_tools() {
     kind \
     doctl \
     gh \
+    github:agavra/tuicr \
     kubectx \
     kubens \
     pipx:awscli \

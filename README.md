@@ -211,7 +211,7 @@ mode in their OSD menus.
 - `core` installs the repo-managed AppArmor profile at [config/apparmor/bwrap](config/apparmor/bwrap) so Ubuntu 24.04's unprivileged user namespace restriction permits Bubblewrap-based sandboxes used by Codex CLI.
 - Vale uses the repo-managed global config at [config/vale/vale.ini](config/vale/vale.ini), with the `general` profile: `Vale + write-good + alex`.
 - `core` writes Zsh completions for `kubectl` to `${XDG_DATA_HOME:-$HOME/.local/share}/zsh/site-functions/_kubectl`.
-- `PROFILE=dev|full` also installs Neovim, Helm, `kubebuilder`, `kind`, `doctl`, `gh`, `kubectx`, `kubens`, `awscli`, `python-openstackclient` with `python-octaviaclient`, `esptool`, `black`, `isort`, `mypy`, and `ruff` from [config/mise/config.toml](config/mise/config.toml), installs Go developer tools (`gopls`, `golangci-lint`, `govulncheck`, `modvendor`) via `go install`, and writes Zsh completions for `kubectl`, `kubebuilder`, Helm, and `kind`.
+- `PROFILE=dev|full` also installs Neovim, Helm, `kubebuilder`, `kind`, `doctl`, `gh`, `tuicr`, `kubectx`, `kubens`, `awscli`, `python-openstackclient` with `python-octaviaclient`, `esptool`, `black`, `isort`, `mypy`, and `ruff` from [config/mise/config.toml](config/mise/config.toml), installs Go developer tools (`gopls`, `golangci-lint`, `govulncheck`, `modvendor`) via `go install`, and writes Zsh completions for `kubectl`, `kubebuilder`, Helm, and `kind`.
 - `dev`: `core` + developer tools such as `ansible`, `go`, `tofu` (OpenTofu), `doctl`, `gh`, `aws`, `openstack`, `hugo`, `picocom`, Codex CLI (`@openai/codex`), Gemini CLI (`@google/gemini-cli`), and ESP tooling (`esptool` + `idf.py` bootstrap), plus Neovim bootstrap.
 - Go is installed from the official tarball into `~/.local/opt/go` with `~/.local/bin/go` symlinked ahead of system Go, so the repo can enforce a minimum version.
 - `full`: `dev` + heavier extras such as `nerdctl`, `regctl`, `vegeta`, `oci-cli`, `autopep8`, and YubiKey tooling from [hooks/os](hooks/os).
@@ -261,6 +261,9 @@ mise install
 development. It is installed by the `dev` and `full` profiles through mise and
 is managed by `nks-dev` for NKS-specific local clusters.
 
+`tuicr` is installed by the `dev` and `full` profiles through mise for local
+PR-style review of worktree changes before folding them into the main checkout.
+
 Manual Kubernetes installers remain available for `k3d` only:
 
 ```bash
@@ -269,7 +272,7 @@ kube::install_k3d
 ```
 
 `kubectl` and `vale` are installed automatically by `make setup PROFILE=core|dev|full`.
-Helm, `kubebuilder`, `kind`, `gh`, `kubectx`, `kubens`, `awscli`, `python-openstackclient` with the Octavia plugin, `esptool`, `black`, `isort`, `mypy`, and `ruff` are installed automatically by `make setup PROFILE=dev|full`.
+Helm, `kubebuilder`, `kind`, `gh`, `tuicr`, `kubectx`, `kubens`, `awscli`, `python-openstackclient` with the Octavia plugin, `esptool`, `black`, `isort`, `mypy`, and `ruff` are installed automatically by `make setup PROFILE=dev|full`.
 `oci-cli` and `autopep8` are installed automatically by the `full` profile extras from the same mise config.
 The repo-managed [config/mise/config.toml](config/mise/config.toml) is linked to `~/.config/mise/config.toml`, and the shell/hooks also export `MISE_GLOBAL_CONFIG_FILE` as a fallback when needed.
 Vale's global config lives at `~/.config/vale/vale.ini` and setup runs `vale sync` to install the configured style packages.
