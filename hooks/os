@@ -1,7 +1,8 @@
 #!/bin/bash
 # vim: set ft=sh sw=2:
 
-export GOARCH=$(go env GOARCH 2>/dev/null || echo "amd64")
+GOARCH="$(go env GOARCH 2>/dev/null || echo "amd64")"
+export GOARCH
 
 _ROOT="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." && pwd)"
 if [ ! -f "${_ROOT}/hooks/os" ] && [ -f "${PWD}/hooks/os" ]; then
@@ -545,18 +546,27 @@ os::ubuntu::ensure_bwrap_apparmor_profile() {
 }
 
 os::get_distro() {
-  local uname_lc
+  local release_file uname_lc
   # Determine OS platform
   uname_lc=$(uname | tr "[:upper:]" "[:lower:]")
 
   # If Linux, try to determine specific distribution
   if [ "${uname_lc}" == "linux" ]; then
     # If available, use LSB to identify distribution
-    if [ -f /etc/lsb-release -o -d /etc/lsb-release.d ]; then
-      export DISTRO=$(lsb_release -i | cut -d: -f2 | sed s/'^\t'//)
+    if [ -f /etc/lsb-release ] || [ -d /etc/lsb-release.d ]; then
+      DISTRO="$(lsb_release -i | cut -d: -f2 | sed s/'^\t'//)"
+      export DISTRO
     # Otherwise, use release info file
     else
-      export DISTRO=$(ls -d /etc/[A-Za-z]*[_-][rv]e[lr]* | grep -v "lsb" | cut -d'/' -f3 | cut -d'-' -f1 | cut -d'_' -f1)
+      for release_file in /etc/[A-Za-z]*[_-][rv]e[lr]*; do
+        [ -e "${release_file}" ] || continue
+        case "${release_file}" in
+          *lsb*) continue ;;
+        esac
+        DISTRO="$(basename "${release_file}" | cut -d'-' -f1 | cut -d'_' -f1)"
+        export DISTRO
+        break
+      done
     fi
   fi
 
