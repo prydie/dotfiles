@@ -1,0 +1,36 @@
+# Ghostty configuration.
+#
+# Replaces GNOME Terminal (VTE), which does not honour OSC 52 clipboard writes.
+# Ghostty's `clipboard-write = allow` (the default, set explicitly below for
+# intent) is what lets a copy inside tmux/Neovim over SSH actually land on this
+# machine's system clipboard -- it applies the OSC 52 escape sequence that
+# tmux forwards (see set-clipboard in ~/.tmux.conf).
+
+# --- Font ---
+# Mirrors the previous GNOME Terminal profile (FiraCode Nerd Font Mono 11).
+font-family = FiraCode Nerd Font Mono
+font-size = 11
+
+# --- Theme ---
+# Reproduce the old GNOME Terminal look: GNOME's default Tango palette (from the
+# Tango Dark theme) on Ubuntu's classic aubergine background with white text.
+# Run `ghostty +list-themes` to browse alternatives.
+theme = Builtin Tango Dark
+background = 300A24
+foreground = ffffff
+cursor-color = ffffff
+cursor-text = 300A24
+
+# --- SSH ---
+# Ghostty advertises TERM=xterm-ghostty, whose terminfo is absent on remote hosts
+# (tmux/vim then bail with "missing or unsuitable terminal"). ssh-terminfo auto-
+# installs ghostty's terminfo on each host you connect to; ssh-env propagates
+# TERM/COLORTERM as a fallback. (cursor/title/path are the on-by-default features,
+# restated because this key replaces the default set.)
+shell-integration-features = cursor,title,path,ssh-env,ssh-terminfo
+
+# --- Clipboard (the reason this config exists) ---
+# allow: honour OSC 52 writes from terminal programs (tmux/Neovim) without asking.
+clipboard-write = allow
+# Keep the guard that warns before pasting multi-line / control-char payloads.
+clipboard-paste-protection = true

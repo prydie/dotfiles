@@ -1518,6 +1518,36 @@ os::install_dell_dock_fix() {
   fi
 }
 
+os::ghostty::install_terminfo() {
+  # Ghostty advertises TERM=xterm-ghostty, whose terminfo ships only inside the
+  # Ghostty app. Install it into the user terminfo db so tmux/vim work when this
+  # host is reached over SSH from a Ghostty terminal (otherwise: "missing or
+  # unsuitable terminal: xterm-ghostty"). Sourced from the repo so it works on
+  # hosts that do not have Ghostty itself installed.
+  local src dest
+  src="${_ROOT}/config/ghostty/xterm-ghostty.terminfo"
+
+  if [ ! -f "${src}" ]; then
+    log::f "Ghostty terminfo source missing at ${src}; skipping"
+    return 0
+  fi
+  if ! command -v tic >/dev/null 2>&1; then
+    log::f "tic not found (install ncurses-bin); skipping Ghostty terminfo"
+    return 0
+  fi
+  if infocmp xterm-ghostty >/dev/null 2>&1 && [ "${GHOSTTY_TERMINFO_FORCE:-0}" != "1" ]; then
+    log::f "Ghostty terminfo already present (xterm-ghostty)"
+    return 0
+  fi
+
+  dest="${HOME}/.terminfo"
+  log::f "Installing Ghostty terminfo (xterm-ghostty) into ${dest}"
+  tic -x -o "${dest}" "${src}" 2>/dev/null || {
+    log::e "Failed to install Ghostty terminfo from ${src}"
+    return 1
+  }
+}
+
 tools::full_install() {
   go::install_developer_tools
   tools::install_ansible
@@ -1545,12 +1575,15 @@ if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
     install-dell-dock-fix)
       os::install_dell_dock_fix
       ;;
+    ghostty-terminfo)
+      os::ghostty::install_terminfo
+      ;;
     "")
-      echo "No action selected. Use: $0 codex-superpowers | tla-tools | verify-tla-tools | full-install | install-dell-dock-fix"
+      echo "No action selected. Use: $0 codex-superpowers | tla-tools | verify-tla-tools | full-install | install-dell-dock-fix | ghostty-terminfo"
       ;;
     *)
       echo "Unknown action: $1"
-      echo "Usage: $0 codex-superpowers | tla-tools | verify-tla-tools | full-install | install-dell-dock-fix"
+      echo "Usage: $0 codex-superpowers | tla-tools | verify-tla-tools | full-install | install-dell-dock-fix | ghostty-terminfo"
       exit 1
       ;;
   esac

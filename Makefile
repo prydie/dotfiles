@@ -43,6 +43,10 @@ tla-tools: ## Install and verify TLA+ validation/proof tooling
 verify-tla-tools: ## Verify TLA+ validation/proof tooling is callable
 	@bash hooks/os verify-tla-tools
 
+.PHONY: ghostty-terminfo
+ghostty-terminfo: ## Install Ghostty's xterm-ghostty terminfo into ~/.terminfo (for SSH from Ghostty)
+	@bash hooks/os ghostty-terminfo
+
 .PHONY: bootstrap
 bootstrap: ## Install bootstrap deps, link dotfiles, and run setup profile (PROFILE=link|core|dev|full)
 	@bash install.sh

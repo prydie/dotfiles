@@ -52,6 +52,7 @@ make codex-sandbox-fix
 make codex-superpowers
 make tla-tools
 make verify-tla-tools
+make ghostty-terminfo
 make refresh-dev
 make gnome-prefs-save
 make gnome-prefs-apply
@@ -200,6 +201,7 @@ mode in their OSD menus.
 
 ### What gets configured
 
+- On every profile (including `link`), installs Ghostty's `xterm-ghostty` terminfo into `~/.terminfo` from [config/ghostty/xterm-ghostty.terminfo](config/ghostty/xterm-ghostty.terminfo), so SSHing into the host from a Ghostty terminal does not break `tmux`/`vim` with "missing or unsuitable terminal: xterm-ghostty". Run standalone with `make ghostty-terminfo`.
 - Python tooling via `uv`.
 - Node tooling via `nvm`.
 - `PROFILE=core|dev|full` bootstraps zplug plugins and TPM.

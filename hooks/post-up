@@ -29,6 +29,10 @@ case "${PROFILE}" in
     ;;
 esac
 
+# Install Ghostty's terminfo on every profile (including link) so SSHing into
+# this host from a Ghostty terminal does not break tmux/vim. User-level, cheap.
+os::ghostty::install_terminfo || true
+
 if [[ "${PROFILE}" != "link" ]]; then
   if [[ "${DISTRO}" =~ ^(Ubuntu|debian)$ ]]; then
     os::ensure_zsh
