@@ -35,6 +35,14 @@ codex-sandbox-fix: ## Install AppArmor profile needed by Codex CLI bubblewrap sa
 codex-superpowers: ## Install/enable the Codex Superpowers plugin
 	@bash hooks/os codex-superpowers
 
+.PHONY: tla-tools
+tla-tools: ## Install and verify TLA+ validation/proof tooling
+	@bash hooks/os tla-tools
+
+.PHONY: verify-tla-tools
+verify-tla-tools: ## Verify TLA+ validation/proof tooling is callable
+	@bash hooks/os verify-tla-tools
+
 .PHONY: bootstrap
 bootstrap: ## Install bootstrap deps, link dotfiles, and run setup profile (PROFILE=link|core|dev|full)
 	@bash install.sh

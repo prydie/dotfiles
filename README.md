@@ -50,6 +50,8 @@ make bootstrap
 make setup
 make codex-sandbox-fix
 make codex-superpowers
+make tla-tools
+make verify-tla-tools
 make refresh-dev
 make gnome-prefs-save
 make gnome-prefs-apply
@@ -211,7 +213,7 @@ mode in their OSD menus.
 - `core` installs the repo-managed AppArmor profile at [config/apparmor/bwrap](config/apparmor/bwrap) so Ubuntu 24.04's unprivileged user namespace restriction permits Bubblewrap-based sandboxes used by Codex CLI.
 - Vale uses the repo-managed global config at [config/vale/vale.ini](config/vale/vale.ini), with the `general` profile: `Vale + write-good + alex`.
 - `core` writes Zsh completions for `kubectl` to `${XDG_DATA_HOME:-$HOME/.local/share}/zsh/site-functions/_kubectl`.
-- `PROFILE=dev|full` also installs Neovim, Helm, `kubebuilder`, `kind`, `doctl`, `gh`, `tuicr`, `kubectx`, `kubens`, `awscli`, `python-openstackclient` with `python-octaviaclient`, `esptool`, `black`, `isort`, `mypy`, and `ruff` from [config/mise/config.toml](config/mise/config.toml), installs Go developer tools (`gopls`, `golangci-lint`, `govulncheck`, `modvendor`) via `go install`, and writes Zsh completions for `kubectl`, `kubebuilder`, Helm, and `kind`.
+- `PROFILE=dev|full` also installs Neovim, Helm, `kubebuilder`, `kind`, `doctl`, `gh`, `tuicr`, `kubectx`, `kubens`, `promtool`, `awscli`, `python-openstackclient` with `python-octaviaclient`, `esptool`, `black`, `isort`, `mypy`, and `ruff` from [config/mise/config.toml](config/mise/config.toml), installs Go developer tools (`gopls`, `golangci-lint`, `govulncheck`, `modvendor`) via `go install`, installs TLA+ validation/proof tooling (`tlc`, `sany`, `pcal`, `tla2tex`, `apalache-mc`, `tlapm`, `tla`, `tla-mcp`), and writes Zsh completions for `kubectl`, `kubebuilder`, Helm, and `kind`.
 - `dev`: `core` + developer tools such as `ansible`, `go`, `tofu` (OpenTofu), `doctl`, `gh`, `aws`, `openstack`, `hugo`, `picocom`, Codex CLI (`@openai/codex`), Gemini CLI (`@google/gemini-cli`), and ESP tooling (`esptool` + `idf.py` bootstrap), plus Neovim bootstrap.
 - Go is installed from the official tarball into `~/.local/opt/go` with `~/.local/bin/go` symlinked ahead of system Go, so the repo can enforce a minimum version.
 - `full`: `dev` + heavier extras such as `nerdctl`, `regctl`, `vegeta`, `oci-cli`, `autopep8`, and YubiKey tooling from [hooks/os](hooks/os).
@@ -272,10 +274,49 @@ kube::install_k3d
 ```
 
 `kubectl` and `vale` are installed automatically by `make setup PROFILE=core|dev|full`.
-Helm, `kubebuilder`, `kind`, `gh`, `tuicr`, `kubectx`, `kubens`, `awscli`, `python-openstackclient` with the Octavia plugin, `esptool`, `black`, `isort`, `mypy`, and `ruff` are installed automatically by `make setup PROFILE=dev|full`.
+Helm, `kubebuilder`, `kind`, `gh`, `tuicr`, `kubectx`, `kubens`, `promtool`, `awscli`, `python-openstackclient` with the Octavia plugin, `esptool`, `black`, `isort`, `mypy`, and `ruff` are installed automatically by `make setup PROFILE=dev|full`.
 `oci-cli` and `autopep8` are installed automatically by the `full` profile extras from the same mise config.
 The repo-managed [config/mise/config.toml](config/mise/config.toml) is linked to `~/.config/mise/config.toml`, and the shell/hooks also export `MISE_GLOBAL_CONFIG_FILE` as a fallback when needed.
 Vale's global config lives at `~/.config/vale/vale.ini` and setup runs `vale sync` to install the configured style packages.
+
+## TLA+ tooling
+
+`PROFILE=dev|full` installs command-line tooling for validating and proving TLA+ models:
+
+- `tlc`, `sany`, `pcal`, `tla2tex`, `tlatex`, `tlarepl`, and `tla2tools` wrappers around `tla2tools.jar`
+- `apalache-mc` for symbolic model checking
+- `tlapm` from TLAPS for proof checking
+- `tla` and `tla-mcp` from the experimental `tla-rs` project for interactive/model-checking workflows and MCP-enabled agent clients
+
+Install or verify just this toolchain with:
+
+```bash
+make tla-tools
+make verify-tla-tools
+```
+
+The installers place artifacts under `~/.local/opt` and symlink commands into `~/.local/bin`.
+
+### LLM-assisted TLA+ workflow
+
+Use the LLM as a drafting and repair assistant, not as the verifier:
+
+1. Write a modeling brief first: system boundary, state variables, actions, invariants, expected liveness, and explicit non-goals.
+2. Ask the LLM to produce a small TLA+ module and `.cfg`, then immediately run `sany`, `tlc`, and, when useful, `apalache-mc`.
+3. Keep model constants tiny until the spec converges. Increase bounds only after SANY/TLC failures stop being modeling mistakes.
+4. Treat counterexamples as design evidence. Classify each as an invalid invariant, a spec/modeling gap, or a real implementation bug.
+5. For implementation conformance, add trace validation: instrument code to emit NDJSON events, replay those traces against a TLA+ trace spec, then model check.
+6. For proof obligations, use `tlapm` after the finite model stabilizes. Do not ask the LLM to assert a proof succeeded; run TLAPS.
+
+`tla-mcp` is registered as the global Codex MCP server `tla` on this machine. It gives agent clients quick model-checking tools through the experimental `tla-rs` checker. Use official TLC/TLAPS results as the source of truth when behavior differs.
+
+Installed local Codex skills from Specula support the agent workflow after restarting Codex:
+
+- `$spec-generation`
+- `$harness-generation`
+- `$tla-checking-workflow`
+- `$tla-trace-workflow`
+- `$tla-verification-workflow`
 
 ## NKS local development
 

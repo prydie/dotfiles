@@ -120,6 +120,7 @@ tools::install_mise_dev_tools() {
     github:agavra/tuicr \
     kubectx \
     kubens \
+    promtool \
     pipx:awscli \
     pipx:esptool \
     pipx:black \
@@ -813,10 +814,12 @@ os::ubuntu::install_packages_dev() {
 
   local dev_packages=(
     ansible
+    default-jre-headless
     hugo
     picocom
     shellcheck
     shfmt
+    z3
   )
 
   sudo apt update
@@ -825,6 +828,7 @@ os::ubuntu::install_packages_dev() {
   go::ensure_installed
   tools::install_mise_dev_tools
   go::install_developer_tools
+  tools::install_tla_tools
   if [ -f "${_ROOT}/hooks/kubernetes" ]; then
     BIN_DIR="${HOME}/bin"
     mkdir -p "${BIN_DIR}"
@@ -997,6 +1001,386 @@ go::ensure_installed() {
   return 1
 }
 
+tools::github_release_url() {
+  local repo version artifact
+  repo="$1"
+  version="$2"
+  artifact="$3"
+
+  if [ "${version}" = "latest" ]; then
+    printf "https://github.com/%s/releases/latest/download/%s\n" "${repo}" "${artifact}"
+  else
+    printf "https://github.com/%s/releases/download/%s/%s\n" "${repo}" "${version}" "${artifact}"
+  fi
+}
+
+tools::write_tla_java_wrapper() {
+  local name main_class wrapper
+  name="$1"
+  main_class="$2"
+  wrapper="${HOME}/.local/bin/${name}"
+
+  mkdir -p "${HOME}/.local/bin" || return 1
+  # shellcheck disable=SC2016
+  {
+    printf '#!/usr/bin/env bash\n'
+    printf 'set -euo pipefail\n'
+    printf 'jar="${TLA_TOOLS_JAR:-${HOME}/.local/opt/tlaplus/tla2tools.jar}"\n'
+    printf 'if [ ! -f "${jar}" ]; then\n'
+    printf '  echo "tla2tools.jar not found at ${jar}; run: make -C ~/.dotfiles tla-tools" >&2\n'
+    printf '  exit 1\n'
+    printf 'fi\n'
+    printf 'exec java -XX:+UseParallelGC -cp "${jar}" %s "$@"\n' "${main_class}"
+  } > "${wrapper}"
+  chmod 0755 "${wrapper}"
+}
+
+tools::write_tla2tools_wrapper() {
+  local wrapper
+  wrapper="${HOME}/.local/bin/tla2tools"
+
+  mkdir -p "${HOME}/.local/bin" || return 1
+  # shellcheck disable=SC2016
+  {
+    printf '#!/usr/bin/env bash\n'
+    printf 'set -euo pipefail\n'
+    printf 'jar="${TLA_TOOLS_JAR:-${HOME}/.local/opt/tlaplus/tla2tools.jar}"\n'
+    printf 'if [ ! -f "${jar}" ]; then\n'
+    printf '  echo "tla2tools.jar not found at ${jar}; run: make -C ~/.dotfiles tla-tools" >&2\n'
+    printf '  exit 1\n'
+    printf 'fi\n'
+    printf 'exec java -XX:+UseParallelGC -jar "${jar}" "$@"\n'
+  } > "${wrapper}"
+  chmod 0755 "${wrapper}"
+}
+
+tools::install_tla2tools() {
+  local version install_root jar url tmp
+  version="${TLA_TOOLS_VERSION:-latest}"
+  install_root="${TLA_TOOLS_HOME:-${HOME}/.local/opt/tlaplus}"
+  jar="${install_root}/tla2tools.jar"
+  url="$(tools::github_release_url "tlaplus/tlaplus" "${version}" "tla2tools.jar")"
+
+  if [ -f "${jar}" ] && [ "${TLA_TOOLS_FORCE:-0}" != "1" ]; then
+    log::f "TLA+ tools jar already installed at ${jar}"
+  else
+    log::f "Installing TLA+ tools jar from ${url}"
+    tmp="$(mktemp)" || return 1
+    curl -fsSL -o "${tmp}" "${url}" || {
+      rm -f "${tmp}"
+      return 1
+    }
+    mkdir -p "${install_root}" || return 1
+    install -m 0644 "${tmp}" "${jar}" || {
+      rm -f "${tmp}"
+      return 1
+    }
+    rm -f "${tmp}"
+  fi
+
+  tools::write_tla2tools_wrapper || return 1
+  tools::write_tla_java_wrapper tlc tlc2.TLC || return 1
+  tools::write_tla_java_wrapper sany tla2sany.SANY || return 1
+  tools::write_tla_java_wrapper pcal pcal.trans || return 1
+  tools::write_tla_java_wrapper tla2tex tla2tex.TLA || return 1
+  tools::write_tla_java_wrapper tlatex tla2tex.TLA || return 1
+  tools::write_tla_java_wrapper tlarepl tlc2.REPL || return 1
+}
+
+tools::install_apalache() {
+  local version install_root url tmp tarball
+  version="${APALACHE_VERSION:-latest}"
+  install_root="${APALACHE_HOME:-${HOME}/.local/opt/apalache}"
+  url="$(tools::github_release_url "apalache-mc/apalache" "${version}" "apalache.tgz")"
+
+  if [ -x "${install_root}/bin/apalache-mc" ] && [ "${APALACHE_FORCE:-0}" != "1" ]; then
+    log::f "Apalache already installed at ${install_root}"
+  else
+    log::f "Installing Apalache from ${url}"
+    tmp="$(mktemp -d)" || return 1
+    tarball="${tmp}/apalache.tgz"
+    curl -fsSL -o "${tarball}" "${url}" || {
+      rm -rf "${tmp}"
+      return 1
+    }
+    rm -rf "${install_root}" || return 1
+    mkdir -p "${install_root}" || return 1
+    tar -xzf "${tarball}" -C "${install_root}" --strip-components=1 || {
+      rm -rf "${tmp}"
+      return 1
+    }
+    rm -rf "${tmp}"
+  fi
+
+  mkdir -p "${HOME}/.local/bin" || return 1
+  ln -sf "${install_root}/bin/apalache-mc" "${HOME}/.local/bin/apalache-mc" || return 1
+}
+
+tools::install_tlaps() {
+  local version release_tag install_root arch url tmp installer
+  version="${TLAPS_VERSION:-1.5.0}"
+  release_tag="${TLAPS_RELEASE_TAG:-202210041448}"
+  install_root="${TLAPS_HOME:-${HOME}/.local/opt/tlaps}"
+  arch="$(uname -m)"
+
+  case "${arch}" in
+    x86_64|amd64) ;;
+    *)
+      log::e "TLAPS binary installer supports x86_64 Linux only; unsupported architecture: ${arch}"
+      return 1
+      ;;
+  esac
+
+  if [ -x "${install_root}/bin/tlapm" ] && [ "${TLAPS_FORCE:-0}" != "1" ]; then
+    log::f "TLAPS already installed at ${install_root}"
+  else
+    url="https://github.com/tlaplus/tlapm/releases/download/${release_tag}/tlaps-${version}-x86_64-linux-gnu-inst.bin"
+    log::f "Installing TLAPS from ${url}"
+    tmp="$(mktemp -d)" || return 1
+    installer="${tmp}/tlaps-inst.bin"
+    curl -fsSL -o "${installer}" "${url}" || {
+      rm -rf "${tmp}"
+      return 1
+    }
+    chmod 0755 "${installer}" || return 1
+    mkdir -p "$(dirname "${install_root}")" || return 1
+    "${installer}" -d "${install_root}" || {
+      rm -rf "${tmp}"
+      return 1
+    }
+    rm -rf "${tmp}"
+  fi
+
+  mkdir -p "${HOME}/.local/bin" || return 1
+  ln -sf "${install_root}/bin/tlapm" "${HOME}/.local/bin/tlapm" || return 1
+}
+
+tools::install_tla_rs() {
+  local version platform base tmp
+  version="${TLA_RS_VERSION:-v0.6.3}"
+
+  case "$(uname -m)" in
+    x86_64|amd64) platform="linux-amd64" ;;
+    *)
+      log::e "tla-rs binary installer supports x86_64 Linux only; unsupported architecture: $(uname -m)"
+      return 1
+      ;;
+  esac
+
+  if [ -x "${HOME}/.local/bin/tla" ] && [ -x "${HOME}/.local/bin/tla-mcp" ] && [ "${TLA_RS_FORCE:-0}" != "1" ]; then
+    log::f "tla-rs already installed at ${HOME}/.local/bin/tla and ${HOME}/.local/bin/tla-mcp"
+    return 0
+  fi
+
+  base="https://github.com/fabracht/tla-rs/releases/download/${version}"
+  tmp="$(mktemp -d)" || return 1
+
+  log::f "Installing tla-rs ${version} from ${base}"
+  curl -fsSL -o "${tmp}/SHA256SUMS" "${base}/SHA256SUMS" || {
+    rm -rf "${tmp}"
+    return 1
+  }
+  curl -fsSL -o "${tmp}/tla-${platform}" "${base}/tla-${platform}" || {
+    rm -rf "${tmp}"
+    return 1
+  }
+  curl -fsSL -o "${tmp}/tla-mcp-${platform}" "${base}/tla-mcp-${platform}" || {
+    rm -rf "${tmp}"
+    return 1
+  }
+
+  (
+    cd "${tmp}" || exit 1
+    grep -E " (tla|tla-mcp)-${platform}$" SHA256SUMS | sha256sum -c -
+  ) || {
+    rm -rf "${tmp}"
+    return 1
+  }
+
+  mkdir -p "${HOME}/.local/bin" || return 1
+  install -m 0755 "${tmp}/tla-${platform}" "${HOME}/.local/bin/tla" || {
+    rm -rf "${tmp}"
+    return 1
+  }
+  install -m 0755 "${tmp}/tla-mcp-${platform}" "${HOME}/.local/bin/tla-mcp" || {
+    rm -rf "${tmp}"
+    return 1
+  }
+  rm -rf "${tmp}"
+}
+
+tools::ensure_tla_runtime_deps() {
+  local missing=()
+
+  command -v java >/dev/null 2>&1 || missing+=(default-jre-headless)
+  command -v z3 >/dev/null 2>&1 || missing+=(z3)
+
+  if [ "${#missing[@]}" -eq 0 ]; then
+    return 0
+  fi
+
+  if ! command -v apt-get >/dev/null 2>&1; then
+    log::e "Missing TLA+ runtime dependencies and apt-get is unavailable: ${missing[*]}"
+    return 1
+  fi
+
+  log::f "Installing TLA+ runtime dependencies: ${missing[*]}"
+  sudo apt update || return 1
+  apt::install_if_available "${missing[@]}" || return 1
+
+  command -v java >/dev/null 2>&1 || {
+    log::e "java not found on PATH after installing TLA+ runtime dependencies"
+    return 1
+  }
+  command -v z3 >/dev/null 2>&1 || {
+    log::e "z3 not found on PATH after installing TLA+ runtime dependencies"
+    return 1
+  }
+}
+
+tools::install_tla_tools() {
+  tools::ensure_tla_runtime_deps || return 1
+
+  tools::install_tla2tools || return 1
+  tools::install_apalache || return 1
+  tools::install_tlaps || return 1
+  tools::install_tla_rs || return 1
+  tools::verify_tla_tools
+}
+
+tools::verify_tla_command() {
+  local name cmd check output status first_line path
+  name="$1"
+  cmd="$2"
+  check="$3"
+
+  if ! command -v "${cmd}" >/dev/null 2>&1; then
+    log::e "${name} not found on PATH"
+    return 1
+  fi
+
+  output="$({ eval "${check}"; } 2>&1)"
+  status=$?
+  first_line="$(sed -n '1p' <<<"${output}")"
+  if [ "${status}" -ne 0 ]; then
+    log::e "${name} check failed: ${first_line:-no output}"
+    return 1
+  fi
+
+  path="$(command -v "${cmd}")"
+  log::f "${name}: ${first_line:-ok} (${path})"
+}
+
+tools::write_tla_smoke_model() {
+  local dir
+  dir="$1"
+
+  cat > "${dir}/Smoke.tla" <<'EOF'
+---- MODULE Smoke ----
+EXTENDS Naturals
+VARIABLE
+  \* @type: Int;
+  x
+Init == x = 0
+Next == \/ x < 2 /\ x' = x + 1
+        \/ x = 2 /\ x' = x
+Inv == x <= 2
+====
+EOF
+
+  cat > "${dir}/Smoke.cfg" <<'EOF'
+INIT Init
+NEXT Next
+INVARIANT Inv
+EOF
+}
+
+tools::verify_tla_smoke_command() {
+  local name cmd tmp output status first_line path
+  name="$1"
+  shift
+  cmd="$1"
+
+  if ! command -v "${cmd}" >/dev/null 2>&1; then
+    log::e "${name} not found on PATH"
+    return 1
+  fi
+
+  tmp="$(mktemp -d)"
+  tools::write_tla_smoke_model "${tmp}"
+  output="$(cd "${tmp}" && "$@" 2>&1)"
+  status=$?
+  rm -rf "${tmp}"
+
+  first_line="$(sed -n '/[^[:space:]]/ {p; q;}' <<<"${output}")"
+  if [ "${status}" -ne 0 ]; then
+    log::e "${name} smoke check failed: ${first_line:-no output}"
+    return 1
+  fi
+
+  path="$(command -v "${cmd}")"
+  log::f "${name}: smoke check passed (${path})"
+}
+
+tools::verify_tlaps_smoke() {
+  local tmp output status first_line path
+
+  if ! command -v tlapm >/dev/null 2>&1; then
+    log::e "TLAPS not found on PATH"
+    return 1
+  fi
+
+  tmp="$(mktemp -d)"
+  output="$(cd "${tmp}" && tlapm -C -I +examples/cantor Cantor1.tla 2>&1)"
+  status=$?
+  rm -rf "${tmp}"
+
+  first_line="$(sed -n '/[^[:space:]]/ {p; q;}' <<<"${output}")"
+  if [ "${status}" -ne 0 ]; then
+    log::e "TLAPS proof smoke check failed: ${first_line:-no output}"
+    return 1
+  fi
+
+  path="$(command -v tlapm)"
+  log::f "TLAPS: proof smoke check passed (${path})"
+}
+
+tools::verify_tla_mcp() {
+  local output status path
+
+  if ! command -v tla-mcp >/dev/null 2>&1; then
+    log::e "tla-mcp not found on PATH"
+    return 1
+  fi
+
+  output="$(tla-mcp </dev/null 2>&1)"
+  status=$?
+  if [ "${status}" -ne 1 ] || ! grep -q 'ConnectionClosed("initialize request")' <<<"${output}"; then
+    log::e "tla-mcp stdio smoke check failed: ${output:-no output}"
+    return 1
+  fi
+
+  path="$(command -v tla-mcp)"
+  log::f "tla-mcp: stdio smoke check passed (${path})"
+}
+
+tools::verify_tla_tools() {
+  local failures=0
+  log::f "Verifying TLA+ validation/proof CLIs"
+
+  tools::verify_tla_command "Java" "java" "java -version" || failures=1
+  tools::verify_tla_smoke_command "SANY" "sany" "Smoke.tla" || failures=1
+  tools::verify_tla_smoke_command "TLC" "tlc" "Smoke.tla" || failures=1
+  tools::verify_tla_command "PlusCal translator" "pcal" "pcal -help" || failures=1
+  tools::verify_tla_command "TLATeX" "tla2tex" "tla2tex -help" || failures=1
+  tools::verify_tla_smoke_command "Apalache" "apalache-mc" "check" "--length=2" "--inv=Inv" "Smoke.tla" || failures=1
+  tools::verify_tlaps_smoke || failures=1
+  tools::verify_tla_smoke_command "tla-rs" "tla" "Smoke.tla" "--config" "Smoke.cfg" "--max-states" "100" "--max-depth" "10" || failures=1
+  tools::verify_tla_mcp || failures=1
+
+  return "${failures}"
+}
+
 
 
 # Tools
@@ -1094,7 +1478,9 @@ tools::verify_dev_cli() {
   tools::verify_one "Helm" "helm" "helm version --short"
   tools::verify_one "Kubebuilder" "kubebuilder" "kubebuilder version"
   tools::verify_one "kind" "kind" "kind version"
+  tools::verify_one "promtool" "promtool" "promtool --version"
   tools::verify_one "Vale" "vale" "vale --version"
+  tools::verify_tla_tools
 }
 
 tools::install_yubikey_manager() {
@@ -1147,6 +1533,12 @@ if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
     codex-superpowers)
       tools::install_codex_superpowers
       ;;
+    tla-tools)
+      tools::install_tla_tools
+      ;;
+    verify-tla-tools)
+      tools::verify_tla_tools
+      ;;
     full-install)
       tools::full_install
       ;;
@@ -1154,11 +1546,11 @@ if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
       os::install_dell_dock_fix
       ;;
     "")
-      echo "No action selected. Use: $0 full-install | install-dell-dock-fix"
+      echo "No action selected. Use: $0 codex-superpowers | tla-tools | verify-tla-tools | full-install | install-dell-dock-fix"
       ;;
     *)
       echo "Unknown action: $1"
-      echo "Usage: $0 full-install | install-dell-dock-fix"
+      echo "Usage: $0 codex-superpowers | tla-tools | verify-tla-tools | full-install | install-dell-dock-fix"
       exit 1
       ;;
   esac
