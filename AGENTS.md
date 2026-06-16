@@ -16,6 +16,7 @@ bin/webshot \
 
 Notes:
 - `--clone-user-data-dir-from` is preferred over `--user-data-dir` for an already-open Chrome profile. It avoids `SingletonLock` errors and does not mutate the live profile.
+- For Grafana or other HTTP Basic auth pages, prefer `--basic-auth user:password` over embedding credentials in the URL. Some dashboard frontends break when their JavaScript sees `user:pass@host` URLs.
 - Use `--profile-directory Default` unless a different Chrome profile is known to hold the logged-in session.
 - Default output is under `/tmp`; pass `-o` when you want a stable path.
 - Adjust viewport with `--width` and `--height` when reviewing responsive layouts.

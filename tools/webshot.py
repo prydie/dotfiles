@@ -4,14 +4,19 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import fnmatch
+import http.server
 import shutil
+import socketserver
 import subprocess
 import sys
 import tempfile
+import threading
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlparse
+from urllib.request import Request, urlopen
 
 
 DEFAULT_WIDTH = 1440
@@ -66,6 +71,11 @@ def parse_args() -> argparse.Namespace:
         help="Chrome binary to invoke",
     )
     parser.add_argument(
+        "--basic-auth",
+        metavar="USER:PASSWORD",
+        help="Send HTTP Basic auth via a local proxy instead of embedding credentials in the URL",
+    )
+    parser.add_argument(
         "--no-sandbox",
         action="store_true",
         help="Pass --no-sandbox to Chrome (useful in restricted container environments)",
@@ -98,6 +108,16 @@ def build_command(args: argparse.Namespace, output_path: Path, user_data_dir: st
     if args.no_sandbox:
         command.insert(1, "--no-sandbox")
     return command
+
+
+def sanitized_target_url(url: str) -> str:
+    parsed = urlparse(url)
+    if not parsed.username and not parsed.password:
+        return url
+    host = parsed.hostname or ""
+    if parsed.port:
+        host = f"{host}:{parsed.port}"
+    return parsed._replace(netloc=host).geturl()
 
 
 def resolve_chrome(binary: str) -> str:
@@ -142,9 +162,93 @@ def clone_user_data_dir(source_root: Path, target_root: Path, profile_directory:
             shutil.copy2(source_path, target_path)
 
 
+class ThreadingHTTPServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
+    daemon_threads = True
+
+
+class BasicAuthProxyHandler(http.server.BaseHTTPRequestHandler):
+    target_origin = ""
+    authorization = ""
+
+    def do_GET(self) -> None:  # noqa: N802 - http.server method name
+        self.proxy_request()
+
+    def do_HEAD(self) -> None:  # noqa: N802 - http.server method name
+        self.proxy_request(head_only=True)
+
+    def do_POST(self) -> None:  # noqa: N802 - http.server method name
+        self.proxy_request(body=self.rfile.read(int(self.headers.get("Content-Length", "0"))))
+
+    def proxy_request(self, head_only: bool = False, body: bytes | None = None) -> None:
+        target_url = self.target_origin + self.path
+        if body is not None:
+            method = "POST"
+        elif head_only:
+            method = "HEAD"
+        else:
+            method = "GET"
+        request = Request(target_url, data=body, method=method)
+        request.add_header("Authorization", self.authorization)
+        request.add_header("User-Agent", self.headers.get("User-Agent", "webshot"))
+        request.add_header("Accept", self.headers.get("Accept", "*/*"))
+        if body is not None and self.headers.get("Content-Type"):
+            request.add_header("Content-Type", self.headers["Content-Type"])
+
+        try:
+            with urlopen(request, timeout=30) as response:  # noqa: S310 - developer-local capture helper
+                self.send_response(response.status)
+                for header, value in response.headers.items():
+                    if header.lower() in {
+                        "connection",
+                        "content-encoding",
+                        "content-length",
+                        "transfer-encoding",
+                    }:
+                        continue
+                    self.send_header(header, value)
+                body = b"" if head_only else response.read()
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                if body:
+                    self.wfile.write(body)
+        except Exception as exc:  # pragma: no cover - CLI fallback path
+            self.send_error(502, f"proxying {target_url}: {exc}")
+
+    def log_message(self, _format: str, *_args: object) -> None:
+        return
+
+
+def start_basic_auth_proxy(target_url: str, user_password: str) -> tuple[ThreadingHTTPServer, str]:
+    parsed = urlparse(sanitized_target_url(target_url))
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise SystemExit(f"Unsupported URL for --basic-auth: {target_url}")
+
+    token = base64.b64encode(user_password.encode()).decode()
+    handler = type(
+        "ConfiguredBasicAuthProxyHandler",
+        (BasicAuthProxyHandler,),
+        {
+            "target_origin": f"{parsed.scheme}://{parsed.netloc}",
+            "authorization": f"Basic {token}",
+        },
+    )
+    server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+
+    proxy_url = f"http://127.0.0.1:{server.server_port}{parsed.path or '/'}"
+    if parsed.query:
+        proxy_url += f"?{parsed.query}"
+    return server, proxy_url
+
+
 def main() -> int:
     args = parse_args()
     args.chrome_binary = resolve_chrome(args.chrome_binary)
+    args.url = sanitized_target_url(args.url)
+    auth_proxy = None
+    if args.basic_auth:
+        auth_proxy, args.url = start_basic_auth_proxy(args.url, args.basic_auth)
 
     output_path = Path(args.output).expanduser() if args.output else default_output_path(args.url)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -169,6 +273,9 @@ def main() -> int:
     try:
         completed = subprocess.run(command, check=False, capture_output=True, text=True)
     finally:
+        if auth_proxy is not None:
+            auth_proxy.shutdown()
+            auth_proxy.server_close()
         if cleanup_dir is not None:
             cleanup_dir.cleanup()
 
