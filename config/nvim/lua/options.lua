@@ -5,7 +5,47 @@ vim.g.mapleader = " "
 o.laststatus = 3 -- global statusline
 o.showmode = false
 
--- o.clipboard = "unnamedplus"
+-- Use the system clipboard for all yank/paste.
+o.clipboard = "unnamedplus"
+
+-- Over SSH there is no usable local display server, and Nvim would otherwise pick
+-- the *remote* host's wl-copy/xclip. Route yanks to OSC 52 so they reach the
+-- terminal you are actually sitting at. Paste reads the unnamed register, since
+-- terminal OSC 52 read-back is widely disabled.
+if vim.env.SSH_TTY then
+  local function paste()
+    return vim.split(vim.fn.getreg "", "\n")
+  end
+
+  local copy_for
+  if vim.env.TMUX then
+    -- Inside tmux: hand the yank to tmux's buffer with -w, which makes tmux emit
+    -- the OSC 52 to the outer terminal (see set-clipboard in tmux.conf). Works on
+    -- any Nvim version, including the 0.9.x that ships on some target hosts.
+    copy_for = function(_)
+      return function(lines)
+        vim.fn.system({ "tmux", "load-buffer", "-w", "-" }, table.concat(lines, "\n"))
+      end
+    end
+  else
+    -- No tmux: use Nvim's built-in OSC 52 provider (0.10+). Older Nvim outside
+    -- tmux has no clean terminal write, so leave the default provider in place.
+    local has_builtin, builtin = pcall(require, "vim.ui.clipboard.osc52")
+    if has_builtin then
+      copy_for = function(reg)
+        return builtin.copy(reg)
+      end
+    end
+  end
+
+  if copy_for then
+    vim.g.clipboard = {
+      name = "OSC 52",
+      copy = { ["+"] = copy_for "+", ["*"] = copy_for "*" },
+      paste = { ["+"] = paste, ["*"] = paste },
+    }
+  end
+end
 
 -- Indenting
 o.expandtab = true
