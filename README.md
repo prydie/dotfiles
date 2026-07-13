@@ -81,9 +81,10 @@ other private or machine-specific data. Keep private host-specific guidance in
 The repo-root `AGENTS.md` is project guidance for this dotfiles repo only and is
 excluded from `rcm` linking so it is not installed as `~/.AGENTS.md`.
 
-`make setup PROFILE=dev|full` installs Codex CLI and enables the curated
-`superpowers@openai-curated` plugin in local `~/.codex` state. To refresh or
-install only that plugin, run:
+`make setup PROFILE=dev|full` installs Codex CLI and attempts to enable the
+curated `superpowers@openai-curated` plugin in local `~/.codex` state. Plugin
+setup is optional during bootstrap so a Codex/plugin issue does not block the
+rest of the machine setup. To refresh or install only that plugin, run:
 
 ```bash
 make codex-superpowers
@@ -218,8 +219,8 @@ mode in their OSD menus.
 - `core` installs the repo-managed AppArmor profile at [config/apparmor/bwrap](config/apparmor/bwrap) so Ubuntu 24.04's unprivileged user namespace restriction permits Bubblewrap-based sandboxes used by Codex CLI.
 - Vale uses the repo-managed global config at [config/vale/vale.ini](config/vale/vale.ini), with the `general` profile: `Vale + write-good + alex`.
 - `core` writes Zsh completions for `kubectl` to `${XDG_DATA_HOME:-$HOME/.local/share}/zsh/site-functions/_kubectl`.
-- `PROFILE=dev|full` also installs Neovim, Helm, `kubebuilder`, `kind`, `doctl`, `gh`, `tuicr`, `kubectx`, `kubens`, `promtool`, `awscli`, `python-openstackclient` with `python-octaviaclient`, `esptool`, `black`, `isort`, `mypy`, and `ruff` from [config/mise/config.toml](config/mise/config.toml), installs Go developer tools (`gopls`, `golangci-lint`, `govulncheck`, `modvendor`) via `go install`, installs TLA+ validation/proof tooling (`tlc`, `sany`, `pcal`, `tla2tex`, `apalache-mc`, `tlapm`, `tla`, `tla-mcp`), and writes Zsh completions for `kubectl`, `kubebuilder`, Helm, and `kind`.
-- `dev`: `core` + developer tools such as `ansible`, `go`, `tofu` (OpenTofu), `doctl`, `gh`, `aws`, `openstack`, `hugo`, `picocom`, Codex CLI (`@openai/codex`), Gemini CLI (`@google/gemini-cli`), and ESP tooling (`esptool` + `idf.py` bootstrap), plus Neovim bootstrap.
+- `PROFILE=dev|full` also installs Neovim, Helm, `kubebuilder`, `kind`, `doctl`, `gh`, `tuicr`, `kubectx`, `kubens`, `promtool`, `teleport-community` (`tsh`/`tctl`/`teleport`), `awscli`, `python-openstackclient` with `python-octaviaclient`, `esptool`, `black`, `isort`, `mypy`, and `ruff` from [config/mise/config.toml](config/mise/config.toml), installs Go developer tools (`gopls`, `golangci-lint`, `govulncheck`, `modvendor`) via `go install`, installs TLA+ validation/proof tooling (`tlc`, `sany`, `pcal`, `tla2tex`, `apalache-mc`, `tlapm`, `tla`, `tla-mcp`), and writes Zsh completions for `kubectl`, `kubebuilder`, Helm, and `kind`.
+- `dev`: `core` + developer tools such as `1password-cli`, `ansible`, `go`, `tofu` (OpenTofu), `doctl`, `gh`, `aws`, `openstack`, `hugo`, `picocom`, Claude Code (`@anthropic-ai/claude-code`), Codex CLI (`@openai/codex`), Gemini CLI (`@google/gemini-cli`), and ESP tooling (`esptool` + `idf.py` bootstrap), plus Neovim bootstrap.
 - Go is installed from the official tarball into `~/.local/opt/go` with `~/.local/bin/go` symlinked ahead of system Go, so the repo can enforce a minimum version.
 - `full`: `dev` + heavier extras such as `nerdctl`, `regctl`, `vegeta`, `oci-cli`, `autopep8`, and YubiKey tooling from [hooks/os](hooks/os).
 

@@ -121,6 +121,7 @@ tools::install_mise_dev_tools() {
     kubectx \
     kubens \
     promtool \
+    teleport-community \
     pipx:awscli \
     pipx:esptool \
     pipx:black \
@@ -547,6 +548,42 @@ os::ubuntu::ensure_tailscale_repo() {
   fi
 }
 
+os::ubuntu::ensure_1password_repo() {
+  local arch keyring listfile sourcesfile desired_line policy_dir policy_file debsig_dir debsig_key
+  arch="$(dpkg --print-architecture)"
+  keyring="/usr/share/keyrings/1password-archive-keyring.gpg"
+  listfile="/etc/apt/sources.list.d/1password.list"
+  sourcesfile="/etc/apt/sources.list.d/1password.sources"
+  desired_line="deb [arch=${arch} signed-by=${keyring}] https://downloads.1password.com/linux/debian/${arch} stable main"
+  policy_dir="/etc/debsig/policies/AC2D62742012EA22"
+  policy_file="${policy_dir}/1password.pol"
+  debsig_dir="/usr/share/debsig/keyrings/AC2D62742012EA22"
+  debsig_key="${debsig_dir}/debsig.gpg"
+
+  if [ ! -f "${keyring}" ]; then
+    curl -fsSL https://downloads.1password.com/linux/keys/1password.asc | \
+      sudo gpg --no-tty --batch --dearmor -o "${keyring}" >/dev/null
+  fi
+
+  if [ -f "${sourcesfile}" ] && grep -q 'downloads.1password.com/linux/debian' "${sourcesfile}" 2>/dev/null; then
+    :
+  elif [ ! -f "${listfile}" ] || ! grep -Fxq "${desired_line}" "${listfile}" 2>/dev/null; then
+    echo "${desired_line}" | sudo tee "${listfile}" >/dev/null
+  fi
+
+  if [ ! -f "${policy_file}" ]; then
+    sudo install -m 0755 -d "${policy_dir}"
+    curl -fsSL https://downloads.1password.com/linux/debian/debsig/1password.pol | \
+      sudo tee "${policy_file}" >/dev/null
+  fi
+
+  if [ ! -f "${debsig_key}" ]; then
+    sudo install -m 0755 -d "${debsig_dir}"
+    curl -fsSL https://downloads.1password.com/linux/keys/1password.asc | \
+      sudo gpg --no-tty --batch --dearmor -o "${debsig_key}" >/dev/null
+  fi
+}
+
 os::ubuntu::ensure_opentofu_repo() {
   local keyring_main keyring_repo listfile
   keyring_main="/etc/apt/keyrings/opentofu.gpg"
@@ -872,6 +909,7 @@ os::ubuntu::install_packages_dev() {
   log::f "Installing developer apt packages"
 
   local dev_packages=(
+    1password-cli
     ansible
     default-jre-headless
     hugo
@@ -881,6 +919,7 @@ os::ubuntu::install_packages_dev() {
     z3
   )
 
+  os::ubuntu::ensure_1password_repo
   sudo apt update
   sudo apt install -y --no-install-recommends "${dev_packages[@]}"
   tools::install_opentofu
@@ -904,6 +943,7 @@ os::ubuntu::install_packages_dev() {
   nvm::install_node_default
   mkdir -p "${HOME}/.local/bin"
   npm install -g --prefix "${HOME}/.local" \
+    @anthropic-ai/claude-code \
     @google/gemini-cli \
     @openai/codex \
     @ansible/ansible-language-server \
@@ -914,7 +954,7 @@ os::ubuntu::install_packages_dev() {
     pyright \
     vscode-langservers-extracted \
     yaml-language-server
-  tools::install_codex_superpowers
+  tools::install_codex_superpowers_optional
   tools::verify_dev_cli
 }
 
@@ -948,6 +988,15 @@ tools::install_codex_superpowers() {
   fi
 
   "${codex_bin}" plugin add superpowers@openai-curated
+}
+
+tools::install_codex_superpowers_optional() {
+  if tools::install_codex_superpowers; then
+    return 0
+  fi
+
+  log::f "Skipping Codex Superpowers plugin during bootstrap; rerun make codex-superpowers after Codex is healthy"
+  return 0
 }
 
 tools::plugin_capable_codex_bin() {
@@ -987,6 +1036,10 @@ tools::verify_codex_superpowers() {
 
   log::e "Codex Superpowers plugin not installed"
   return 1
+}
+
+tools::verify_codex_superpowers_optional() {
+  tools::verify_codex_superpowers || true
 }
 
 go::install_developer_tools() {
@@ -1535,7 +1588,8 @@ tools::verify_dev_cli() {
   log::f "Verifying key dev CLIs"
   tools::verify_one "mise" "mise" "mise --version"
   tools::verify_one "Codex CLI" "codex" "codex --version"
-  tools::verify_codex_superpowers
+  tools::verify_codex_superpowers_optional
+  tools::verify_one "Claude Code" "claude" "claude --version"
   tools::verify_one "Gemini CLI" "gemini" "gemini --version"
   tools::verify_one "Go" "go" "go version"
   tools::verify_one "gopls" "gopls" "gopls version"
@@ -1550,6 +1604,7 @@ tools::verify_dev_cli() {
   tools::verify_one "Kubebuilder" "kubebuilder" "kubebuilder version"
   tools::verify_one "kind" "kind" "kind version"
   tools::verify_one "promtool" "promtool" "promtool --version"
+  tools::verify_one "tsh" "tsh" "tsh version"
   tools::verify_one "Vale" "vale" "vale --version"
   tools::verify_tla_tools
 }
