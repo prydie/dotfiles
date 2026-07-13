@@ -1,0 +1,4 @@
+appearance = "dark"
+theme = "nord-dark-high-contrast"
+transparent_background = true
+no_update_check = true
