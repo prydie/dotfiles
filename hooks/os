@@ -213,6 +213,64 @@ nvm::install_node_default() {
   log::f "Using node $(node --version) and npm $(npm --version)"
 }
 
+tools::install_tmux_plugins() {
+  local tpm_dir
+  tpm_dir="${HOME}/.tmux/plugins/tpm"
+
+  if ! command -v tmux >/dev/null 2>&1; then
+    log::f "Skipping tmux plugin install: tmux not on PATH"
+    return 0
+  fi
+
+  if [ ! -d "${tpm_dir}" ]; then
+    log::f "Installing tmux plugin manager"
+    mkdir -p "${tpm_dir%/tpm}"
+    git clone https://github.com/tmux-plugins/tpm "${tpm_dir}" || {
+      log::e "Failed to clone TPM; tmux plugins were not installed"
+      return 0
+    }
+  fi
+
+  if [ ! -x "${tpm_dir}/bin/install_plugins" ]; then
+    log::e "TPM install script missing at ${tpm_dir}/bin/install_plugins"
+    return 0
+  fi
+
+  log::f "Installing tmux plugins"
+  "${tpm_dir}/bin/install_plugins" || {
+    log::e "TPM plugin install failed; rerun make tmux-plugins"
+    return 0
+  }
+}
+
+tools::install_ghostty() {
+  local candidate policy_output
+
+  if command -v ghostty >/dev/null 2>&1; then
+    log::f "Ghostty already installed: $(ghostty --version 2>/dev/null | head -n1)"
+    return 0
+  fi
+
+  desktop::ensure_universe_repo
+
+  policy_output="$(apt-cache policy ghostty 2>/dev/null || true)"
+  candidate="$(awk '/Candidate:/ {print $2; exit}' <<<"${policy_output}")"
+  if [ -n "${candidate}" ] && [ "${candidate}" != "(none)" ]; then
+    log::f "Installing Ghostty from apt"
+    sudo apt install -y --no-install-recommends ghostty
+    return 0
+  fi
+
+  if command -v snap >/dev/null 2>&1; then
+    log::f "Ghostty apt package unavailable; installing snap fallback"
+    sudo snap install ghostty --classic
+    return 0
+  fi
+
+  log::e "Ghostty not available from apt and snap is not installed"
+  return 1
+}
+
 docker::ensure_compose() {
   if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
     return 0
@@ -777,6 +835,7 @@ os::ubuntu::install_packages_core() {
   desktop::install_clipboard_and_caffeine
   desktop::ensure_desktop_extensions_enabled
   desktop::apply_gnome_extension_preferences
+  tools::install_ghostty
 
   uv::ensure_installed
   tools::install_mise
@@ -1575,6 +1634,9 @@ if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
     codex-superpowers)
       tools::install_codex_superpowers
       ;;
+    tmux-plugins)
+      tools::install_tmux_plugins
+      ;;
     tla-tools)
       tools::install_tla_tools
       ;;
@@ -1584,6 +1646,10 @@ if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
     full-install)
       tools::full_install
       ;;
+    ghostty)
+      tools::install_ghostty
+      os::ghostty::install_terminfo
+      ;;
     install-dell-dock-fix)
       os::install_dell_dock_fix
       ;;
@@ -1591,11 +1657,11 @@ if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
       os::ghostty::install_terminfo
       ;;
     "")
-      echo "No action selected. Use: $0 codex-superpowers | tla-tools | verify-tla-tools | full-install | install-dell-dock-fix | ghostty-terminfo"
+      echo "No action selected. Use: $0 codex-superpowers | tmux-plugins | tla-tools | verify-tla-tools | full-install | ghostty | install-dell-dock-fix | ghostty-terminfo"
       ;;
     *)
       echo "Unknown action: $1"
-      echo "Usage: $0 codex-superpowers | tla-tools | verify-tla-tools | full-install | install-dell-dock-fix | ghostty-terminfo"
+      echo "Usage: $0 codex-superpowers | tmux-plugins | tla-tools | verify-tla-tools | full-install | ghostty | install-dell-dock-fix | ghostty-terminfo"
       exit 1
       ;;
   esac

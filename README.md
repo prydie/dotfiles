@@ -50,8 +50,10 @@ make bootstrap
 make setup
 make codex-sandbox-fix
 make codex-superpowers
+make tmux-plugins
 make tla-tools
 make verify-tla-tools
+make ghostty
 make ghostty-terminfo
 make refresh-dev
 make gnome-prefs-save
@@ -202,9 +204,10 @@ mode in their OSD menus.
 ### What gets configured
 
 - On every profile (including `link`), installs Ghostty's `xterm-ghostty` terminfo into `~/.terminfo` from [config/ghostty/xterm-ghostty.terminfo](config/ghostty/xterm-ghostty.terminfo), so SSHing into the host from a Ghostty terminal does not break `tmux`/`vim` with "missing or unsuitable terminal: xterm-ghostty". Run standalone with `make ghostty-terminfo`.
+- `PROFILE=core|dev|full` installs Ghostty from apt when available, falling back to Snap only when apt has no candidate. Run standalone with `make ghostty`.
 - Python tooling via `uv`.
 - Node tooling via `nvm`.
-- `PROFILE=core|dev|full` bootstraps zplug plugins and TPM.
+- `PROFILE=core|dev|full` bootstraps zplug plugins and installs missing TPM plugins. Run standalone with `make tmux-plugins`.
 - `PROFILE=dev|full` installs pinned Neovim from [config/mise/config.toml](config/mise/config.toml) and runs headless lazy.nvim sync.
 
 ### Profiles

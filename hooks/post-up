@@ -81,10 +81,7 @@ if [[ "${PROFILE}" != "link" ]]; then
     fi
   fi
 
-  if [ ! -d "$HOME/.tmux/plugins/tpm" ]; then
-    git clone https://github.com/tmux-plugins/tpm "$HOME/.tmux/plugins/tpm"
-    "$HOME/.tmux/plugins/tpm/bin/install_plugins"
-  fi
+  tools::install_tmux_plugins
 else
   log::f "Skipping zplug/TPM bootstrap for PROFILE=link"
 fi

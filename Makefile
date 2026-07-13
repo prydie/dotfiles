@@ -35,6 +35,10 @@ codex-sandbox-fix: ## Install AppArmor profile needed by Codex CLI bubblewrap sa
 codex-superpowers: ## Install/enable the Codex Superpowers plugin
 	@bash hooks/os codex-superpowers
 
+.PHONY: tmux-plugins
+tmux-plugins: ## Install tmux TPM plugins
+	@bash hooks/os tmux-plugins
+
 .PHONY: tla-tools
 tla-tools: ## Install and verify TLA+ validation/proof tooling
 	@bash hooks/os tla-tools
@@ -46,6 +50,10 @@ verify-tla-tools: ## Verify TLA+ validation/proof tooling is callable
 .PHONY: ghostty-terminfo
 ghostty-terminfo: ## Install Ghostty's xterm-ghostty terminfo into ~/.terminfo (for SSH from Ghostty)
 	@bash hooks/os ghostty-terminfo
+
+.PHONY: ghostty
+ghostty: ## Install Ghostty, using apt before snap fallback
+	@bash hooks/os ghostty
 
 .PHONY: bootstrap
 bootstrap: ## Install bootstrap deps, link dotfiles, and run setup profile (PROFILE=link|core|dev|full)
