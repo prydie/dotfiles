@@ -1024,6 +1024,14 @@ go::install_developer_tools() {
   go install "golang.org/x/tools/gopls@${gopls_version}"
 }
 
+go::is_snap_install() {
+  local go_bin go_root
+  go_bin="$(command -v go 2>/dev/null || true)"
+  go_root="$(go env GOROOT 2>/dev/null || true)"
+
+  [[ "${go_bin}" == /snap/* || "${go_root}" == /snap/* ]]
+}
+
 go::install_local() {
   local version min_version arch os_name tmpdir tarball install_root download_version
   min_version="${GO_MIN_VERSION:-1.23.0}"
@@ -1066,26 +1074,33 @@ go::install_local() {
   tar -xzf "${tarball}" -C "${opt_root}"
   ln -sf "${install_root}/bin/go" "${HOME}/.local/bin/go"
   ln -sf "${install_root}/bin/gofmt" "${HOME}/.local/bin/gofmt"
+  hash -r 2>/dev/null || true
   rm -rf "${tmpdir}"
 }
 
 go::ensure_installed() {
-  local current_version min_version
+  local current_version go_bin min_version
   min_version="${GO_MIN_VERSION:-1.23.0}"
 
   if command -v go >/dev/null 2>&1; then
-    current_version="$(go version | awk '{print $3}' | sed 's/^go//')"
-    if version::ge "${current_version}" "${min_version}"; then
+    go_bin="$(command -v go)"
+    current_version="$(go version 2>/dev/null | awk '{print $3}' | sed 's/^go//')"
+    if go::is_snap_install; then
+      log::f "Ignoring Snap-managed Go at ${go_bin}; installing official Go"
+    elif [ -n "${current_version}" ] && version::ge "${current_version}" "${min_version}"; then
       log::f "Go already installed: $(go version)"
       return 0
+    elif [ -n "${current_version}" ]; then
+      log::f "Go ${current_version} detected; upgrading to >= ${min_version}"
+    else
+      log::f "Go detected at ${go_bin}, but its version could not be read; reinstalling"
     fi
-
-    log::f "Go ${current_version} detected; upgrading to >= ${min_version}"
   else
     log::f "Go not found; installing >= ${min_version}"
   fi
 
   if go::install_local; then
+    hash -r 2>/dev/null || true
     log::f "Using Go $(go version)"
     return 0
   fi
