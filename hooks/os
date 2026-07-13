@@ -121,6 +121,9 @@ tools::install_mise_dev_tools() {
     kubectx \
     kubens \
     promtool \
+    cilium-cli \
+    ginkgo \
+    sonobuoy \
     teleport-community \
     pipx:awscli \
     pipx:esptool \
@@ -852,6 +855,7 @@ os::ubuntu::install_packages_core() {
     ruby
     silversearcher-ag
     software-properties-common
+    sqlite3
     swig
     tcpdump
     tmux
