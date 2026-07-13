@@ -9,3 +9,4 @@ __pycache__/
 .superpowers/
 /config/nks-dev/env
 /config/nks-dev/*.local
+/config/mise/config.local.toml

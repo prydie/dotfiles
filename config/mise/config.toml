@@ -1,34 +1,15 @@
+# Core mise tools — installed by every non-link profile (core|dev|full).
+#
+# Profiles are expressed as mise config environments, not duplicated tool lists:
+#   dev  → this file + config.dev.toml                    (`mise install --env dev`)
+#   full → this file + config.dev.toml + config.full.toml (`mise install --env dev,full`)
+# Add a tool to the appropriate file and the matching profile installs it — there
+# is no separate list in hooks/os to keep in sync.
+#
+# Personal, machine-local tools belong in an untracked ~/.config/mise/config.local.toml
+# (mise loads it automatically; it is gitignored so it never lands in the work profiles).
 [tools]
-neovim = "0.12.2"
 starship = "1.25.1"
 atuin = "18.16.1"
-doctl = "1.159.0"
-gh = "2.92.0"
-"github:agavra/tuicr" = "v0.16.1"
 kubectl = "1.36.1"
-kubectx = "0.11.0"
-kubens = "0.11.0"
 vale = "3.14.2"
-helm = "4.2.0"
-kubebuilder = "4.14.0"
-kind = "0.31.0"
-ginkgo = "latest"
-sonobuoy = "latest"
-cilium-cli = "latest"
-promtool = "3.12.0"
-loki-logcli = "3.6.11"
-teleport-community = "18.10.0"
-"pipx:yt-dlp" = "latest"
-"pipx:autopep8" = "2.3.2"
-"pipx:awscli" = "1.45.11"
-"pipx:black" = "latest"
-"pipx:esptool" = "latest"
-"pipx:isort" = "latest"
-"pipx:mypy" = "latest"
-"pipx:python-openstackclient" = { version = "10.0.0", uvx_args = "--with python-octaviaclient==3.13.0" }
-nerdctl = "2.2.2"
-"pipx:oci-cli" = "3.83.0"
-regctl = "0.11.4"
-"pipx:ruff" = "latest"
-"github:tsenart/vegeta" = "v12.13.0"
-"npm:playwright" = "latest"  # headless browser automation; driven against system google-chrome (channel: 'chrome')

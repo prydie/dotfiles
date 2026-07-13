@@ -93,54 +93,35 @@ tools::install_mise() {
 }
 
 tools::install_mise_tools() {
-  local config_file
-  config_file="$(tools::mise_global_config)"
+  # Install mise-managed tools for the given profile environment(s). With no
+  # argument the base config.toml (core) set is installed; pass an env list such
+  # as "dev" or "dev,full" to layer in config.dev.toml / config.full.toml. The
+  # tool lists live only in those mise config files, so there is no parallel list
+  # here to drift out of sync (see config/mise/config.toml).
+  local env="${1:-}" global_config
+  global_config="$(tools::mise_global_config)"
 
-  if [ ! -f "${config_file}" ]; then
-    log::e "mise config not found at ${config_file}"
+  if [ ! -f "${global_config}" ]; then
+    log::e "mise config not found at ${global_config}"
     return 1
   fi
 
+  # Env layering (config.<env>.toml) only resolves via the linked global config
+  # dir, not a MISE_GLOBAL_CONFIG_FILE override, so require the dotfiles to be
+  # linked first (bootstrap links before running any profile).
+  case "${global_config}" in
+    "${_ROOT}"/*)
+      log::e "mise config is not linked at ~/.config/mise/config.toml; run 'make link' or bootstrap before installing tools"
+      return 1
+      ;;
+  esac
+
   tools::install_mise
-  MISE_GLOBAL_CONFIG_FILE="${config_file}" mise install "$@"
-}
-
-tools::install_mise_core_tools() {
-  tools::install_mise_tools starship atuin kubectl vale
-}
-
-tools::install_mise_dev_tools() {
-  tools::install_mise_tools \
-    neovim \
-    helm \
-    kubebuilder \
-    kind \
-    doctl \
-    gh \
-    github:agavra/tuicr \
-    kubectx \
-    kubens \
-    promtool \
-    cilium-cli \
-    ginkgo \
-    sonobuoy \
-    teleport-community \
-    pipx:awscli \
-    pipx:esptool \
-    pipx:black \
-    pipx:isort \
-    pipx:mypy \
-    pipx:python-openstackclient \
-    pipx:ruff
-}
-
-tools::install_mise_full_tools() {
-  tools::install_mise_tools \
-    pipx:oci-cli \
-    pipx:autopep8 \
-    nerdctl \
-    regctl \
-    github:tsenart/vegeta
+  if [ -n "${env}" ]; then
+    MISE_ENV="${env}" mise install
+  else
+    mise install
+  fi
 }
 
 tools::sync_vale_styles() {
@@ -880,7 +861,7 @@ os::ubuntu::install_packages_core() {
 
   uv::ensure_installed
   tools::install_mise
-  tools::install_mise_core_tools
+  tools::install_mise_tools
   kube::binaries
   tools::sync_vale_styles
   fonts::install_nerd_font
@@ -928,7 +909,7 @@ os::ubuntu::install_packages_dev() {
   sudo apt install -y --no-install-recommends "${dev_packages[@]}"
   tools::install_opentofu
   go::ensure_installed
-  tools::install_mise_dev_tools
+  tools::install_mise_tools dev
   go::install_developer_tools
   tools::install_tla_tools
   if [ -f "${_ROOT}/hooks/kubernetes" ]; then
@@ -1683,7 +1664,7 @@ tools::full_install() {
   tools::install_ansible
   tools::wireshark
   uv::ensure_installed
-  tools::install_mise_full_tools
+  tools::install_mise_tools dev,full
   tools::install_yubikey_manager
   os::install_dell_dock_fix
 }
