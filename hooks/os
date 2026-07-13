@@ -800,6 +800,7 @@ os::ubuntu::install_packages_core() {
     gawk
     git
     gnupg
+    htop
     jq
     libpcsclite-dev
     libpq-dev
