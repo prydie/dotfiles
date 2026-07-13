@@ -93,35 +93,20 @@ tools::install_mise() {
 }
 
 tools::install_mise_tools() {
-  # Install mise-managed tools for the given profile environment(s). With no
-  # argument the base config.toml (core) set is installed; pass an env list such
-  # as "dev" or "dev,full" to layer in config.dev.toml / config.full.toml. The
-  # tool lists live only in those mise config files, so there is no parallel list
-  # here to drift out of sync (see config/mise/config.toml).
-  local env="${1:-}" global_config
-  global_config="$(tools::mise_global_config)"
+  # Install every mise-managed tool from the global config. The tool set lives
+  # only in config/mise/config.toml (single source of truth) — there is no
+  # parallel list here to drift out of sync. Personal, machine-local tools come
+  # from an untracked ~/.config/mise/config.local.toml that mise loads on its own.
+  local config_file
+  config_file="$(tools::mise_global_config)"
 
-  if [ ! -f "${global_config}" ]; then
-    log::e "mise config not found at ${global_config}"
+  if [ ! -f "${config_file}" ]; then
+    log::e "mise config not found at ${config_file}"
     return 1
   fi
 
-  # Env layering (config.<env>.toml) only resolves via the linked global config
-  # dir, not a MISE_GLOBAL_CONFIG_FILE override, so require the dotfiles to be
-  # linked first (bootstrap links before running any profile).
-  case "${global_config}" in
-    "${_ROOT}"/*)
-      log::e "mise config is not linked at ~/.config/mise/config.toml; run 'make link' or bootstrap before installing tools"
-      return 1
-      ;;
-  esac
-
   tools::install_mise
-  if [ -n "${env}" ]; then
-    MISE_ENV="${env}" mise install
-  else
-    mise install
-  fi
+  MISE_GLOBAL_CONFIG_FILE="${config_file}" mise install
 }
 
 tools::sync_vale_styles() {
@@ -909,7 +894,6 @@ os::ubuntu::install_packages_dev() {
   sudo apt install -y --no-install-recommends "${dev_packages[@]}"
   tools::install_opentofu
   go::ensure_installed
-  tools::install_mise_tools dev
   go::install_developer_tools
   tools::install_tla_tools
   if [ -f "${_ROOT}/hooks/kubernetes" ]; then
@@ -1664,7 +1648,6 @@ tools::full_install() {
   tools::install_ansible
   tools::wireshark
   uv::ensure_installed
-  tools::install_mise_tools dev,full
   tools::install_yubikey_manager
   os::install_dell_dock_fix
 }

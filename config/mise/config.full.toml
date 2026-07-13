@@ -1,8 +1,0 @@
-# Full profile tools — layered on config.toml + config.dev.toml via
-# `mise install --env dev,full`.
-[tools]
-nerdctl = "2.2.2"
-regctl = "0.11.4"
-"github:tsenart/vegeta" = "v12.13.0"
-"pipx:oci-cli" = "3.83.0"
-"pipx:autopep8" = "2.3.2"

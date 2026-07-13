@@ -209,17 +209,17 @@ mode in their OSD menus.
 - Python tooling via `uv`.
 - Node tooling via `nvm`.
 - `PROFILE=core|dev|full` bootstraps zplug plugins and installs missing TPM plugins. Run standalone with `make tmux-plugins`.
-- `PROFILE=dev|full` installs pinned Neovim from [config/mise/config.dev.toml](config/mise/config.dev.toml) and runs headless lazy.nvim sync.
+- `PROFILE=dev|full` runs a headless lazy.nvim sync for the mise-managed Neovim (pinned in [config/mise/config.toml](config/mise/config.toml)).
 
 ### Profiles
 
 - `link`: no host package/tool installs; dotfiles only.
 - `core`: infra/network baseline (`tailscale`, `cloudflared`, `openconnect`, `wireguard-tools`, `nmap`, `tcpdump`, `dnsutils`, `jq`, `yq`, `traceroute`, `ufw`, `rsync`, `restic`, `rclone`) and Docker Compose v2 (`docker compose`).
-- `core` also installs `mise`, then installs Atuin, Starship, `kubectl`, and `vale` from [config/mise/config.toml](config/mise/config.toml), bootstraps `FiraCode Nerd Font` into `~/.local/share/fonts/NerdFonts/FiraCode` (override with `NERD_FONT_NAME` / `NERD_FONT_VERSION`), and configures GNOME Terminal default font to `FiraCode Nerd Font Mono 11` (override with `TERMINAL_FONT_SPEC`).
+- `core` also installs `mise` and all mise-managed CLIs from [config/mise/config.toml](config/mise/config.toml), bootstraps `FiraCode Nerd Font` into `~/.local/share/fonts/NerdFonts/FiraCode` (override with `NERD_FONT_NAME` / `NERD_FONT_VERSION`), and configures GNOME Terminal default font to `FiraCode Nerd Font Mono 11` (override with `TERMINAL_FONT_SPEC`).
 - `core` installs the repo-managed AppArmor profile at [config/apparmor/bwrap](config/apparmor/bwrap) so Ubuntu 24.04's unprivileged user namespace restriction permits Bubblewrap-based sandboxes used by Codex CLI.
 - Vale uses the repo-managed global config at [config/vale/vale.ini](config/vale/vale.ini), with the `general` profile: `Vale + write-good + alex`.
 - `core` writes Zsh completions for `kubectl` to `${XDG_DATA_HOME:-$HOME/.local/share}/zsh/site-functions/_kubectl`.
-- `PROFILE=dev|full` also installs Neovim, Helm, `kubebuilder`, `kind`, `doctl`, `gh`, `tuicr`, `kubectx`, `kubens`, `promtool`, `loki-logcli`, `cilium-cli`, `ginkgo`, `sonobuoy`, `teleport-community` (`tsh`/`tctl`/`teleport`), `playwright`, `awscli`, `python-openstackclient` with `python-octaviaclient`, `esptool`, `black`, `isort`, `mypy`, and `ruff` from [config/mise/config.dev.toml](config/mise/config.dev.toml), installs Go developer tools (`gopls`, `golangci-lint`, `govulncheck`, `modvendor`) via `go install`, installs TLA+ validation/proof tooling (`tlc`, `sany`, `pcal`, `tla2tex`, `apalache-mc`, `tlapm`, `tla`, `tla-mcp`), and writes Zsh completions for `kubectl`, `kubebuilder`, Helm, and `kind`.
+- `PROFILE=dev|full` installs Go developer tools (`gopls`, `golangci-lint`, `govulncheck`, `modvendor`) via `go install`, installs TLA+ validation/proof tooling (`tlc`, `sany`, `pcal`, `tla2tex`, `apalache-mc`, `tlapm`, `tla`, `tla-mcp`), and writes Zsh completions for `kubebuilder`, Helm, and `kind`. (All mise-managed CLIs, including the dev tooling, come from `config.toml` at the `core` step above.)
 - `dev`: `core` + developer tools such as `1password-cli`, `ansible`, `go`, `tofu` (OpenTofu), `doctl`, `gh`, `aws`, `openstack`, `hugo`, `picocom`, Claude Code (`@anthropic-ai/claude-code`), Codex CLI (`@openai/codex`), Gemini CLI (`@google/gemini-cli`), and ESP tooling (`esptool` + `idf.py` bootstrap), plus Neovim bootstrap.
 - Go is installed from the official tarball into `~/.local/opt/go` with `~/.local/bin/go` symlinked ahead of system Go, so the repo can enforce a minimum version.
 - `full`: `dev` + heavier extras such as `nerdctl`, `regctl`, `vegeta`, `oci-cli`, `autopep8`, and YubiKey tooling from [hooks/os](hooks/os).
@@ -259,23 +259,17 @@ This stores/loads:
 
 ## Kubernetes installers (no `curl | bash`)
 
-Fast-moving CLI tools are managed centrally via mise config, split by profile so
-each tool is declared exactly once (no parallel list in `hooks/os` to drift):
-
-- [config/mise/config.toml](config/mise/config.toml) — core tools (every profile)
-- [config/mise/config.dev.toml](config/mise/config.dev.toml) — dev additions
-- [config/mise/config.full.toml](config/mise/config.full.toml) — full additions
-
-Profiles map to mise config environments, so a profile run installs the layered
-set. Update a version in the matching file, then re-run the relevant command:
+Fast-moving CLI tools are managed centrally in [config/mise/config.toml](config/mise/config.toml)
+— the single source of truth. Add or pin a tool there and it installs on the next
+`make setup` (or `mise install`); there is no parallel list in `hooks/os` to keep in
+sync. Update a version, then run:
 
 ```bash
-mise install                 # core
-mise install --env dev       # core + dev
-mise install --env dev,full  # core + dev + full
+mise install
 ```
 
-Personal, machine-local tools go in an untracked `~/.config/mise/config.local.toml`.
+Personal, machine-local tools (e.g. tools you only want on a personal laptop) go in
+an untracked `~/.config/mise/config.local.toml`, which mise loads automatically.
 
 `kind` is the default local Kubernetes cluster tool for controller-manager
 development. It is installed by the `dev` and `full` profiles through mise and
@@ -294,7 +288,7 @@ kube::install_k3d
 `kubectl` and `vale` are installed automatically by `make setup PROFILE=core|dev|full`.
 Helm, `kubebuilder`, `kind`, `gh`, `tuicr`, `kubectx`, `kubens`, `promtool`, `awscli`, `python-openstackclient` with the Octavia plugin, `esptool`, `black`, `isort`, `mypy`, and `ruff` are installed automatically by `make setup PROFILE=dev|full`.
 `oci-cli` and `autopep8` are installed automatically by the `full` profile extras from the same mise config.
-The repo-managed mise configs are linked into `~/.config/mise/`; the env layering (`config.dev.toml` / `config.full.toml`) resolves only through that linked global dir, so the dotfiles must be linked before a profile installs tools.
+The repo-managed [config/mise/config.toml](config/mise/config.toml) is linked to `~/.config/mise/config.toml`, and the hooks pass `MISE_GLOBAL_CONFIG_FILE` so tools install even before the config is linked.
 Vale's global config lives at `~/.config/vale/vale.ini` and setup runs `vale sync` to install the configured style packages.
 
 ## TLA+ tooling
