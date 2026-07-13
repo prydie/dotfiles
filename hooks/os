@@ -172,7 +172,7 @@ nvm::ensure_installed() {
   log::f "Installing nvm ${nvm_version}"
   git clone https://github.com/nvm-sh/nvm.git "${NVM_DIR}"
   (
-    cd "${NVM_DIR}"
+    cd "${NVM_DIR}" || exit
     git checkout "${nvm_version}"
   )
 }
