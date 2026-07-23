@@ -883,7 +883,9 @@ os::ubuntu::install_packages_dev() {
     1password-cli
     ansible
     default-jre-headless
+    dnsmasq
     hugo
+    libnss3-tools
     picocom
     shellcheck
     shfmt
