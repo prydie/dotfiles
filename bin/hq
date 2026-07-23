@@ -1,0 +1,341 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# hq — mission control for Claude/Codex agents running in tmux.
+#
+# LOCAL host only for now (cross-machine sync is a later phase that slots in
+# around collect_local without changing the renderer). Two signal sources:
+#   * tmux pane titles that Claude paints for itself — a leading braille spinner
+#     (⠿) means working, a ✳ means it finished its turn and is idle;
+#   * per-pane "needs you" latch files written by the Claude hook (hooks/claude/
+#     hq-hook), which flag an agent blocked on a prompt — something a title can't
+#     express. A latch overrides the title-derived state.
+#
+# Subcommands:
+#   hq render   one-shot render (default)
+#   hq watch    flicker-free live view for the popup/sidebar (q or Esc quits)
+#   hq badge    compact "● N need you" for the tmux status line (empty if none)
+#   hq raw      print the parsed agent records (debugging)
+
+US=$'\t' # field delimiter — tmux preserves tabs but mangles most control bytes
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/agent-hq/state" # hook latch files
+
+# ---- presentation -----------------------------------------------------------
+
+if [[ -t 1 && -z "${NO_COLOR:-}" ]]; then
+  DIM=$'\e[2m'; BOLD=$'\e[1m'; RESET=$'\e[0m'
+  GREEN=$'\e[32m'; YELLOW=$'\e[33m'
+else
+  DIM=''; BOLD=''; RESET=''; GREEN=''; YELLOW=''
+fi
+
+# state -> traffic-light dot. All are single-codepoint, emoji-presentation-default
+# glyphs (no U+FE0F variation selector): foot renders those at a stable 2-cell
+# width. Avoid VS16 emoji (e.g. ✳️ 🛰️) here — foot renders them at an unstable
+# width, which shifts the following text a column on every repaint.
+dot_working='🟢'; dot_idle='⚪'; dot_needs='🔴'; dot_error='🟠'
+
+host_short() { hostname -s 2>/dev/null || hostname; }
+
+# width-aware truncation (chars, not bytes; relies on a UTF-8 locale as tmux/foot
+# already require). Appends … when it clips.
+truncate_chars() {
+  local s=$1 max=$2
+  if (( ${#s} > max )); then
+    printf '%s…' "${s:0:max-1}"
+  else
+    printf '%s' "$s"
+  fi
+}
+
+# codepoint of the first character, or 0 if empty/unknown
+first_codepoint() {
+  local s=$1
+  [[ -z $s ]] && { printf '0'; return; }
+  printf '%d' "'${s:0:1}" 2>/dev/null || printf '0'
+}
+
+# ---- collection -------------------------------------------------------------
+
+# Emit one record per local Claude/Codex agent pane:
+#   rank US host US state US type US title US path US branch US target US pane_id US reason
+# rank orders the render (0 needs-you, 1 working, 2 idle, 3 other).
+collect_local() {
+  local host; host=$(host_short)
+  tmux list-panes -a -F \
+    "#{pane_current_command}${US}#{pane_id}${US}#{pane_current_path}${US}#{session_name}:#{window_index}.#{pane_index}${US}#{pane_title}" \
+    2>/dev/null | while IFS="$US" read -r cmd pane_id path target title; do
+
+    local type
+    case "$cmd" in
+      claude) type=claude ;;
+      codex)  type=codex ;;
+      *)      continue ;;
+    esac
+
+    # Classify from the leading title glyph Claude paints for itself.
+    local cp state rank
+    cp=$(first_codepoint "$title")
+    if (( cp >= 0x2800 && cp <= 0x28FF )); then
+      state=working; rank=1
+    elif (( cp == 0x2733 || cp == 0x2734 || cp == 0x273B )); then
+      state=idle; rank=2
+    else
+      state=idle; rank=3 # no glyph (e.g. a Codex UUID title) — best effort
+    fi
+
+    # Strip the leading glyph (+ following space) to get a clean title.
+    local clean=$title
+    if (( rank == 1 || (cp >= 0x2733 && cp <= 0x273B) )); then
+      clean=${title:1}; clean=${clean# }
+    fi
+    [[ -z $clean ]] && clean=$cmd
+
+    # A '-' sentinel keeps this field non-empty: tab is IFS-whitespace, so an
+    # empty middle field would collapse and shift every later column left.
+    local branch
+    branch=$(git -C "$path" rev-parse --abbrev-ref HEAD 2>/dev/null || true)
+    branch=${branch:--}
+
+    # A "needs you" latch (from the Claude hook) overrides the title: an agent
+    # blocked on a prompt outranks whatever glyph its title happens to show.
+    local reason='-'
+    local latch="${STATE_DIR}/${host}-${pane_id//%/p}.needs"
+    if [[ -f $latch ]]; then
+      state=needs; rank=0
+      IFS= read -r reason <"$latch" 2>/dev/null || reason=''
+      [[ -z $reason ]] && reason='-'
+    fi
+
+    printf '%s\n' "${rank}${US}${host}${US}${state}${US}${type}${US}${clean}${US}${path}${US}${branch}${US}${target}${US}${pane_id}${US}${reason}"
+  done
+}
+
+# ---- render -----------------------------------------------------------------
+
+# collect_local sorted for display: group by host, needs-you first, then title.
+collect_sorted() {
+  collect_local | sort -t"$US" -k2,2 -k1,1n -k5,5
+}
+
+# Render the sidebar frame from records on stdin. $1 is the selected agent index
+# (0-based, in stdin order) to highlight, or -1 for a plain non-interactive
+# render with no selection cursor or key hints.
+render_frame() {
+  local sel=${1:--1}
+  local width=${COLUMNS:-$(tput cols 2>/dev/null || echo 46)}
+  (( width < 30 )) && width=30
+
+  local rows; rows=$(cat)
+
+  # No in-content title: the popup's tmux border already shows "📡 mission
+  # control" (its -T title), so a heading line here just duplicates it. Just a
+  # blank line of top padding below the border.
+  printf '\n'
+
+  if [[ -z $rows ]]; then
+    printf '%s   no agents running%s\n' "$DIM" "$RESET"
+    return
+  fi
+
+  local n_total=0 n_working=0 n_idle=0 n_needs=0 last_host='' ai=0
+  while IFS="$US" read -r rank host state type title path branch target pane_id reason; do
+    [[ -z $host ]] && continue
+    n_total=$((n_total + 1))
+
+    if [[ $host != "$last_host" ]]; then
+      [[ -n $last_host ]] && printf '\n'
+      printf ' %s🖥  %s%s\n' "$BOLD" "$host" "$RESET"
+      last_host=$host
+    fi
+
+    local dot titlecol=''
+    case "$state" in
+      needs)   dot=$dot_needs;   titlecol=$YELLOW; n_needs=$((n_needs + 1)) ;;
+      working) dot=$dot_working; titlecol=$GREEN;  n_working=$((n_working + 1)) ;;
+      error)   dot=$dot_error ;;
+      *)       dot=$dot_idle;    n_idle=$((n_idle + 1)) ;;
+    esac
+    # line 1: " <dot> <title>". The dot emoji is 2 cells, so the fixed lead is
+    # 4 cells (1 pad + 2 dot + 1 space); truncate the ASCII title to leave a 2
+    # cell right margin. The selected row is a constant-gutter full-width reverse
+    # bar — no arrow, so the text never shifts as the cursor moves.
+    local ttl; ttl=$(truncate_chars "$title" $((width - 6)))
+    if (( ai == sel )); then
+      local pad=$((width - 4 - ${#ttl} - 1)); (( pad < 0 )) && pad=0
+      printf ' %s %s%s%*s%s\n' "$dot" $'\e[7m' "$ttl" "$pad" '' $'\e[0m'
+    else
+      printf ' %s %s%s%s\n' "$dot" "$titlecol" "$ttl" "$RESET"
+    fi
+
+    # line 2: dim meta, indented under the title. The type (claude/codex) is shown
+    # as a word rather than an emoji glyph — a VS16 type glyph (✳️) here was the
+    # thing whose unstable width made this line jitter. For a blocked agent the
+    # reason is more useful than the path, so lead with it.
+    local metatext
+    if [[ $state == needs && -n $reason && $reason != - ]]; then
+      metatext="$reason"
+    else
+      local shortpath=${path/#$HOME/\~}
+      metatext="${type} · ${shortpath}"
+      [[ -n $branch && $branch != - ]] && metatext+=" · ⎇ ${branch}"
+    fi
+    metatext=$(truncate_chars "$metatext" $((width - 6)))
+    printf '    %s%s%s\n' "$DIM" "$metatext" "$RESET"
+
+    ai=$((ai + 1))
+  done <<< "$rows"
+
+  # footer tally — only surface the 🔴 segment when something actually needs you
+  local foot="${n_total} agent"; [[ $n_total -ne 1 ]] && foot+='s'
+  [[ $n_needs -gt 0 ]] && foot+=" · ${dot_needs} ${n_needs}"
+  foot+=" · ${dot_working} ${n_working} · ${dot_idle} ${n_idle}"
+  printf '\n %s%s%s\n' "$DIM" "$foot" "$RESET"
+
+  (( sel >= 0 )) && printf ' %s↑↓ select · ↵ jump · q quit%s\n' "$DIM" "$RESET"
+  return 0
+}
+
+# One-shot render for `hq render` — no selection cursor.
+render() {
+  collect_sorted | render_frame -1
+}
+
+# ---- entrypoint -------------------------------------------------------------
+
+# Compact status-line badge: "● N need you", or nothing when nobody is blocked.
+# Derived from collect_local (the authoritative live view) rather than counting
+# latch files directly, so a stale latch from a crashed pane never shows a
+# phantom count. The Claude hook triggers `tmux refresh-client -S` to repaint
+# the status bar the instant this changes.
+badge() {
+  local n
+  n=$(collect_local | awk -F'\t' '$3 == "needs"' | grep -c . || true)
+  if ((n > 0)); then
+    printf '● %d need you' "$n"
+  fi
+}
+
+# Focus an agent's tmux pane from its record. A local agent switches the current
+# client onto that pane (the popup then closes, landing you there). A remote
+# agent — once cross-machine sync lands — is pre-selected on its own server over
+# ssh, so it is ready when you flip to that host's window (a TUI can't move the
+# window-manager focus between hosts).
+jump_to() {
+  local rec=$1
+  local rank host state type title path branch target pane_id reason
+  IFS="$US" read -r rank host state type title path branch target pane_id reason <<<"$rec"
+  [[ -z $pane_id ]] && return
+  if [[ $host == "$(host_short)" ]]; then
+    # Resolve everything from the unambiguous pane id (%N) rather than string-
+    # splitting session:window.pane, which would break if a session name contained
+    # a ':' or '.'. tmux resolves a pane-id target up to its window and session.
+    local sess
+    sess=$(tmux display -p -t "$pane_id" '#{session_name}' 2>/dev/null || true)
+    tmux select-window -t "$pane_id" 2>/dev/null || true
+    tmux select-pane -t "$pane_id" 2>/dev/null || true
+    [[ -n $sess ]] && tmux switch-client -t "$sess" 2>/dev/null || true
+  else
+    ssh -o BatchMode=yes "$host" \
+      "tmux select-window -t '${target%.*}' \\; select-pane -t '$pane_id'" 2>/dev/null || true
+  fi
+}
+
+# Interactive, flicker-free live view for the popup. Navigate with ↑/↓ (or j/k),
+# Enter jumps to the selected agent's pane, q or Esc quits (which, with
+# `display-popup -E`, closes the popup). Frames paint in place from the top and
+# are skipped when unchanged, so a static list does not flicker.
+watch() {
+  local interval=${1:-1}
+  # No tty to drive selection (e.g. piped) → just render once.
+  [[ -t 0 ]] || { render; return; }
+
+  # Force COLUMNS to the popup's ACTUAL width, read straight from the tty. We
+  # can't trust an inherited COLUMNS (the popup inherits the launching shell's
+  # value — the full terminal width), and `tput cols` is no good either: ncurses
+  # lets a COLUMNS env var override the real size. `stty size` asks the kernel
+  # (TIOCGWINSZ) and ignores the environment. A wrong width makes render_frame
+  # truncate to the terminal width and wrap inside the narrow popup — which reads
+  # as text "jumping in from the left".
+  local cols
+  cols=$(stty size 2>/dev/null | awk '{print $2}')
+  [[ ${cols:-0} -gt 0 ]] || cols=$(tput cols 2>/dev/null || echo 70)
+  export COLUMNS=$cols
+
+  # Put the tty in no-echo, non-canonical mode for the WHOLE loop. `read -sN1`
+  # only silences echo *during* the read; between reads bash restores cooked mode
+  # with echo ON, so a keypress landing in that window (fast nav / key-repeat)
+  # gets echoed onto the screen and then wiped by the next repaint — a flash that
+  # looks like the text shifting right then back. Keep OPOST/ONLCR (do NOT use
+  # `stty raw`) so newlines still return the cursor to column 0.
+  local saved_stty
+  saved_stty=$(stty -g 2>/dev/null || true)
+  stty -echo -icanon min 1 time 0 2>/dev/null || true
+
+  printf '\033[?1049h\033[?25l'
+  # shellcheck disable=SC2317
+  cleanup() {
+    printf '\033[?25h\033[?1049l'
+    [[ -n $saved_stty ]] && stty "$saved_stty" 2>/dev/null || true
+  }
+  trap cleanup EXIT INT TERM HUP
+
+  local -a recs=()
+  local sel=0 prev='' painted key rest frame need_render=1 n=0
+  mapfile -t recs < <(collect_sorted); n=${#recs[@]}
+
+  while :; do
+    if ((need_render)); then
+      ((n > 0 && sel >= n)) && sel=$((n - 1))
+      ((sel < 0)) && sel=0
+      if ((n > 0)); then
+        frame=$(printf '%s\n' "${recs[@]}" | render_frame "$sel")
+      else
+        frame=$(render_frame "$sel" </dev/null)
+      fi
+      if [[ $frame != "$prev" ]]; then
+        # ESC[K per line clears stale tails; ESC[H homes, trailing ESC[J wipes below.
+        painted=$(printf '%s\n' "$frame" | sed $'s/$/\033[K/')
+        printf '\033[H%s\033[J' "$painted"
+        prev=$frame
+      fi
+      need_render=0
+    fi
+
+    if read -rsN1 -t "$interval" key; then
+      case $key in
+        q) break ;;
+        j) sel=$((sel + 1)); need_render=1 ;;
+        k) sel=$((sel - 1)); need_render=1 ;;
+        $'\n' | $'\r') ((n > 0)) && { jump_to "${recs[$sel]}"; break; } ;;
+        $'\e')
+          # bare Esc quits; an arrow key arrives as Esc [ A/B — read the tail.
+          # A slightly roomier timeout tolerates keystrokes split by SSH latency.
+          if read -rsN2 -t 0.05 rest; then
+            case $rest in
+              '[A') sel=$((sel - 1)); need_render=1 ;;
+              '[B') sel=$((sel + 1)); need_render=1 ;;
+            esac
+          else
+            break
+          fi
+          ;;
+      esac
+    else
+      (($? <= 128)) && break # EOF → exit; timeout (>128) → refresh the list
+      mapfile -t recs < <(collect_sorted); n=${#recs[@]}
+      need_render=1
+    fi
+  done
+}
+
+case "${1:-render}" in
+  render) render ;;
+  raw)    collect_local ;;
+  watch)  watch "${2:-}" ;;
+  badge)  badge ;;
+  *)
+    printf 'usage: hq [render|watch|badge|raw]\n' >&2
+    exit 2
+    ;;
+esac

@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+# Claude Code hook for the `hq` mission-control sidebar.
+#
+# The tmux pane title tells the sidebar whether an agent is working or idle, but
+# it cannot express "blocked, waiting on you" (a permission prompt, or Claude
+# sitting idle waiting for input). This hook maintains a per-pane "needs you"
+# latch file that `hq` reads to flag such agents.
+#
+# Wired per-event in ~/.claude/settings.json; the intended action is the 1st arg:
+#   needs   an attention Notification fired (permission / idle-waiting)
+#   clear   forward progress (prompt submitted, a tool ran, turn ended, session start)
+#   end     the session ended in this pane
+#
+# The latch is keyed by host + tmux pane id, matching how `hq` joins panes to
+# state, so it is naturally scoped and self-cleaning as panes come and go.
+set -euo pipefail
+
+action=${1:-}
+pane=${TMUX_PANE:-}
+[[ -z $pane ]] && exit 0 # not inside tmux → the sidebar can't join to this agent
+
+host=$(hostname -s 2>/dev/null || hostname)
+dir="${XDG_STATE_HOME:-$HOME/.local/state}/agent-hq/state"
+key="${host}-${pane//%/p}" # %22 → p22, a safe filename fragment
+latch="${dir}/${key}.needs"
+
+changed=0
+case "$action" in
+  needs)
+    mkdir -p "$dir"
+    [[ -f $latch ]] || changed=1
+    # Capture the notification text (stdin carries the hook JSON); best-effort.
+    msg=$(jq -r '.message // empty' 2>/dev/null <&0 || true)
+    printf '%s\n' "$msg" >"$latch"
+    ;;
+  clear | end)
+    [[ -f $latch ]] && changed=1
+    rm -f "$latch"
+    ;;
+  *)
+    exit 0
+    ;;
+esac
+
+# Only when the latch actually changed, nudge tmux to repaint the status bar so
+# the "need you" badge updates immediately instead of waiting for status-interval.
+# Skipping the no-op case keeps the frequent PostToolUse "clear" from spamming
+# status redraws (which would reintroduce the flicker we just designed out).
+if ((changed)); then
+  tmux refresh-client -S 2>/dev/null || true
+fi
+exit 0
