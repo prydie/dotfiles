@@ -1,0 +1,44 @@
+#!/bin/sh
+
+set -eu
+
+if [ "$#" -eq 0 ]; then
+    echo "usage: agent-run COMMAND [ARGUMENT ...]" >&2
+    exit 2
+fi
+
+if ! command -v systemctl >/dev/null 2>&1 || ! command -v systemd-run >/dev/null 2>&1; then
+    echo "agent-run: systemd user tools are required" >&2
+    exit 1
+fi
+
+quota=$(systemctl --user show agents.slice \
+    --property=CPUQuotaPerSecUSec \
+    --value 2>/dev/null) || {
+    echo "agent-run: agents.slice is unavailable; run 'systemctl --user daemon-reload'" >&2
+    exit 1
+}
+
+case "$quota" in
+    "" | "[not set]" | infinity)
+        echo "agent-run: agents.slice does not have a finite CPU limit" >&2
+        echo "agent-run: run 'systemctl --user daemon-reload' and retry" >&2
+        exit 1
+        ;;
+    *)
+        ;;
+esac
+
+if ! command -v "$1" >/dev/null 2>&1; then
+    echo "agent-run: command not found: $1" >&2
+    exit 127
+fi
+
+exec systemd-run \
+    --user \
+    --scope \
+    --quiet \
+    --collect \
+    --same-dir \
+    --slice=agents.slice \
+    -- "$@"

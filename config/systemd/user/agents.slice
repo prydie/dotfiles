@@ -1,0 +1,8 @@
+[Unit]
+Description=Local AI agent workloads
+
+[Slice]
+# Keep four of this host's sixteen CPUs available for interactive work.
+CPUQuota=1200%
+# Yield readily to the desktop and other user services under contention.
+CPUWeight=10

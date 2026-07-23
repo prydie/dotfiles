@@ -50,11 +50,14 @@ make bootstrap
 make setup
 make codex-sandbox-fix
 make codex-superpowers
+make ai-skills
 make tmux-plugins
+make agent-session-hooks
 make tla-tools
 make verify-tla-tools
 make ghostty
 make ghostty-terminfo
+make bruno
 make refresh-dev
 make gnome-prefs-save
 make gnome-prefs-apply
@@ -129,6 +132,77 @@ discovers global skills under `${CODEX_HOME:-~/.codex}/skills`, so `make ai-skil
 also symlinks each skill there. The installed skills live outside this repo and
 are not tracked; the install is not version-pinned by design — refresh with
 `skills update -g`, and remove with `skills remove -g -a claude-code codex -s <name>`.
+
+## Tmux agent checkpoints
+
+`agent-sessions` combines tmux-resurrect's terminal layout with the native
+Codex and Claude session IDs. It does not capture pane contents or copy agent
+transcripts. It stores private checkpoint manifests under
+`${XDG_STATE_HOME:-~/.local/state}/agent-sessions` with mode `0600`.
+The Resurrect post-save hook restricts its state directory to `0700` and its
+snapshots to `0600`.
+Codex panes attached to an app-server retain their `--remote` endpoint instead
+of reopening the thread through a standalone local process. Confirmed restore
+starts the managed Codex daemon before launching any panes that use its control
+socket; a daemon startup failure prevents every agent launch.
+
+Install the plugin and additive user-level lifecycle hooks:
+
+```bash
+make tmux-plugins
+make agent-session-hooks
+```
+
+`PROFILE=dev|full` installs the hooks automatically. The installer preserves
+other settings and backs up a settings file before changing it. Restart Codex,
+open `/hooks`, and trust the new user hook; an organization policy may disable
+user hooks.
+
+Before rebooting:
+
+```bash
+agent-sessions status
+agent-sessions checkpoint
+```
+
+Checkpointing refuses to stop anything until every active Codex or Claude pane
+has a validated UUID. If a remote client cannot be identified, register the ID
+reported by the agent and retry:
+
+```bash
+agent-sessions register --pane %21 --agent codex --session-id <UUID>
+```
+
+The checkpoint saves tmux while every pane still exists, interrupts active
+turns, rechecks which agents remain before sending `/exit`, and retries one slow
+cancellation within a 30-second bound. It never force-kills an agent. When a
+pane uses the managed Codex app-server, checkpoint stops its daemon after every
+recorded pane exits; restore starts it before reattaching. Use `--keep-running`
+to save without exiting anything.
+
+After rebooting, start tmux and press `C-a C-r` to restore its structure. Review
+the proposed native resume commands before launching them:
+
+```bash
+agent-sessions restore
+agent-sessions restore --run
+```
+
+`C-a S` opens the checkpoint command in a popup. `C-a R` opens the confirmed
+agent restore command after the tmux structure exists. Automatic agent relaunch
+is deliberately disabled. Restore records the new pane identities so subsequent
+checkpoints do not require another manual remote-session registration.
+
+## Agent resource headroom
+
+Interactive `codex`, `claude`, and `gemini` commands run through `agent-run`.
+Their processes and local build/test children share `agents.slice`, which caps
+them at twelve CPUs and gives them less CPU weight than interactive desktop
+applications. This leaves nominal four-CPU headroom on the sixteen-CPU laptop.
+The managed Codex app-server and restored tmux sessions use the same launcher.
+
+Docker containers do not inherit the user slice and remain outside this initial
+limit.
 
 ## Neovim Go workflow
 
@@ -245,6 +319,7 @@ mode in their OSD menus.
 - Python tooling via `uv`.
 - Node tooling via `nvm`.
 - `PROFILE=core|dev|full` bootstraps zplug plugins and installs missing TPM plugins. Run standalone with `make tmux-plugins`.
+- `PROFILE=dev|full` installs additive Codex and Claude session checkpoint hooks. Run standalone with `make agent-session-hooks`.
 - `PROFILE=dev|full` runs a headless lazy.nvim sync for the mise-managed Neovim (pinned in [config/mise/config.toml](config/mise/config.toml)).
 
 ### Profiles

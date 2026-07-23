@@ -1,0 +1,1096 @@
+#!/usr/bin/env python3
+"""Checkpoint and resume Codex and Claude sessions running in tmux."""
+
+from __future__ import annotations
+
+import argparse
+import dataclasses
+import datetime as dt
+import json
+import os
+import shlex
+import shutil
+import subprocess
+import sys
+import tempfile
+import time
+import uuid
+from pathlib import Path
+from typing import Any, Iterable
+
+
+STATE_VERSION = 1
+FIELD_SEPARATOR = "\x1f"
+SHELL_COMMANDS = {"bash", "dash", "fish", "sh", "zsh"}
+
+
+class AgentSessionsError(RuntimeError):
+    """An expected, user-actionable failure."""
+
+
+@dataclasses.dataclass(frozen=True)
+class Pane:
+    pane_id: str
+    session_name: str
+    window_index: int
+    pane_index: int
+    pid: int
+    command: str
+    cwd: str
+
+    @property
+    def coordinate(self) -> str:
+        return f"{self.session_name}:{self.window_index}.{self.pane_index}"
+
+
+@dataclasses.dataclass(frozen=True)
+class AgentProcess:
+    agent: str
+    pid: int
+    argv: tuple[str, ...]
+
+
+@dataclasses.dataclass(frozen=True)
+class Resolution:
+    pane: Pane
+    process: AgentProcess
+    session_id: str | None
+    cwd: str
+    method: str
+    remote: str | None
+
+
+def utc_now() -> str:
+    return dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")
+
+
+def state_dir() -> Path:
+    override = os.environ.get("AGENT_SESSIONS_STATE_DIR")
+    if override:
+        return Path(override).expanduser()
+    base = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state"))
+    return base / "agent-sessions"
+
+
+def claude_home() -> Path:
+    return Path(os.environ.get("AGENT_SESSIONS_CLAUDE_HOME", Path.home() / ".claude"))
+
+
+def codex_home() -> Path:
+    return Path(os.environ.get("CODEX_HOME", Path.home() / ".codex"))
+
+
+def proc_root() -> Path:
+    return Path(os.environ.get("AGENT_SESSIONS_PROC_ROOT", "/proc"))
+
+
+def valid_session_id(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    try:
+        uuid.UUID(value)
+    except (ValueError, AttributeError):
+        return None
+    return value.lower()
+
+
+def ensure_private_dir(path: Path) -> None:
+    path.mkdir(mode=0o700, parents=True, exist_ok=True)
+    try:
+        path.chmod(0o700)
+    except OSError:
+        pass
+
+
+def atomic_json_write(path: Path, value: object) -> None:
+    ensure_private_dir(path.parent)
+    mode = 0o600
+    if path.exists():
+        mode = path.stat().st_mode & 0o777
+    fd, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(value, handle, indent=2, sort_keys=True)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.chmod(temporary, mode)
+        os.replace(temporary, path)
+        directory_fd = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+    finally:
+        try:
+            os.unlink(temporary)
+        except FileNotFoundError:
+            pass
+
+
+def load_json(path: Path) -> Any:
+    with path.open(encoding="utf-8") as handle:
+        return json.load(handle)
+
+
+def run_tmux(*arguments: str, check: bool = True) -> subprocess.CompletedProcess[str]:
+    try:
+        return subprocess.run(
+            ["tmux", *arguments],
+            check=check,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+    except FileNotFoundError as error:
+        raise AgentSessionsError("tmux is not installed") from error
+    except subprocess.CalledProcessError as error:
+        detail = error.stderr.strip() or error.stdout.strip() or "tmux command failed"
+        raise AgentSessionsError(detail) from error
+
+
+def list_panes() -> list[Pane]:
+    format_string = FIELD_SEPARATOR.join(
+        (
+            "#{pane_id}",
+            "#{session_name}",
+            "#{window_index}",
+            "#{pane_index}",
+            "#{pane_pid}",
+            "#{pane_current_command}",
+            "#{pane_current_path}",
+        )
+    )
+    result = run_tmux("list-panes", "-a", "-F", format_string)
+    panes: list[Pane] = []
+    for line in result.stdout.splitlines():
+        fields = line.split(FIELD_SEPARATOR)
+        if len(fields) != 7:
+            continue
+        try:
+            panes.append(
+                Pane(
+                    pane_id=fields[0],
+                    session_name=fields[1],
+                    window_index=int(fields[2]),
+                    pane_index=int(fields[3]),
+                    pid=int(fields[4]),
+                    command=fields[5],
+                    cwd=fields[6],
+                )
+            )
+        except ValueError:
+            continue
+    return panes
+
+
+def pane_by_id(pane_id: str) -> Pane | None:
+    return next((pane for pane in list_panes() if pane.pane_id == pane_id), None)
+
+
+def process_table() -> tuple[dict[int, int], dict[int, tuple[str, ...]]]:
+    parents: dict[int, int] = {}
+    arguments: dict[int, tuple[str, ...]] = {}
+    root = proc_root()
+    try:
+        entries = root.iterdir()
+    except OSError:
+        return parents, arguments
+    for entry in entries:
+        if not entry.name.isdigit():
+            continue
+        pid = int(entry.name)
+        try:
+            stat = (entry / "stat").read_text(encoding="utf-8")
+            suffix = stat[stat.rfind(")") + 2 :].split()
+            parents[pid] = int(suffix[1])
+            raw = (entry / "cmdline").read_bytes().split(b"\0")
+            arguments[pid] = tuple(
+                item.decode(errors="replace") for item in raw if item
+            )
+        except (OSError, ValueError, IndexError):
+            continue
+    return parents, arguments
+
+
+def process_depths(root_pid: int, parents: dict[int, int]) -> dict[int, int]:
+    children: dict[int, list[int]] = {}
+    for child, parent in parents.items():
+        children.setdefault(parent, []).append(child)
+    depths = {root_pid: 0}
+    queue = [root_pid]
+    while queue:
+        parent = queue.pop(0)
+        for child in children.get(parent, []):
+            if child in depths:
+                continue
+            depths[child] = depths[parent] + 1
+            queue.append(child)
+    return depths
+
+
+def executable_name(argv: tuple[str, ...]) -> str:
+    return Path(argv[0]).name if argv else ""
+
+
+def process_agent(argv: tuple[str, ...]) -> tuple[str, int] | None:
+    if not argv:
+        return None
+    name = executable_name(argv)
+    if name == "claude":
+        return "claude", 2
+    if name == "codex":
+        if len(argv) > 1 and argv[1] in {"app-server", "exec", "mcp-server"}:
+            return None
+        return "codex", 2
+    if name in {"node", "nodejs"} and len(argv) > 1:
+        wrapped = Path(argv[1]).name
+        if wrapped == "claude":
+            return "claude", 1
+        if wrapped == "codex":
+            return "codex", 1
+    return None
+
+
+def find_agent_process(pane: Pane) -> AgentProcess | None:
+    parents, arguments = process_table()
+    depths = process_depths(pane.pid, parents)
+    candidates: list[tuple[int, int, int, str, tuple[str, ...]]] = []
+    for pid, depth in depths.items():
+        argv = arguments.get(pid, ())
+        detected = process_agent(argv)
+        if detected is None:
+            continue
+        agent, confidence = detected
+        candidates.append((-confidence, depth, pid, agent, argv))
+    if not candidates:
+        return None
+    candidates.sort()
+    _, _, pid, agent, argv = candidates[0]
+    return AgentProcess(agent=agent, pid=pid, argv=argv)
+
+
+def session_id_from_argv(process: AgentProcess) -> str | None:
+    argv = process.argv
+    for index, argument in enumerate(argv):
+        if argument in {"--resume", "-r", "--session-id"} and index + 1 < len(argv):
+            session_id = valid_session_id(argv[index + 1])
+            if session_id:
+                return session_id
+        if argument.startswith("--resume=") or argument.startswith("--session-id="):
+            session_id = valid_session_id(argument.split("=", 1)[1])
+            if session_id:
+                return session_id
+    if process.agent == "codex" and "resume" in argv:
+        resume_index = argv.index("resume")
+        for argument in argv[resume_index + 1 :]:
+            session_id = valid_session_id(argument)
+            if session_id:
+                return session_id
+    return None
+
+
+def remote_address(process: AgentProcess) -> str | None:
+    if process.agent != "codex":
+        return None
+    for index, argument in enumerate(process.argv):
+        if argument == "--remote" and index + 1 < len(process.argv):
+            return process.argv[index + 1]
+        if argument.startswith("--remote="):
+            return argument.split("=", 1)[1]
+    return None
+
+
+def valid_remote_address(value: object) -> str | None:
+    if isinstance(value, str) and value.startswith(("unix://", "ws://", "wss://")):
+        return value
+    return None
+
+
+def claude_process_state(process: AgentProcess) -> tuple[str, str] | None:
+    path = claude_home() / "sessions" / f"{process.pid}.json"
+    try:
+        value = load_json(path)
+    except (OSError, ValueError, TypeError):
+        return None
+    if value.get("pid") != process.pid:
+        return None
+    session_id = valid_session_id(value.get("sessionId"))
+    cwd = value.get("cwd")
+    if session_id and isinstance(cwd, str):
+        return session_id, cwd
+    return None
+
+
+def codex_open_session(process: AgentProcess, pane: Pane) -> tuple[str, str] | None:
+    fd_dir = proc_root() / str(process.pid) / "fd"
+    candidates: list[tuple[int, bool, str, str]] = []
+    try:
+        descriptors: Iterable[Path] = fd_dir.iterdir()
+    except OSError:
+        return None
+    seen: set[Path] = set()
+    for descriptor in descriptors:
+        try:
+            target = Path(os.readlink(descriptor))
+        except OSError:
+            continue
+        if target in seen or target.suffix != ".jsonl":
+            continue
+        seen.add(target)
+        try:
+            target.relative_to(codex_home() / "sessions")
+            with target.open(encoding="utf-8") as handle:
+                metadata = json.loads(handle.readline())
+            payload = metadata.get("payload", {})
+            session_id = valid_session_id(payload.get("id"))
+            cwd = payload.get("cwd")
+            source = payload.get("source")
+            originator = payload.get("originator")
+            if not session_id or not isinstance(cwd, str):
+                continue
+            top_level = source == "cli" or originator == "codex-tui"
+            if not top_level:
+                continue
+            candidates.append(
+                (target.stat().st_mtime_ns, cwd == pane.cwd, session_id, cwd)
+            )
+        except (OSError, ValueError, TypeError, json.JSONDecodeError):
+            continue
+    if not candidates:
+        return None
+    matching_cwd = [candidate for candidate in candidates if candidate[1]]
+    pool = matching_cwd or candidates
+    pool.sort(reverse=True)
+    _, _, session_id, cwd = pool[0]
+    return session_id, cwd
+
+
+def active_record_path(pane_id: str) -> Path:
+    safe_id = pane_id.removeprefix("%")
+    return state_dir() / "active" / f"pane-{safe_id}.json"
+
+
+def active_record(pane: Pane, agent: str) -> dict[str, Any] | None:
+    try:
+        value = load_json(active_record_path(pane.pane_id))
+    except (OSError, ValueError, TypeError):
+        return None
+    if (
+        value.get("version") != STATE_VERSION
+        or value.get("agent") != agent
+        or value.get("pane_id") != pane.pane_id
+        or value.get("pane_pid") != pane.pid
+        or not valid_session_id(value.get("session_id"))
+        or not isinstance(value.get("cwd"), str)
+    ):
+        return None
+    return value
+
+
+def resolve_pane(pane: Pane, process: AgentProcess) -> Resolution:
+    remote = remote_address(process)
+    record = active_record(pane, process.agent)
+    if record:
+        event = record.get("event")
+        method = "manual" if event == "ManualRegister" else "hook"
+        if event == "Restore":
+            method = "restore"
+        return Resolution(
+            pane, process, record["session_id"], record["cwd"], method, remote
+        )
+    session_id = session_id_from_argv(process)
+    if session_id:
+        return Resolution(pane, process, session_id, pane.cwd, "command-line", remote)
+    if process.agent == "claude":
+        recovered = claude_process_state(process)
+        if recovered:
+            session_id, cwd = recovered
+            return Resolution(
+                pane, process, session_id, cwd, "claude-process-state", remote
+            )
+    if process.agent == "codex":
+        recovered = codex_open_session(process, pane)
+        if recovered:
+            session_id, cwd = recovered
+            return Resolution(
+                pane, process, session_id, cwd, "codex-open-session", remote
+            )
+    return Resolution(pane, process, None, pane.cwd, "unresolved", remote)
+
+
+def active_resolutions() -> list[Resolution]:
+    resolutions: list[Resolution] = []
+    for pane in list_panes():
+        process = find_agent_process(pane)
+        if process:
+            resolutions.append(resolve_pane(pane, process))
+    return resolutions
+
+
+def tmux_metadata(pane_id: str) -> Pane | None:
+    try:
+        return pane_by_id(pane_id)
+    except AgentSessionsError:
+        return None
+
+
+def record_hook(agent: str) -> int:
+    try:
+        payload = json.load(sys.stdin)
+    except (ValueError, TypeError):
+        return 0
+    pane_id = os.environ.get("TMUX_PANE")
+    session_id = valid_session_id(payload.get("session_id"))
+    cwd = payload.get("cwd")
+    if not pane_id or not session_id or not isinstance(cwd, str):
+        return 0
+    pane = tmux_metadata(pane_id)
+    if pane is None:
+        return 0
+    path = active_record_path(pane_id)
+    event = payload.get("hook_event_name")
+    if event == "SessionEnd":
+        try:
+            previous = load_json(path)
+        except (OSError, ValueError, TypeError):
+            previous = None
+        if previous and previous.get("session_id") != session_id:
+            return 0
+    value = {
+        "agent": agent,
+        "captured_at": utc_now(),
+        "cwd": cwd,
+        "event": event,
+        "pane_id": pane.pane_id,
+        "pane_index": pane.pane_index,
+        "pane_pid": pane.pid,
+        "session_id": session_id,
+        "tmux_session": pane.session_name,
+        "version": STATE_VERSION,
+        "window_index": pane.window_index,
+    }
+    try:
+        atomic_json_write(path, value)
+    except OSError:
+        # A bookkeeping hook must never block or add context to an agent session.
+        return 0
+    return 0
+
+
+def handler_is_ours(handler: object, agent: str) -> bool:
+    if not isinstance(handler, dict):
+        return False
+    command = handler.get("command")
+    arguments = handler.get("args")
+    if isinstance(arguments, list) and arguments == ["hook", agent]:
+        return isinstance(command, str) and Path(command).name == "agent-sessions"
+    return (
+        isinstance(command, str)
+        and "agent-sessions" in command
+        and f"hook {agent}" in command
+    )
+
+
+def add_hook(
+    settings: dict[str, Any],
+    event: str,
+    matcher: str | None,
+    handler: dict[str, Any],
+    agent: str,
+) -> None:
+    hooks = settings.setdefault("hooks", {})
+    groups = hooks.setdefault(event, [])
+    for group in groups:
+        if isinstance(group, dict) and isinstance(group.get("hooks"), list):
+            group["hooks"] = [
+                item for item in group["hooks"] if not handler_is_ours(item, agent)
+            ]
+    groups[:] = [
+        group
+        for group in groups
+        if not (
+            isinstance(group, dict)
+            and isinstance(group.get("hooks"), list)
+            and not group["hooks"]
+        )
+    ]
+    target = next(
+        (
+            group
+            for group in groups
+            if isinstance(group, dict) and group.get("matcher") == matcher
+        ),
+        None,
+    )
+    if target is None:
+        target = {"hooks": []}
+        if matcher is not None:
+            target["matcher"] = matcher
+        groups.append(target)
+    target["hooks"].append(handler)
+
+
+def backup_and_write(path: Path, value: dict[str, Any]) -> Path | None:
+    previous: dict[str, Any] = {}
+    if path.exists():
+        try:
+            previous = load_json(path)
+        except (ValueError, TypeError) as error:
+            raise AgentSessionsError(
+                f"refusing to modify invalid JSON: {path}"
+            ) from error
+        if previous == value:
+            return None
+        stamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S.%f")
+        backup = path.with_name(f"{path.name}.bak-{stamp}")
+        shutil.copy2(path, backup)
+    else:
+        backup = None
+    atomic_json_write(path, value)
+    return backup
+
+
+def install_hooks() -> int:
+    executable = str(Path(__file__).resolve())
+    specifications = (
+        (
+            claude_home() / "settings.json",
+            "claude",
+            (
+                ("SessionStart", "startup|resume|clear|compact"),
+                ("SessionEnd", None),
+            ),
+            {
+                "args": ["hook", "claude"],
+                "command": executable,
+                "timeout": 5,
+                "type": "command",
+            },
+        ),
+        (
+            codex_home() / "hooks.json",
+            "codex",
+            (
+                ("SessionStart", "startup|resume|clear|compact"),
+                ("Stop", None),
+            ),
+            {
+                "command": f"{shlex.quote(executable)} hook codex",
+                "type": "command",
+            },
+        ),
+    )
+    for path, agent, events, handler in specifications:
+        if path.exists():
+            try:
+                settings = load_json(path)
+            except (OSError, ValueError, TypeError) as error:
+                raise AgentSessionsError(
+                    f"cannot read valid JSON from {path}"
+                ) from error
+            if not isinstance(settings, dict):
+                raise AgentSessionsError(f"expected a JSON object in {path}")
+        else:
+            settings = {}
+        for event, matcher in events:
+            add_hook(settings, event, matcher, dict(handler), agent)
+        backup = backup_and_write(path, settings)
+        if backup:
+            print(f"Updated {path} (backup: {backup})")
+        elif path.exists():
+            print(f"Configured {path}")
+    print("Review and trust the Codex hook with /hooks after restarting Codex.")
+    return 0
+
+
+def manual_register(arguments: argparse.Namespace) -> int:
+    session_id = valid_session_id(arguments.session_id)
+    if session_id is None:
+        raise AgentSessionsError("session ID must be a UUID")
+    pane = pane_by_id(arguments.pane)
+    if pane is None:
+        raise AgentSessionsError(f"tmux pane does not exist: {arguments.pane}")
+    value = {
+        "agent": arguments.agent,
+        "captured_at": utc_now(),
+        "cwd": arguments.cwd or pane.cwd,
+        "event": "ManualRegister",
+        "pane_id": pane.pane_id,
+        "pane_index": pane.pane_index,
+        "pane_pid": pane.pid,
+        "session_id": session_id,
+        "tmux_session": pane.session_name,
+        "version": STATE_VERSION,
+        "window_index": pane.window_index,
+    }
+    atomic_json_write(active_record_path(pane.pane_id), value)
+    print(f"Registered {arguments.agent} {session_id} for {pane.pane_id}")
+    return 0
+
+
+def record_restored_pane(
+    pane: Pane, agent: str, session_id: str, cwd: str, remote: str | None
+) -> None:
+    value = {
+        "agent": agent,
+        "captured_at": utc_now(),
+        "cwd": cwd,
+        "event": "Restore",
+        "pane_id": pane.pane_id,
+        "pane_index": pane.pane_index,
+        "pane_pid": pane.pid,
+        "session_id": session_id,
+        "tmux_session": pane.session_name,
+        "version": STATE_VERSION,
+        "window_index": pane.window_index,
+        **({"remote": remote} if remote else {}),
+    }
+    atomic_json_write(active_record_path(pane.pane_id), value)
+
+
+def print_status() -> int:
+    resolutions = active_resolutions()
+    if not resolutions:
+        print("No Codex or Claude processes found in tmux.")
+        return 0
+    print(f"{'PANE':<7} {'TARGET':<28} {'AGENT':<8} {'SESSION':<36} SOURCE")
+    for item in resolutions:
+        print(
+            f"{item.pane.pane_id:<7} {item.pane.coordinate:<28} "
+            f"{item.process.agent:<8} {item.session_id or '-':<36} {item.method}"
+        )
+    unresolved = sum(item.session_id is None for item in resolutions)
+    return 2 if unresolved else 0
+
+
+def snapshot_value(resolutions: list[Resolution]) -> dict[str, Any]:
+    return {
+        "captured_at": utc_now(),
+        "panes": [
+            {
+                "agent": item.process.agent,
+                "cwd": item.cwd,
+                "pane_index": item.pane.pane_index,
+                "session_id": item.session_id,
+                "tmux_session": item.pane.session_name,
+                "window_index": item.pane.window_index,
+                **({"remote": item.remote} if item.remote else {}),
+            }
+            for item in resolutions
+        ],
+        "version": STATE_VERSION,
+    }
+
+
+def write_snapshot(resolutions: list[Resolution]) -> Path:
+    snapshots = state_dir() / "snapshots"
+    ensure_private_dir(snapshots)
+    stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
+    path = snapshots / f"checkpoint-{stamp}.json"
+    value = snapshot_value(resolutions)
+    atomic_json_write(path, value)
+    atomic_json_write(state_dir() / "latest.json", value)
+    return path
+
+
+def resurrect_save_path() -> Path:
+    override = os.environ.get("AGENT_SESSIONS_RESURRECT_SAVE")
+    if override:
+        return Path(override).expanduser()
+    return Path.home() / ".tmux/plugins/tmux-resurrect/scripts/save.sh"
+
+
+def save_tmux_layout() -> None:
+    script = resurrect_save_path()
+    if not os.access(script, os.X_OK):
+        raise AgentSessionsError(
+            f"tmux-resurrect save script is missing: {script}; run make tmux-plugins"
+        )
+    result = subprocess.run(
+        [str(script)], text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+    )
+    if result.returncode != 0:
+        detail = result.stderr.strip() or result.stdout.strip() or "unknown error"
+        raise AgentSessionsError(f"tmux-resurrect save failed: {detail}")
+
+
+def secure_resurrect_state(path_argument: str) -> int:
+    path = Path(path_argument).expanduser().resolve()
+    if not path.name.startswith("tmux_resurrect_") or path.suffix != ".txt":
+        raise AgentSessionsError(f"not a tmux-resurrect state file: {path}")
+    try:
+        stat_result = path.stat()
+    except FileNotFoundError as error:
+        raise AgentSessionsError(
+            f"tmux-resurrect state file does not exist: {path}"
+        ) from error
+    if stat_result.st_uid != os.getuid():
+        raise AgentSessionsError(
+            f"tmux-resurrect state file is not owned by this user: {path}"
+        )
+    directory = path.parent
+    directory.chmod(0o700)
+    for candidate in directory.glob("tmux_resurrect_*.txt"):
+        if candidate.is_file() and candidate.stat().st_uid == os.getuid():
+            candidate.chmod(0o600)
+    return 0
+
+
+def confirm(prompt: str, assume_yes: bool) -> None:
+    if assume_yes:
+        return
+    if not sys.stdin.isatty():
+        raise AgentSessionsError("confirmation requires a terminal; pass --yes")
+    reply = input(f"{prompt} [y/N] ").strip().lower()
+    if reply not in {"y", "yes"}:
+        raise AgentSessionsError("cancelled")
+
+
+def unresolved_instructions(resolutions: list[Resolution]) -> None:
+    print(
+        "Checkpoint refused: these panes have no validated session ID:", file=sys.stderr
+    )
+    for item in resolutions:
+        if item.session_id is not None:
+            continue
+        print(
+            f"  {item.pane.pane_id} {item.process.agent} at {item.pane.coordinate}",
+            file=sys.stderr,
+        )
+        print(
+            "    agent-sessions register "
+            f"--pane {shlex.quote(item.pane.pane_id)} --agent {item.process.agent} "
+            "--session-id <UUID>",
+            file=sys.stderr,
+        )
+
+
+def wait_for_agent_exit(pane_ids: set[str], deadline: float) -> set[str]:
+    remaining = set(pane_ids)
+    while remaining and time.monotonic() < deadline:
+        time.sleep(0.25)
+        try:
+            panes = {pane.pane_id: pane for pane in list_panes()}
+        except AgentSessionsError:
+            return set()
+        for pane_id in list(remaining):
+            pane = panes.get(pane_id)
+            if pane is None or find_agent_process(pane) is None:
+                remaining.remove(pane_id)
+    return remaining
+
+
+def send_agent_exit(pane_ids: set[str]) -> None:
+    try:
+        panes = {pane.pane_id: pane for pane in list_panes()}
+    except AgentSessionsError:
+        return
+    for pane_id in pane_ids:
+        pane = panes.get(pane_id)
+        if pane is None or find_agent_process(pane) is None:
+            continue
+        # Send the command and Enter in one tmux operation. Rechecking the
+        # foreground process avoids typing /exit into a shell when Ctrl-C has
+        # already closed the agent.
+        run_tmux("send-keys", "-t", pane_id, "/exit", "Enter", check=False)
+
+
+def stop_agents(resolutions: list[Resolution], timeout: float) -> list[str]:
+    remaining = {item.pane.pane_id for item in resolutions}
+    for pane_id in remaining:
+        run_tmux("send-keys", "-t", pane_id, "C-c", check=False)
+
+    started = time.monotonic()
+    deadline = started + timeout
+    first_grace = min(deadline, started + min(1.0, timeout / 3))
+    remaining = wait_for_agent_exit(remaining, first_grace)
+    if not remaining:
+        return []
+
+    send_agent_exit(remaining)
+    retry_at = min(deadline, started + timeout * 0.6)
+    remaining = wait_for_agent_exit(remaining, retry_at)
+    if not remaining:
+        return []
+
+    # A busy Claude session can take several seconds to unwind tools or
+    # subagents. Interrupt once more, then retry /exit without using signals or
+    # force-killing the process.
+    for pane_id in remaining:
+        run_tmux("send-keys", "-t", pane_id, "C-c", check=False)
+    second_grace = min(deadline, time.monotonic() + min(1.0, timeout / 5))
+    remaining = wait_for_agent_exit(remaining, second_grace)
+    if remaining:
+        send_agent_exit(remaining)
+        remaining = wait_for_agent_exit(remaining, deadline)
+    return sorted(remaining)
+
+
+def checkpoint(arguments: argparse.Namespace) -> int:
+    resolutions = active_resolutions()
+    if not resolutions:
+        raise AgentSessionsError("no Codex or Claude processes found in tmux")
+    if any(item.session_id is None for item in resolutions):
+        unresolved_instructions(resolutions)
+        return 2
+    if arguments.keep_running:
+        prompt = f"Save {len(resolutions)} agent sessions and the tmux layout?"
+    else:
+        prompt = (
+            f"Save {len(resolutions)} agent sessions and interrupt them before exiting?"
+        )
+    confirm(prompt, arguments.yes)
+    # Save while panes still exist. zsh may have exec'd the agent, in which case
+    # the pane closes as soon as the agent exits. Write our manifest only after
+    # Resurrect succeeds, so latest.json never points at an incomplete pair.
+    save_tmux_layout()
+    snapshot = write_snapshot(resolutions)
+    print(f"Saved checkpoint: {snapshot}")
+    if arguments.keep_running:
+        return 0
+    remaining = stop_agents(resolutions, arguments.timeout)
+    if remaining:
+        print(
+            "Saved the checkpoint, but these panes did not exit gracefully: "
+            + ", ".join(remaining),
+            file=sys.stderr,
+        )
+        print("No process was force-killed.", file=sys.stderr)
+        return 1
+    if any(managed_daemon_remote(item.remote) for item in resolutions):
+        manage_codex_daemon("stop")
+        print("Stopped the managed Codex app-server daemon.")
+    print("All recorded agents exited gracefully.")
+    return 0
+
+
+def load_snapshot(path_argument: str | None) -> tuple[Path, dict[str, Any]]:
+    path = (
+        Path(path_argument).expanduser()
+        if path_argument
+        else state_dir() / "latest.json"
+    )
+    try:
+        value = load_json(path)
+    except FileNotFoundError as error:
+        raise AgentSessionsError(f"checkpoint does not exist: {path}") from error
+    except (OSError, ValueError, TypeError) as error:
+        raise AgentSessionsError(f"cannot read checkpoint: {path}") from error
+    if value.get("version") != STATE_VERSION or not isinstance(
+        value.get("panes"), list
+    ):
+        raise AgentSessionsError(f"unsupported checkpoint format: {path}")
+    return path, value
+
+
+def resume_argv(agent: str, session_id: str, remote: str | None = None) -> list[str]:
+    if agent == "claude":
+        return ["claude", "--resume", session_id]
+    if agent == "codex":
+        if remote:
+            return ["codex", "resume", "--remote", remote, session_id]
+        return ["codex", "resume", session_id]
+    raise AgentSessionsError(f"unsupported agent in checkpoint: {agent}")
+
+
+def managed_daemon_remote(remote: str | None) -> bool:
+    control_socket = codex_home() / "app-server-control" / "app-server-control.sock"
+    return remote == f"unix://{control_socket}"
+
+
+def agent_runner() -> Path:
+    return Path(__file__).resolve().with_name("agent-run")
+
+
+def scoped_agent_argv(argv: list[str]) -> list[str]:
+    return [str(agent_runner()), *argv]
+
+
+def manage_codex_daemon(command: str) -> None:
+    argv = ["codex", "app-server", "daemon", command]
+    if command == "start":
+        argv = scoped_agent_argv(argv)
+    try:
+        result = subprocess.run(
+            argv,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+    except FileNotFoundError as error:
+        missing = "agent launcher" if command == "start" else "codex"
+        raise AgentSessionsError(f"{missing} is not installed") from error
+    if result.returncode != 0:
+        detail = result.stderr.strip() or result.stdout.strip() or "unknown error"
+        raise AgentSessionsError(
+            f"managed Codex app-server failed to {command}: {detail}"
+        )
+
+
+def restore(arguments: argparse.Namespace) -> int:
+    path, value = load_snapshot(arguments.snapshot)
+    records: list[dict[str, Any]] = value["panes"]
+    commands: list[tuple[Pane, str, str, str, str, str | None, bool]] = []
+    panes = list_panes()
+    by_coordinate = {pane.coordinate: pane for pane in panes}
+    failures: list[str] = []
+    start_codex_daemon = False
+    print(f"Checkpoint: {path} ({value.get('captured_at', 'unknown time')})")
+    for index, record in enumerate(records):
+        if not isinstance(record, dict):
+            failures.append(f"invalid record at index {index}")
+            continue
+        coordinate = (
+            f"{record.get('tmux_session')}:{record.get('window_index')}."
+            f"{record.get('pane_index')}"
+        )
+        session_id = valid_session_id(record.get("session_id"))
+        cwd = record.get("cwd")
+        agent = record.get("agent")
+        raw_remote = record.get("remote")
+        remote = valid_remote_address(raw_remote) if raw_remote is not None else None
+        if (
+            session_id is None
+            or not isinstance(cwd, str)
+            or agent not in {"claude", "codex"}
+        ):
+            failures.append(f"invalid record for {coordinate}")
+            continue
+        if raw_remote is not None and (agent != "codex" or remote is None):
+            failures.append(f"invalid remote address for {coordinate}")
+            continue
+        argv = scoped_agent_argv(resume_argv(agent, session_id, remote))
+        start_codex_daemon = start_codex_daemon or managed_daemon_remote(remote)
+        shell_command = f"cd -- {shlex.quote(cwd)} && exec {shlex.join(argv)}"
+        pane = by_coordinate.get(coordinate)
+        marker = pane.pane_id if pane else "missing"
+        print(f"  {coordinate:<28} {marker:<8} {shell_command}")
+        if pane is None:
+            failures.append(
+                f"missing pane {coordinate}; restore tmux with prefix + Ctrl-r first"
+            )
+            continue
+        current_pane = os.environ.get("TMUX_PANE")
+        self_target = (
+            arguments.run
+            and pane.pane_id == current_pane
+            and pane.command in {"python", "python3"}
+        )
+        if arguments.run and pane.command not in SHELL_COMMANDS and not self_target:
+            failures.append(
+                f"pane {coordinate} is running {pane.command}; refusing to replace it"
+            )
+            continue
+        commands.append(
+            (pane, shell_command, agent, session_id, cwd, remote, self_target)
+        )
+    if failures:
+        for failure in failures:
+            print(f"ERROR: {failure}", file=sys.stderr)
+        return 2
+    if not arguments.run:
+        print("Run `agent-sessions restore --run` to launch these commands.")
+        return 0
+    confirm(f"Resume {len(commands)} agents in the listed panes?", arguments.yes)
+    if start_codex_daemon:
+        manage_codex_daemon("start")
+        print("Started the managed Codex app-server daemon.")
+    for pane, _, agent, session_id, cwd, remote, _ in commands:
+        record_restored_pane(pane, agent, session_id, cwd, remote)
+    self_commands: list[tuple[Pane, str]] = []
+    for pane, command, _, _, _, _, self_target in commands:
+        if self_target:
+            self_commands.append((pane, command))
+            continue
+        run_tmux("send-keys", "-t", pane.pane_id, "-l", command)
+        run_tmux("send-keys", "-t", pane.pane_id, "Enter")
+    print(f"Started {len(commands)} agent sessions.")
+    # Queue the current pane last. Python performs no more reads, so the shell
+    # receives this command as soon as agent-sessions exits.
+    for pane, command in self_commands:
+        run_tmux("send-keys", "-t", pane.pane_id, "-l", command)
+        run_tmux("send-keys", "-t", pane.pane_id, "Enter")
+    return 0
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description="Checkpoint and resume Codex and Claude sessions in tmux."
+    )
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    hook_parser = subparsers.add_parser("hook", help="internal lifecycle hook")
+    hook_parser.add_argument("agent", choices=("claude", "codex"))
+
+    subparsers.add_parser("install-hooks", help="install additive user hooks")
+    subparsers.add_parser("status", help="show active agent-to-session mappings")
+
+    secure_parser = subparsers.add_parser(
+        "secure-resurrect", help="secure tmux-resurrect state after save"
+    )
+    secure_parser.add_argument("path")
+
+    register_parser = subparsers.add_parser(
+        "register", help="manually associate an unresolved pane with a session"
+    )
+    register_parser.add_argument("--pane", required=True)
+    register_parser.add_argument("--agent", required=True, choices=("claude", "codex"))
+    register_parser.add_argument("--session-id", required=True)
+    register_parser.add_argument("--cwd")
+
+    checkpoint_parser = subparsers.add_parser(
+        "checkpoint", help="save tmux and gracefully exit all recorded agents"
+    )
+    checkpoint_parser.add_argument(
+        "--keep-running", action="store_true", help="save without exiting agents"
+    )
+    checkpoint_parser.add_argument(
+        "--timeout", type=float, default=30.0, help="seconds to wait for graceful exit"
+    )
+    checkpoint_parser.add_argument(
+        "--yes", action="store_true", help="skip confirmation"
+    )
+
+    restore_parser = subparsers.add_parser(
+        "restore", help="show or launch resume commands after tmux restore"
+    )
+    restore_parser.add_argument(
+        "--snapshot", help="checkpoint JSON; defaults to latest"
+    )
+    restore_parser.add_argument(
+        "--run",
+        action="store_true",
+        help="launch agents after validation and confirmation",
+    )
+    restore_parser.add_argument("--yes", action="store_true", help="skip confirmation")
+    return parser
+
+
+def main() -> int:
+    arguments = build_parser().parse_args()
+    try:
+        if arguments.command == "hook":
+            return record_hook(arguments.agent)
+        if arguments.command == "install-hooks":
+            return install_hooks()
+        if arguments.command == "status":
+            return print_status()
+        if arguments.command == "secure-resurrect":
+            return secure_resurrect_state(arguments.path)
+        if arguments.command == "register":
+            return manual_register(arguments)
+        if arguments.command == "checkpoint":
+            if arguments.timeout <= 0:
+                raise AgentSessionsError("timeout must be greater than zero")
+            return checkpoint(arguments)
+        if arguments.command == "restore":
+            return restore(arguments)
+    except AgentSessionsError as error:
+        print(f"ERROR: {error}", file=sys.stderr)
+        return 2
+    raise AssertionError(f"unhandled command: {arguments.command}")
+
+
+if __name__ == "__main__":
+    sys.exit(main())

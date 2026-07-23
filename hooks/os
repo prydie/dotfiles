@@ -1013,6 +1013,9 @@ os::ubuntu::install_packages_dev() {
     vscode-langservers-extracted \
     yaml-language-server
   tools::install_codex_superpowers_optional
+  if ! python3 "${_ROOT}/bin/agent-sessions" install-hooks; then
+    log::e "Agent session hooks were not installed; rerun make agent-session-hooks"
+  fi
   tools::verify_dev_cli
 }
 

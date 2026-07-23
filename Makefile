@@ -39,6 +39,10 @@ codex-superpowers: ## Install/enable the Codex Superpowers plugin
 tmux-plugins: ## Install tmux TPM plugins
 	@bash hooks/os tmux-plugins
 
+.PHONY: agent-session-hooks
+agent-session-hooks: ## Register Codex and Claude session checkpoint hooks
+	@python3 bin/agent-sessions install-hooks
+
 .PHONY: ai-skills
 ai-skills: ## Install the mattpocock/skills pilot subset for Claude Code and Codex
 	@bash hooks/os ai-skills

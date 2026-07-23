@@ -103,6 +103,24 @@ setopt share_history
 
 [[ -f ~/.aliases ]] && . ~/.aliases
 
+# Put local agent processes and their build/test children under one aggregate
+# CPU limit. The external launcher prevents these functions from recursing.
+agent::run() {
+  "$HOME/bin/agent-run" "$@"
+}
+
+codex() {
+  agent::run codex "$@"
+}
+
+claude() {
+  agent::run claude "$@"
+}
+
+gemini() {
+  agent::run gemini "$@"
+}
+
 
 # Completions
 #############
