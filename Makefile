@@ -39,6 +39,10 @@ codex-superpowers: ## Install/enable the Codex Superpowers plugin
 tmux-plugins: ## Install tmux TPM plugins
 	@bash hooks/os tmux-plugins
 
+.PHONY: ai-skills
+ai-skills: ## Install the mattpocock/skills pilot subset for Claude Code and Codex
+	@bash hooks/os ai-skills
+
 .PHONY: tla-tools
 tla-tools: ## Install and verify TLA+ validation/proof tooling
 	@bash hooks/os tla-tools

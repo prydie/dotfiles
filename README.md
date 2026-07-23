@@ -95,6 +95,41 @@ tracked by this public repo. Superpowers scratch state under `.superpowers/` is
 also ignored; deliberate specs/plans under `docs/superpowers/` remain visible to
 Git review.
 
+## Agent skills (mattpocock/skills pilot)
+
+A conservative pilot subset of [`mattpocock/skills`](https://github.com/mattpocock/skills)
+is installed globally for both Claude Code and Codex via the
+[skills.sh](https://skills.sh/) installer:
+
+```bash
+make ai-skills
+```
+
+The pilot deliberately excludes the skills that require Matt's
+`/setup-matt-pocock-skills` workflow (issue tracker, triage labels, doc layout) —
+`ask-matt`, `code-review`, `to-spec`, `to-tickets`, `triage`, `wayfinder`,
+`implement`, and `improve-codebase-architecture`. Every skill in the pilot is
+self-contained and low blast radius. The subset is the single source of truth in
+the `AI_SKILLS` array in [hooks/os](hooks/os):
+
+- `grill-me`, `grilling`, `grill-with-docs` — relentless alignment interviews;
+  `grill-with-docs` also uses `domain-modeling` to build ADRs and a glossary.
+- `domain-modeling` — maintain a project's `CONTEXT.md` and ADRs.
+- `diagnosing-bugs` — structured reproduce → minimise → hypothesise → fix loop.
+- `resolving-merge-conflicts` — resolve in-progress conflicts by intent.
+- `codebase-design` — deep-module design vocabulary (advisory).
+- `writing-great-skills` — reference for authoring skills.
+- `prototype`, `handoff`, `tdd`, `research` — design spikes, conversation
+  handoff, red-green-refactor, and cited investigation.
+
+`skills.sh` installs the skills into the shared `~/.agents/skills` store and
+symlinks them into `~/.claude/skills` for Claude Code. It marks Codex a
+"universal" agent and does not populate `~/.codex/skills`, but `codex-cli`
+discovers global skills under `${CODEX_HOME:-~/.codex}/skills`, so `make ai-skills`
+also symlinks each skill there. The installed skills live outside this repo and
+are not tracked; the install is not version-pinned by design — refresh with
+`skills update -g`, and remove with `skills remove -g -a claude-code codex -s <name>`.
+
 ## Neovim Go workflow
 
 Go formatting is handled by Conform (`goimports`, then `gofumpt`). Live Go
