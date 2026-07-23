@@ -65,9 +65,6 @@ make restic-backup-now
 make restic-systemd-enable
 make patching
 make patching-full
-nks-dev doctor
-nks-dev kind-create
-nks-dev tunnel
 ```
 
 ## Codex instructions
@@ -399,8 +396,7 @@ Personal, machine-local tools (e.g. tools you only want on a personal laptop) go
 an untracked `~/.config/mise/config.local.toml`, which mise loads automatically.
 
 `kind` is the default local Kubernetes cluster tool for controller-manager
-development. It is installed by the `dev` and `full` profiles through mise and
-is managed by `nks-dev` for NKS-specific local clusters.
+development. It is installed by the `dev` and `full` profiles through mise.
 
 `tuicr` is installed by the `dev` and `full` profiles through mise for local
 PR-style review of worktree changes before folding them into the main checkout.
@@ -456,61 +452,6 @@ Installed local Codex skills from Specula support the agent workflow after resta
 - `$tla-checking-workflow`
 - `$tla-trace-workflow`
 - `$tla-verification-workflow`
-
-## NKS local development
-
-`nks-dev` manages the generic local NKS development loop without committing
-work-specific values to this public repo. It reads private settings from
-`~/.config/nks-dev/env`; a placeholder template lives at
-[config/nks-dev/env.example](config/nks-dev/env.example).
-
-Bootstrap a private config:
-
-```bash
-mkdir -p ~/.config/nks-dev
-nks-dev config-template > ~/.config/nks-dev/env
-chmod 0600 ~/.config/nks-dev/env
-$EDITOR ~/.config/nks-dev/env
-```
-
-Check the workstation and create a local management cluster:
-
-```bash
-nks-dev doctor
-nks-dev kind-create
-kubectl --context kind-nks-dev get nodes
-```
-
-The default cluster is one control-plane node plus two workers using a
-digest-pinned `kindest/node` image and a local registry on `localhost:5001`.
-Override those values in `~/.config/nks-dev/env`, not in this repo.
-
-For dev OpenStack instances that need to reach a local service, configure the
-reverse SSH tunnel variables in `~/.config/nks-dev/env`, then run:
-
-```bash
-nks-dev tunnel-command
-nks-dev tunnel
-```
-
-On a replacement laptop, run the normal setup profile, restore
-`~/.config/nks-dev/env` and any credentials from the private source of truth,
-then recreate the cluster with `nks-dev kind-create`.
-
-## UNI helpers
-
-`uni-openstack` runs the OpenStack CLI against the UNI dev cloud, resolving the username and password from the `op://Employee/unikorn-dev-openstack` item at runtime. The OpenStack project and domain names default to the same `username` field; override the usual `OS_*` variables if they need to differ. Install `1password-cli` from the official apt package rather than mise so Linux desktop app integration can trust the `op` binary.
-
-```bash
-uni-openstack server list
-uni-openstack loadbalancer list
-```
-
-`uni-clone-projects` clones `nscaledev` repositories tagged with `unikorn` using SSH URLs:
-
-```bash
-uni-clone-projects ~/src/nscaledev
-```
 
 ## Desk light helper (Home Assistant + tray icon)
 
