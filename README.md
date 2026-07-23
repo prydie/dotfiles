@@ -206,6 +206,7 @@ mode in their OSD menus.
 
 - On every profile (including `link`), installs Ghostty's `xterm-ghostty` terminfo into `~/.terminfo` from [config/ghostty/xterm-ghostty.terminfo](config/ghostty/xterm-ghostty.terminfo), so SSHing into the host from a Ghostty terminal does not break `tmux`/`vim` with "missing or unsuitable terminal: xterm-ghostty". Run standalone with `make ghostty-terminfo`.
 - `PROFILE=core|dev|full` installs Ghostty from apt when available, falling back to Snap only when apt has no candidate. Run standalone with `make ghostty`.
+- `PROFILE=core|dev|full` installs the Bruno desktop app from its official apt repository and the `bru` CLI through mise. Run standalone with `make bruno`.
 - Python tooling via `uv`.
 - Node tooling via `nvm`.
 - `PROFILE=core|dev|full` bootstraps zplug plugins and installs missing TPM plugins. Run standalone with `make tmux-plugins`.
@@ -225,6 +226,22 @@ mode in their OSD menus.
 - `full`: `dev` + heavier extras such as `nerdctl`, `regctl`, `vegeta`, `oci-cli`, `autopep8`, and YubiKey tooling from [hooks/os](hooks/os).
 
 Use OpenTofu (`tofu`) instead of Terraform.
+
+### Bruno
+
+Bruno stores API collections as files, so agents can inspect, edit, and run
+them without desktop automation. From a collection directory:
+
+```bash
+bru run
+bru run --env local --reporter-json /tmp/bruno-results.json
+```
+
+New shells expose `bru` directly. An agent process that predates installation
+can bypass its stale `PATH` with `mise exec -- bru run`.
+
+The CLI defaults to its safe script sandbox. Pass `--sandbox=developer` only
+when a trusted collection needs filesystem access or external npm packages.
 
 ### Examples
 

@@ -241,6 +241,47 @@ tools::install_ghostty() {
   return 1
 }
 
+tools::install_bruno() {
+  local arch config_file
+
+  if command -v apt-get >/dev/null 2>&1 && command -v dpkg >/dev/null 2>&1; then
+    arch="$(dpkg --print-architecture)"
+    if [ "${arch}" != "amd64" ]; then
+      log::e "Bruno's official apt repository supports amd64 only (host: ${arch})"
+      return 1
+    fi
+
+    os::ubuntu::ensure_bootstrap_tools
+    os::ubuntu::ensure_bruno_repo
+    if command -v bruno >/dev/null 2>&1; then
+      log::f "Bruno already installed"
+    else
+      sudo apt update
+      log::f "Installing Bruno desktop app from its official apt repository"
+      if ! sudo apt install -y --no-install-recommends bruno; then
+        log::e "Bruno desktop app installation failed"
+        return 1
+      fi
+    fi
+  elif command -v bruno >/dev/null 2>&1; then
+    log::f "Bruno already installed"
+  else
+    log::e "Bruno desktop installation requires apt on an amd64 Debian/Ubuntu host"
+    return 1
+  fi
+
+  config_file="$(tools::mise_global_config)"
+  tools::install_mise
+  MISE_GLOBAL_CONFIG_FILE="${config_file}" mise install npm:@usebruno/cli
+
+  if ! command -v bru >/dev/null 2>&1; then
+    log::e "Bruno CLI installation completed but bru is not on PATH"
+    return 1
+  fi
+
+  log::f "Bruno CLI installed: $(bru --version 2>/dev/null | head -n1)"
+}
+
 docker::ensure_compose() {
   if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
     return 0
@@ -482,6 +523,50 @@ os::ubuntu::ensure_cloudflared_repo() {
   desired_line="deb [arch=amd64 signed-by=${keyring}] https://pkg.cloudflare.com/cloudflared any main"
 
   curl -fsSL https://pkg.cloudflare.com/cloudflare-main.gpg | sudo tee "${keyring}" >/dev/null
+
+  if [ ! -f "${listfile}" ] || ! grep -Fxq "${desired_line}" "${listfile}" 2>/dev/null; then
+    echo "${desired_line}" | sudo tee "${listfile}" >/dev/null
+  fi
+}
+
+os::ubuntu::ensure_bruno_repo() {
+  local expected_fingerprint fingerprint keyring key_url listfile desired_line tmpdir armored_key binary_key
+  expected_fingerprint="E598552E09C999055FEFA7159FA6017ECABE0266"
+  keyring="/etc/apt/keyrings/bruno.gpg"
+  key_url="https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x9FA6017ECABE0266"
+  listfile="/etc/apt/sources.list.d/bruno.list"
+  desired_line="deb [arch=amd64 signed-by=${keyring}] http://debian.usebruno.com/ bruno stable"
+
+  sudo install -m 0755 -d /etc/apt/keyrings
+
+  fingerprint="$(gpg --batch --show-keys --with-colons "${keyring}" 2>/dev/null | awk -F: '$1 == "fpr" {print $10; exit}')"
+  if [ "${fingerprint}" != "${expected_fingerprint}" ]; then
+    tmpdir="$(mktemp -d)"
+    armored_key="${tmpdir}/bruno.asc"
+    binary_key="${tmpdir}/bruno.gpg"
+
+    if ! curl -fsSL "${key_url}" -o "${armored_key}"; then
+      rm -rf "${tmpdir}"
+      log::e "Failed to download Bruno apt signing key"
+      return 1
+    fi
+
+    fingerprint="$(gpg --batch --show-keys --with-colons "${armored_key}" 2>/dev/null | awk -F: '$1 == "fpr" {print $10; exit}')"
+    if [ "${fingerprint}" != "${expected_fingerprint}" ]; then
+      rm -rf "${tmpdir}"
+      log::e "Bruno apt signing key fingerprint mismatch: ${fingerprint:-missing}"
+      return 1
+    fi
+
+    if ! gpg --batch --yes --dearmor -o "${binary_key}" "${armored_key}"; then
+      rm -rf "${tmpdir}"
+      log::e "Failed to prepare Bruno apt signing key"
+      return 1
+    fi
+
+    sudo install -m 0644 "${binary_key}" "${keyring}"
+    rm -rf "${tmpdir}"
+  fi
 
   if [ ! -f "${listfile}" ] || ! grep -Fxq "${desired_line}" "${listfile}" 2>/dev/null; then
     echo "${desired_line}" | sudo tee "${listfile}" >/dev/null
@@ -848,6 +933,7 @@ os::ubuntu::install_packages_core() {
   uv::ensure_installed
   tools::install_mise
   tools::install_mise_tools
+  tools::install_bruno
   kube::binaries
   tools::sync_vale_styles
   fonts::install_nerd_font
@@ -1592,6 +1678,7 @@ tools::verify_dev_cli() {
   tools::verify_one "kind" "kind" "kind version"
   tools::verify_one "promtool" "promtool" "promtool --version"
   tools::verify_one "tsh" "tsh" "tsh version"
+  tools::verify_one "Bruno CLI" "bru" "bru --version"
   tools::verify_one "Vale" "vale" "vale --version"
   tools::verify_tla_tools
 }
@@ -1690,6 +1777,9 @@ if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
     ghostty)
       tools::install_ghostty
       os::ghostty::install_terminfo
+      ;;
+    bruno)
+      tools::install_bruno
       ;;
     install-dell-dock-fix)
       os::install_dell_dock_fix

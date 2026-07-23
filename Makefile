@@ -55,6 +55,10 @@ ghostty-terminfo: ## Install Ghostty's xterm-ghostty terminfo into ~/.terminfo (
 ghostty: ## Install Ghostty, using apt before snap fallback
 	@bash hooks/os ghostty
 
+.PHONY: bruno
+bruno: ## Install Bruno API client desktop app and CLI
+	@bash hooks/os bruno
+
 .PHONY: bootstrap
 bootstrap: ## Install bootstrap deps, link dotfiles, and run setup profile (PROFILE=link|core|dev|full)
 	@bash install.sh
