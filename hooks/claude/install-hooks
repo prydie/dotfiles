@@ -1,0 +1,58 @@
+#!/usr/bin/env bash
+# Idempotently register the hq mission-control hooks into the LOCAL
+# ~/.claude/settings.json, without disturbing anything else in it.
+#
+# Why this exists: the dotfiles repo is PUBLIC, and ~/.claude/settings.json
+# accumulates machine- and secret-specific data (env vars, permission allowlists,
+# API config, MCP tokens) that must never be published. So the settings file
+# itself stays untracked and machine-local; only the hook SCRIPTS and this
+# installer — both non-sensitive — are versioned. Run by hooks/post-up (make up);
+# safe to run by hand any time. Re-running is a no-op once the hooks are present.
+set -euo pipefail
+
+settings="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json"
+
+if ! command -v jq >/dev/null 2>&1; then
+  echo "hq install-hooks: jq not found — skipping (install jq to wire the sidebar hooks)" >&2
+  exit 0
+fi
+
+mkdir -p "$(dirname "$settings")"
+[[ -f "$settings" ]] || printf '{}\n' >"$settings"
+
+# Never touch a file we cannot parse — don't risk clobbering a hand edit.
+if ! jq -e . "$settings" >/dev/null 2>&1; then
+  echo "hq install-hooks: $settings is not valid JSON — leaving it untouched" >&2
+  exit 0
+fi
+
+hq='~/.dotfiles/hooks/claude/hq-hook'
+desired=$(jq -n --arg hq "$hq" '{
+  Notification:     {matcher:"*", hooks:[{type:"command", command:($hq+" needs")}]},
+  UserPromptSubmit: {            hooks:[{type:"command", command:($hq+" clear")}]},
+  PostToolUse:      {matcher:"*", hooks:[{type:"command", command:($hq+" clear")}]},
+  Stop:             {            hooks:[{type:"command", command:($hq+" clear")}]},
+  SessionStart:     {matcher:"*", hooks:[{type:"command", command:($hq+" clear")}]},
+  SessionEnd:       {matcher:"*", hooks:[{type:"command", command:($hq+" end")}]}
+}')
+
+# For each event: keep every existing matcher-group EXCEPT stale hq ones (so a
+# re-run never duplicates), then append the canonical hq group. Other tools' hooks
+# (e.g. agent-sessions) are matched by their own command and preserved untouched.
+tmp=$(mktemp)
+jq --argjson want "$desired" '
+  .hooks //= {}
+  | reduce ($want | to_entries[]) as $e (.;
+      .hooks[$e.key] =
+        ([ (.hooks[$e.key] // [])[]
+           | select(([.hooks[]?.command // ""] | any(test("hq-hook"))) | not) ]
+         + [$e.value]))
+' "$settings" >"$tmp"
+
+if cmp -s "$settings" "$tmp"; then
+  echo "hq install-hooks: hooks already up to date"
+else
+  cat "$tmp" >"$settings" # truncate-in-place: keep the file's inode & permissions
+  echo "hq install-hooks: registered hq hooks in $settings"
+fi
+rm -f "$tmp"

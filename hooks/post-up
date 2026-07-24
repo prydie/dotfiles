@@ -33,6 +33,11 @@ esac
 # this host from a Ghostty terminal does not break tmux/vim. User-level, cheap.
 os::ghostty::install_terminfo || true
 
+# Wire the hq mission-control sidebar hooks into the LOCAL ~/.claude/settings.json.
+# That file is intentionally untracked (public repo, holds secrets/permissions) —
+# see hooks/claude/install-hooks. User-level and cheap, so run on every profile.
+bash "${_ROOT}/hooks/claude/install-hooks" || log::f "hq hook install skipped"
+
 if [[ "${PROFILE}" != "link" ]]; then
   if [[ "${DISTRO}" =~ ^(Ubuntu|debian)$ ]]; then
     os::ensure_zsh

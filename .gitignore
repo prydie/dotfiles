@@ -10,3 +10,7 @@ __pycache__/
 /config/nks-dev/env
 /config/nks-dev/*.local
 /config/mise/config.local.toml
+# ~/.claude/settings.json is machine-local and accumulates secrets/permissions —
+# never publish it (this repo is public). The hq sidebar hooks are injected into
+# whatever local settings.json exists by hooks/claude/install-hooks instead.
+/claude/settings.json
