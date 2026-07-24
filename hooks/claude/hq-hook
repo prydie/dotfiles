@@ -34,8 +34,11 @@ case "$action" in
     printf '%s\n' "$msg" >"$latch"
     ;;
   clear | end)
-    [[ -f $latch ]] && changed=1
-    rm -f "$latch"
+    # Also drop any "acknowledged" (muted) flag: the agent has made progress, so
+    # the mute has served its purpose and a fresh block should re-alert as red.
+    ack="${dir}/${key}.ack"
+    { [[ -f $latch ]] || [[ -f $ack ]]; } && changed=1
+    rm -f "$latch" "$ack"
     ;;
   *)
     exit 0

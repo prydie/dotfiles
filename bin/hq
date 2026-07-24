@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# The whole script assumes a UTF-8 locale (codepoint math, char-based substring
+# truncation, emoji width). `hq summary`/`badge` run via tmux's `#()` under the
+# server's inherited locale, which may not be a UTF-8 tty — force one so byte-vs-
+# char slicing can't emit invalid UTF-8 into the always-on status line.
+export LC_ALL="${LC_ALL:-C.UTF-8}"
+
 # hq — mission control for Claude/Codex agents running in tmux.
 #
 # LOCAL host only for now (cross-machine sync is a later phase that slots in
@@ -33,7 +39,7 @@ fi
 # glyphs (no U+FE0F variation selector): foot renders those at a stable 2-cell
 # width. Avoid VS16 emoji (e.g. ✳️ 🛰️) here — foot renders them at an unstable
 # width, which shifts the following text a column on every repaint.
-dot_working='🟢'; dot_idle='⚪'; dot_needs='🔴'; dot_error='🟠'
+dot_working='🟢'; dot_idle='⚪'; dot_needs='🔴'; dot_acked='🟡'; dot_error='🟠'
 
 host_short() { hostname -s 2>/dev/null || hostname; }
 
@@ -79,7 +85,7 @@ collect_local() {
     if (( cp >= 0x2800 && cp <= 0x28FF )); then
       state=working; rank=1
     elif (( cp == 0x2733 || cp == 0x2734 || cp == 0x273B )); then
-      state=idle; rank=2
+      state=idle; rank=3
     else
       state=idle; rank=3 # no glyph (e.g. a Codex UUID title) — best effort
     fi
@@ -93,18 +99,30 @@ collect_local() {
 
     # A '-' sentinel keeps this field non-empty: tab is IFS-whitespace, so an
     # empty middle field would collapse and shift every later column left.
-    local branch
-    branch=$(git -C "$path" rev-parse --abbrev-ref HEAD 2>/dev/null || true)
-    branch=${branch:--}
+    # HQ_SKIP_GIT lets the status-line paths (summary/badge) skip a git fork per
+    # pane for a branch they never display.
+    local branch='-'
+    if [[ -z "${HQ_SKIP_GIT:-}" ]]; then
+      branch=$(git -C "$path" rev-parse --abbrev-ref HEAD 2>/dev/null || true)
+      branch=${branch:--}
+    fi
 
     # A "needs you" latch (from the Claude hook) overrides the title: an agent
-    # blocked on a prompt outranks whatever glyph its title happens to show.
+    # blocked on a prompt outranks whatever glyph its title happens to show. A
+    # sibling '.ack' file means you've muted it — still blocked, but deferred, so
+    # it drops out of the top/red alert into a quieter "acked" state.
     local reason='-'
-    local latch="${STATE_DIR}/${host}-${pane_id//%/p}.needs"
-    if [[ -f $latch ]]; then
+    local key="${host}-${pane_id//%/p}"
+    if [[ -f "${STATE_DIR}/${key}.needs" ]]; then
       state=needs; rank=0
-      IFS= read -r reason <"$latch" 2>/dev/null || reason=''
+      IFS= read -r reason <"${STATE_DIR}/${key}.needs" 2>/dev/null || reason=''
       [[ -z $reason ]] && reason='-'
+      [[ -f "${STATE_DIR}/${key}.ack" ]] && { state=acked; rank=2; }
+    else
+      # No live block → a lingering '.ack' is an orphan (the block cleared between
+      # a render and the mute keypress, or a crash left it). Reap it so it can't
+      # silently mute a genuine future block on this pane.
+      [[ -f "${STATE_DIR}/${key}.ack" ]] && rm -f "${STATE_DIR}/${key}.ack"
     fi
 
     printf '%s\n' "${rank}${US}${host}${US}${state}${US}${type}${US}${clean}${US}${path}${US}${branch}${US}${target}${US}${pane_id}${US}${reason}"
@@ -138,7 +156,7 @@ render_frame() {
     return
   fi
 
-  local n_total=0 n_working=0 n_idle=0 n_needs=0 last_host='' ai=0
+  local n_total=0 n_working=0 n_idle=0 n_needs=0 n_acked=0 last_host='' ai=0
   while IFS="$US" read -r rank host state type title path branch target pane_id reason; do
     [[ -z $host ]] && continue
     n_total=$((n_total + 1))
@@ -152,6 +170,7 @@ render_frame() {
     local dot titlecol=''
     case "$state" in
       needs)   dot=$dot_needs;   titlecol=$YELLOW; n_needs=$((n_needs + 1)) ;;
+      acked)   dot=$dot_acked;                     n_acked=$((n_acked + 1)) ;;
       working) dot=$dot_working; titlecol=$GREEN;  n_working=$((n_working + 1)) ;;
       error)   dot=$dot_error ;;
       *)       dot=$dot_idle;    n_idle=$((n_idle + 1)) ;;
@@ -173,7 +192,7 @@ render_frame() {
     # thing whose unstable width made this line jitter. For a blocked agent the
     # reason is more useful than the path, so lead with it.
     local metatext
-    if [[ $state == needs && -n $reason && $reason != - ]]; then
+    if [[ ( $state == needs || $state == acked ) && -n $reason && $reason != - ]]; then
       metatext="$reason"
     else
       local shortpath=${path/#$HOME/\~}
@@ -189,10 +208,11 @@ render_frame() {
   # footer tally — only surface the 🔴 segment when something actually needs you
   local foot="${n_total} agent"; [[ $n_total -ne 1 ]] && foot+='s'
   [[ $n_needs -gt 0 ]] && foot+=" · ${dot_needs} ${n_needs}"
+  [[ $n_acked -gt 0 ]] && foot+=" · ${dot_acked} ${n_acked}"
   foot+=" · ${dot_working} ${n_working} · ${dot_idle} ${n_idle}"
   printf '\n %s%s%s\n' "$DIM" "$foot" "$RESET"
 
-  (( sel >= 0 )) && printf ' %s↑↓ select · ↵ jump · q quit%s\n' "$DIM" "$RESET"
+  (( sel >= 0 )) && printf ' %s↑↓ select · ↵ jump · a mute · q quit%s\n' "$DIM" "$RESET"
   return 0
 }
 
@@ -210,10 +230,42 @@ render() {
 # the status bar the instant this changes.
 badge() {
   local n
-  n=$(collect_local | awk -F'\t' '$3 == "needs"' | grep -c . || true)
+  n=$(HQ_SKIP_GIT=1 collect_local | awk -F'\t' '$3 == "needs"' | grep -c . || true)
   if ((n > 0)); then
     printf '● %d need you' "$n"
   fi
+}
+
+# Compact, always-on status-line summary for `#(hq summary)`: state counts plus
+# the name(s) of any agent that needs you (the actionable bit). Prints nothing
+# when no agents are running, so the status line stays clean. The "needs you"
+# part updates the instant the hook fires `tmux refresh-client -S`; the counts
+# refresh at tmux's status-interval (working/idle come from pane titles, which
+# the hook doesn't track, so they lag up to that interval — fine for a glance).
+summary() {
+  local w=0 i=0 n=0 a=0 names='' state title
+  while IFS="$US" read -r _ _ state _ title _; do
+    [[ -z $state ]] && continue
+    case "$state" in
+      working) w=$((w + 1)) ;;
+      needs)   n=$((n + 1)); names+="${names:+, }${title}" ;;
+      acked)   a=$((a + 1)) ;;
+      *)       i=$((i + 1)) ;;
+    esac
+  done < <(HQ_SKIP_GIT=1 collect_local)
+
+  (( w + i + n + a == 0 )) && return 0
+
+  local out=''
+  if (( n > 0 )); then
+    names=$(truncate_chars "$names" 34)
+    out="${dot_needs}${n} ${names}  "
+  fi
+  (( a > 0 )) && out+="${dot_acked}${a} "
+  out+="${dot_working}${w} ${dot_idle}${i}"
+  # Escape '#' so a pane title containing #[ / #( / #{ can't be interpreted by
+  # tmux's format expansion of #(hq summary); '##' renders as a literal '#'.
+  printf '%s' "${out//\#/\#\#}"
 }
 
 # Focus an agent's tmux pane from its record. A local agent switches the current
@@ -239,6 +291,28 @@ jump_to() {
     ssh -o BatchMode=yes "$host" \
       "tmux select-window -t '${target%.*}' \\; select-pane -t '$pane_id'" 2>/dev/null || true
   fi
+}
+
+# Toggle the "acknowledged" flag on a blocked agent: mute it out of the red/top
+# alert (and the status-bar count) without giving the agent input or clearing its
+# block. The flag is a '.ack' sibling of the '.needs' latch; the hook removes it
+# when the agent next makes progress, so a fresh block re-alerts as red.
+toggle_ack() {
+  local rec=$1 host state pane_id base
+  IFS="$US" read -r _ host state _ _ _ _ _ pane_id _ <<<"$rec"
+  [[ -z $pane_id ]] && return
+  [[ $state == needs || $state == acked ]] || return # only a blocked agent can be muted
+  base="${STATE_DIR}/${host}-${pane_id//%/p}"
+  # Re-check the live latch: if the block cleared between the render and this
+  # keypress, don't mint an orphan '.ack' (it would silently mute a later block);
+  # clean any stray one instead.
+  [[ -f "${base}.needs" ]] || { rm -f "${base}.ack" 2>/dev/null || true; return; }
+  if [[ -f "${base}.ack" ]]; then
+    rm -f "${base}.ack"
+  else
+    mkdir -p "$STATE_DIR"; : >"${base}.ack"
+  fi
+  tmux refresh-client -S 2>/dev/null || true # update the status-bar summary at once
 }
 
 # Interactive, flicker-free live view for the popup. Navigate with ↑/↓ (or j/k),
@@ -307,6 +381,7 @@ watch() {
         q) break ;;
         j) sel=$((sel + 1)); need_render=1 ;;
         k) sel=$((sel - 1)); need_render=1 ;;
+        a) ((n > 0)) && { toggle_ack "${recs[$sel]}"; need_render=1; } ;;
         $'\n' | $'\r') ((n > 0)) && { jump_to "${recs[$sel]}"; break; } ;;
         $'\e')
           # bare Esc quits; an arrow key arrives as Esc [ A/B — read the tail.
@@ -330,12 +405,13 @@ watch() {
 }
 
 case "${1:-render}" in
-  render) render ;;
-  raw)    collect_local ;;
-  watch)  watch "${2:-}" ;;
-  badge)  badge ;;
+  render)  render ;;
+  raw)     collect_local ;;
+  watch)   watch "${2:-}" ;;
+  badge)   badge ;;
+  summary) summary ;;
   *)
-    printf 'usage: hq [render|watch|badge|raw]\n' >&2
+    printf 'usage: hq [render|watch|summary|badge|raw]\n' >&2
     exit 2
     ;;
 esac
