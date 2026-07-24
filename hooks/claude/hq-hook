@@ -27,10 +27,17 @@ latch="${dir}/${key}.needs"
 changed=0
 case "$action" in
   needs)
-    mkdir -p "$dir"
-    [[ -f $latch ]] || changed=1
     # Capture the notification text (stdin carries the hook JSON); best-effort.
     msg=$(jq -r '.message // empty' 2>/dev/null <&0 || true)
+    # The generic ~60s idle nudge ("Claude is waiting for your input") fires for
+    # ANY idle session — including an agent deliberately parked on a background
+    # task that will auto-resume. That is not a genuine "needs you", so don't latch
+    # red for it; reserve the latch for real blocks (permission/decision prompts).
+    case "${msg,,}" in
+      *"waiting for your input"*) exit 0 ;;
+    esac
+    mkdir -p "$dir"
+    [[ -f $latch ]] || changed=1
     printf '%s\n' "$msg" >"$latch"
     ;;
   clear | end)
