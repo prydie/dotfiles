@@ -10,12 +10,14 @@ export LC_ALL="${LC_ALL:-C.UTF-8}"
 # hq — mission control for Claude/Codex agents running in tmux.
 #
 # LOCAL host only for now (cross-machine sync is a later phase that slots in
-# around collect_local without changing the renderer). Two signal sources:
+# around collect_local without changing the renderer). Signal sources:
 #   * tmux pane titles that Claude paints for itself — a leading braille spinner
 #     (⠿) means working, a ✳ means it finished its turn and is idle;
-#   * per-pane "needs you" latch files written by the Claude hook (hooks/claude/
-#     hq-hook), which flag an agent blocked on a prompt — something a title can't
-#     express. A latch overrides the title-derived state.
+#   * per-pane latch files written by the hq hook (hooks/claude/hq-hook), wired
+#     into both Claude and Codex. A "needs you" latch flags an agent blocked on a
+#     prompt (something a title can't express) and overrides the title state. For
+#     Codex — which paints no state glyph, only a session UUID — a "busy" latch
+#     supplies working/idle and a "name" latch supplies a friendly label.
 #
 # Subcommands:
 #   hq render   one-shot render (default)
@@ -79,21 +81,39 @@ collect_local() {
       *)      continue ;;
     esac
 
-    # Classify from the leading title glyph Claude paints for itself.
-    local cp state rank
-    cp=$(first_codepoint "$title")
-    if (( cp >= 0x2800 && cp <= 0x28FF )); then
-      state=working; rank=1
-    elif (( cp == 0x2733 || cp == 0x2734 || cp == 0x273B )); then
-      state=idle; rank=3
-    else
-      state=idle; rank=3 # no glyph (e.g. a Codex UUID title) — best effort
-    fi
+    # Latch files for this pane share one key with the hq hook (host + pane id).
+    local key="${host}-${pane_id//%/p}"
 
-    # Strip the leading glyph (+ following space) to get a clean title.
-    local clean=$title
-    if (( rank == 1 || (cp >= 0x2733 && cp <= 0x273B) )); then
-      clean=${title:1}; clean=${clean# }
+    local state rank clean
+    if [[ $type == codex ]]; then
+      # Codex paints no state glyph (its title is a session UUID), so the hq hook
+      # drives state via latch files: a '.busy' marker means a turn is in flight,
+      # and '.name' holds the friendly label captured from the opening prompt.
+      if [[ -f "${STATE_DIR}/${key}.busy" ]]; then
+        state=working; rank=1
+      else
+        state=idle; rank=3
+      fi
+      clean=''
+      if [[ -f "${STATE_DIR}/${key}.name" ]]; then
+        IFS= read -r clean <"${STATE_DIR}/${key}.name" 2>/dev/null || clean=''
+      fi
+      [[ -z $clean ]] && clean=$title
+    else
+      # Claude classifies from the leading title glyph it paints for itself.
+      local cp; cp=$(first_codepoint "$title")
+      if (( cp >= 0x2800 && cp <= 0x28FF )); then
+        state=working; rank=1
+      elif (( cp == 0x2733 || cp == 0x2734 || cp == 0x273B )); then
+        state=idle; rank=3
+      else
+        state=idle; rank=3 # no glyph — best effort
+      fi
+      # Strip the leading glyph (+ following space) to get a clean title.
+      clean=$title
+      if (( (cp >= 0x2800 && cp <= 0x28FF) || (cp >= 0x2733 && cp <= 0x273B) )); then
+        clean=${title:1}; clean=${clean# }
+      fi
     fi
     [[ -z $clean ]] && clean=$cmd
 
@@ -112,7 +132,6 @@ collect_local() {
     # sibling '.ack' file means you've muted it — still blocked, but deferred, so
     # it drops out of the top/red alert into a quieter "acked" state.
     local reason='-'
-    local key="${host}-${pane_id//%/p}"
     if [[ -f "${STATE_DIR}/${key}.needs" ]]; then
       state=needs; rank=0
       IFS= read -r reason <"${STATE_DIR}/${key}.needs" 2>/dev/null || reason=''
@@ -125,6 +144,13 @@ collect_local() {
       [[ -f "${STATE_DIR}/${key}.ack" ]] && rm -f "${STATE_DIR}/${key}.ack"
     fi
 
+    # The two free-text fields — a Codex name captured from the user's prompt, and
+    # a notification reason — are the only fields that can carry arbitrary text. A
+    # literal TAB in them would inject an extra column and shift every later field
+    # (pane_id included, which would misdirect the jump); a stray CR would corrupt
+    # the terminal render. tmux titles/paths never contain these, but a prompt can.
+    clean=${clean//$'\t'/ }; clean=${clean//$'\r'/}
+    reason=${reason//$'\t'/ }; reason=${reason//$'\r'/}
     printf '%s\n' "${rank}${US}${host}${US}${state}${US}${type}${US}${clean}${US}${path}${US}${branch}${US}${target}${US}${pane_id}${US}${reason}"
   done
 }

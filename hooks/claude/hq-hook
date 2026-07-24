@@ -1,18 +1,25 @@
 #!/usr/bin/env bash
-# Claude Code hook for the `hq` mission-control sidebar.
+# Claude / Codex hook for the `hq` mission-control sidebar.
 #
-# The tmux pane title tells the sidebar whether an agent is working or idle, but
-# it cannot express "blocked, waiting on you" (a permission prompt, or Claude
-# sitting idle waiting for input). This hook maintains a per-pane "needs you"
-# latch file that `hq` reads to flag such agents.
+# Claude paints a leading glyph in its pane title (braille spinner = working,
+# ✳ = idle) that `hq` reads directly, but a title can't express "blocked, waiting
+# on you". Codex paints no state glyph at all (its title is a session UUID). So
+# this hook maintains a small set of per-pane latch files that `hq` reads to fill
+# both gaps: a "needs you" latch, plus — for Codex, which has no title signal — a
+# "busy" (turn in flight) marker and a captured friendly "name".
 #
-# Wired per-event in ~/.claude/settings.json; the intended action is the 1st arg:
-#   needs   an attention Notification fired (permission / idle-waiting)
-#   clear   forward progress (prompt submitted, a tool ran, turn ended, session start)
+# Wired per-event: Claude in ~/.claude/settings.json (hooks/claude/install-hooks),
+# Codex in ~/.codex/config.toml (hooks/codex/install-hooks). The 1st arg is the
+# intended action:
+#   needs   an attention Notification fired (permission / decision prompt)
+#   clear   Claude forward progress (prompt / tool / turn end / session start)
+#   busy    Codex turn in flight (prompt submitted, a tool ran); also captures name
+#   idle    Codex turn ended (Stop) — no longer working
+#   start   Codex session started — clean slate for this pane
 #   end     the session ended in this pane
 #
-# The latch is keyed by host + tmux pane id, matching how `hq` joins panes to
-# state, so it is naturally scoped and self-cleaning as panes come and go.
+# The latches are keyed by host + tmux pane id, matching how `hq` joins panes to
+# state, so they are naturally scoped and self-cleaning as panes come and go.
 set -euo pipefail
 
 action=${1:-}
@@ -23,6 +30,9 @@ host=$(hostname -s 2>/dev/null || hostname)
 dir="${XDG_STATE_HOME:-$HOME/.local/state}/agent-hq/state"
 key="${host}-${pane//%/p}" # %22 → p22, a safe filename fragment
 latch="${dir}/${key}.needs"
+ack="${dir}/${key}.ack"
+busy="${dir}/${key}.busy"
+name="${dir}/${key}.name"
 
 changed=0
 case "$action" in
@@ -40,10 +50,37 @@ case "$action" in
     [[ -f $latch ]] || changed=1
     printf '%s\n' "$msg" >"$latch"
     ;;
-  clear | end)
-    # Also drop any "acknowledged" (muted) flag: the agent has made progress, so
-    # the mute has served its purpose and a fresh block should re-alert as red.
-    ack="${dir}/${key}.ack"
+  busy)
+    # Codex turn in flight: mark the pane working (Codex has no title glyph for
+    # `hq` to read). Forward progress also resolves any prior block — an approval
+    # was granted or a new prompt started — so clear the needs/ack latches (that
+    # DOES change the badge, so flag it for a status repaint).
+    mkdir -p "$dir"
+    : >"$busy"
+    { [[ -f $latch ]] || [[ -f $ack ]]; } && changed=1
+    rm -f "$latch" "$ack"
+    # UserPromptSubmit carries the prompt; capture its first line as a friendly
+    # label (Codex's pane title is a bare UUID). PostToolUse has no prompt → skip,
+    # keeping the name from the turn's opening prompt.
+    prompt=$(jq -r '.prompt // empty' 2>/dev/null <&0 || true)
+    [[ -n $prompt ]] && printf '%s\n' "${prompt%%$'\n'*}" >"$name"
+    ;;
+  idle)
+    # Codex turn ended (Stop): no longer working, and any block is resolved. Keep
+    # the captured name so the agent stays labelled while it sits idle.
+    { [[ -f $latch ]] || [[ -f $ack ]]; } && changed=1
+    rm -f "$busy" "$latch" "$ack"
+    ;;
+  start | end)
+    # Clean slate for this pane: a Codex session started or ended. Drop everything,
+    # including the captured name (a fresh session gets its own on first prompt).
+    { [[ -f $latch ]] || [[ -f $ack ]]; } && changed=1
+    rm -f "$busy" "$name" "$latch" "$ack"
+    ;;
+  clear)
+    # Claude forward progress. Drop the needs latch and any "acknowledged" (muted)
+    # flag: the agent has made progress, so a fresh block should re-alert as red.
+    # (Claude working/idle comes from its title, so there is no '.busy' to touch.)
     { [[ -f $latch ]] || [[ -f $ack ]]; } && changed=1
     rm -f "$latch" "$ack"
     ;;

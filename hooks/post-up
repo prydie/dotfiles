@@ -33,10 +33,12 @@ esac
 # this host from a Ghostty terminal does not break tmux/vim. User-level, cheap.
 os::ghostty::install_terminfo || true
 
-# Wire the hq mission-control sidebar hooks into the LOCAL ~/.claude/settings.json.
-# That file is intentionally untracked (public repo, holds secrets/permissions) —
-# see hooks/claude/install-hooks. User-level and cheap, so run on every profile.
-bash "${_ROOT}/hooks/claude/install-hooks" || log::f "hq hook install skipped"
+# Wire the hq mission-control sidebar hooks into the LOCAL agent configs. Both
+# files are intentionally untracked (public repo, hold secrets/account settings) —
+# see hooks/{claude,codex}/install-hooks. User-level and cheap, so run on every
+# profile. (Codex additionally needs a one-time interactive trust on next launch.)
+bash "${_ROOT}/hooks/claude/install-hooks" || log::f "hq claude hook install skipped"
+bash "${_ROOT}/hooks/codex/install-hooks" || log::f "hq codex hook install skipped"
 
 if [[ "${PROFILE}" != "link" ]]; then
   if [[ "${DISTRO}" =~ ^(Ubuntu|debian)$ ]]; then

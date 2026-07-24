@@ -1,0 +1,109 @@
+#!/usr/bin/env bash
+# Idempotently register the hq mission-control hooks into the LOCAL
+# ~/.codex/config.toml, without disturbing anything else in it.
+#
+# Why this exists (mirrors hooks/claude/install-hooks): the dotfiles repo is
+# PUBLIC, and ~/.codex/config.toml holds machine- and account-specific data
+# (trusted project list, service tier, auth-adjacent settings) that must never be
+# published. So the config file itself stays untracked and machine-local; only the
+# hook SCRIPT and this installer — both non-sensitive — are versioned.
+#
+# Codex config is TOML, which (unlike Claude's JSON) can't be deep-merged with a
+# tool like jq. Instead we manage a clearly-delimited block at the end of the file:
+# strip any previous hq block, then append a fresh one. TOML array-of-tables
+# (`[[hooks.Event]]`) accumulate, so this block coexists with any hooks the user
+# has defined elsewhere in the file.
+#
+# Run by hooks/post-up (make up); safe to run by hand any time. After it writes,
+# Codex requires a ONE-TIME interactive trust: the next `codex` launch shows a
+# "Hooks need review" prompt — approve it once and the trust is persisted (as a
+# hash of the hook config) until the hooks change again.
+set -euo pipefail
+
+config="${CODEX_HOME:-$HOME/.codex}/config.toml"
+# The '~' is written literally into the TOML and expanded by Codex at hook-run
+# time (`$SHELL -lc`), exactly as the Claude installer does — not by this script.
+# shellcheck disable=SC2088
+hook='~/.dotfiles/hooks/claude/hq-hook' # shared Claude/Codex hq hook
+
+begin='# >>> hq mission-control (managed) >>>'
+end='# <<< hq mission-control (managed) <<<'
+
+mkdir -p "$(dirname "$config")"
+[[ -f "$config" ]] || : >"$config"
+
+# The managed block. Each event maps to an hq-hook action (see that script):
+#   SessionStart → start   UserPromptSubmit/PostToolUse → busy
+#   Stop → idle            Notification → needs           SessionEnd → end
+# Codex passes the event JSON on stdin and runs the command via `$SHELL -lc`, so
+# the leading '~' expands and $TMUX_PANE is inherited — the same join key Claude
+# uses, so Codex and Claude agents land in one unified latch namespace.
+block=$(cat <<EOF
+${begin}
+# Managed by hooks/codex/install-hooks — do not edit; re-run that script to update.
+[[hooks.SessionStart]]
+[[hooks.SessionStart.hooks]]
+type = "command"
+command = "${hook} start"
+
+[[hooks.UserPromptSubmit]]
+[[hooks.UserPromptSubmit.hooks]]
+type = "command"
+command = "${hook} busy"
+
+[[hooks.PostToolUse]]
+[[hooks.PostToolUse.hooks]]
+type = "command"
+command = "${hook} busy"
+
+[[hooks.Stop]]
+[[hooks.Stop.hooks]]
+type = "command"
+command = "${hook} idle"
+
+[[hooks.Notification]]
+[[hooks.Notification.hooks]]
+type = "command"
+command = "${hook} needs"
+
+[[hooks.SessionEnd]]
+[[hooks.SessionEnd.hooks]]
+type = "command"
+command = "${hook} end"
+${end}
+EOF
+)
+
+# Strip any previous managed block (inclusive of both markers), trimming a
+# trailing blank line so repeated runs don't accrete whitespace. The skipped
+# region is buffered rather than dropped outright: only a COMPLETE begin..end block
+# is removed. If a begin marker has no matching end (an interrupted prior write or a
+# hand-edit), the buffered lines are flushed back at EOF — a malformed marker can
+# never silently eat the rest of the user's config.
+stripped=$(awk -v b="$begin" -v e="$end" '
+  $0 == b && !skip { skip = 1; buf = $0 ORS; next }
+  skip { buf = buf $0 ORS; if ($0 == e) { skip = 0; buf = "" } next }
+  { print }
+  END { if (skip) printf "%s", buf }
+' "$config")
+# Drop trailing blank lines from the remainder for a clean single separator.
+stripped=${stripped%$'\n'}
+while [[ $stripped == *$'\n' ]]; do stripped=${stripped%$'\n'}; done
+
+# Compose the new file: existing content (block removed) + one blank line + block.
+tmp=$(mktemp)
+if [[ -n $stripped ]]; then
+  printf '%s\n\n%s\n' "$stripped" "$block" >"$tmp"
+else
+  printf '%s\n' "$block" >"$tmp"
+fi
+
+if cmp -s "$config" "$tmp"; then
+  echo "hq codex install-hooks: hooks already up to date"
+  rm -f "$tmp"
+else
+  cat "$tmp" >"$config" # truncate-in-place: keep the file's inode & permissions
+  rm -f "$tmp"
+  echo "hq codex install-hooks: registered hq hooks in $config"
+  echo "hq codex install-hooks: run 'codex' once and approve the 'Hooks need review' prompt to trust them"
+fi
