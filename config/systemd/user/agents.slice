@@ -2,7 +2,14 @@
 Description=Local AI agent workloads
 
 [Slice]
-# Keep four of this host's sixteen CPUs available for interactive work.
-CPUQuota=1200%
+# Keep twelve of this host's sixteen CPUs available for interactive work and
+# isolate agent cache growth from the desktop.
+CPUQuota=400%
 # Yield readily to the desktop and other user services under contention.
 CPUWeight=10
+IOWeight=10
+MemoryAccounting=yes
+MemoryHigh=16G
+MemoryMax=24G
+MemorySwapMax=2G
+TasksMax=2048

@@ -194,9 +194,16 @@ checkpoints do not require another manual remote-session registration.
 
 Interactive `codex`, `claude`, and `gemini` commands run through `agent-run`.
 Their processes and local build/test children share `agents.slice`, which caps
-them at twelve CPUs and gives them less CPU weight than interactive desktop
-applications. This leaves nominal four-CPU headroom on the sixteen-CPU laptop.
-The managed Codex app-server and restored tmux sessions use the same launcher.
+them at four CPUs and 24 GiB of memory, and gives them less CPU and I/O weight
+than interactive desktop applications. The managed Codex app-server and
+restored tmux sessions use the same launcher.
+
+Run agent-initiated tests through `agent-test-run`. It places work in
+`nks-agent-tests.slice`, which caps the aggregate at two CPUs and 16 GiB of
+memory. Use `agent-test-run --heavy` for every multi-package, race, envtest,
+full-suite, generation, or parallel TLC command. The heavy mode serialises
+those commands through `/tmp/nks-agent-heavy-test.lock`; only a single-package,
+non-race focused test may omit it.
 
 Docker containers do not inherit the user slice and remain outside this initial
 limit.

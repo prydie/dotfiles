@@ -1,0 +1,80 @@
+#!/bin/sh
+
+set -eu
+
+usage() {
+    echo "usage: agent-test-run [--heavy] COMMAND [ARGUMENT ...]" >&2
+}
+
+heavy=false
+if [ "${1:-}" = "--heavy" ]; then
+    heavy=true
+    shift
+fi
+
+if [ "$#" -eq 0 ]; then
+    usage
+    exit 2
+fi
+
+if ! command -v systemctl >/dev/null 2>&1 || ! command -v systemd-run >/dev/null 2>&1; then
+    echo "agent-test-run: systemd user tools are required" >&2
+    exit 1
+fi
+
+quota=$(systemctl --user show nks-agent-tests.slice \
+    --property=CPUQuotaPerSecUSec \
+    --value 2>/dev/null) || {
+    echo "agent-test-run: nks-agent-tests.slice is unavailable; run 'systemctl --user daemon-reload'" >&2
+    exit 1
+}
+memory_max=$(systemctl --user show nks-agent-tests.slice \
+    --property=MemoryMax \
+    --value 2>/dev/null) || {
+    echo "agent-test-run: nks-agent-tests.slice is unavailable; run 'systemctl --user daemon-reload'" >&2
+    exit 1
+}
+case "$quota" in
+    "" | "[not set]" | infinity)
+        echo "agent-test-run: nks-agent-tests.slice does not have a finite CPU limit" >&2
+        exit 1
+        ;;
+esac
+case "$memory_max" in
+    "" | "[not set]" | infinity)
+        echo "agent-test-run: nks-agent-tests.slice does not have a finite memory limit" >&2
+        exit 1
+        ;;
+esac
+
+if ! command -v "$1" >/dev/null 2>&1; then
+    echo "agent-test-run: command not found: $1" >&2
+    exit 127
+fi
+
+run() {
+    systemd-run \
+        --user \
+        --scope \
+        --quiet \
+        --collect \
+        --same-dir \
+        --slice=nks-agent-tests.slice \
+        -- \
+        nice -n 10 ionice -c 3 env GOMAXPROCS=2 GOFLAGS=-p=2 "$@"
+}
+
+if [ "$heavy" = true ]; then
+    exec flock -w 3600 /tmp/nks-agent-heavy-test.lock \
+        systemd-run \
+        --user \
+        --scope \
+        --quiet \
+        --collect \
+        --same-dir \
+        --slice=nks-agent-tests.slice \
+        -- \
+        nice -n 10 ionice -c 3 env GOMAXPROCS=2 GOFLAGS=-p=2 "$@"
+fi
+
+run "$@"

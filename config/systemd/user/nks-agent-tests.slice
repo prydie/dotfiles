@@ -1,0 +1,14 @@
+[Unit]
+Description=Resource-bounded NKS agent test workloads
+
+[Slice]
+# One broad workload at a time should fit comfortably while preserving desktop,
+# local-cluster, and agent-server headroom.
+CPUQuota=200%
+CPUWeight=10
+IOWeight=10
+MemoryAccounting=yes
+MemoryHigh=12G
+MemoryMax=16G
+MemorySwapMax=2G
+TasksMax=1024
