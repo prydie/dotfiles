@@ -64,17 +64,53 @@ run() {
         nice -n 10 ionice -c 3 env GOMAXPROCS=2 GOFLAGS=-p=2 "$@"
 }
 
-if [ "$heavy" = true ]; then
-    exec flock -w 3600 /tmp/nks-agent-heavy-test.lock \
-        systemd-run \
+run_named() {
+    unit=$1
+    shift
+    systemd-run \
         --user \
         --scope \
         --quiet \
         --collect \
         --same-dir \
         --slice=nks-agent-tests.slice \
+        --unit="$unit" \
         -- \
         nice -n 10 ionice -c 3 env GOMAXPROCS=2 GOFLAGS=-p=2 "$@"
+}
+
+wait_for_scope() {
+    unit=$1
+    while state=$(systemctl --user show "$unit" \
+        --property=ActiveState \
+        --value 2>/dev/null); do
+        case "$state" in
+            active | activating | reloading | deactivating)
+                sleep 0.1
+                ;;
+            *)
+                return
+                ;;
+        esac
+    done
+}
+
+if [ "$heavy" = true ]; then
+    (
+        flock -w 3600 9
+        # Keep the lock in this waiting parent and close its descriptor before
+        # systemd-run starts workload processes. The named scope wait keeps
+        # surviving children serialised without letting them inherit the lock.
+        unit="nks-agent-heavy-test-$$.scope"
+        if run_named "$unit" "$@" 9>&-; then
+            rc=0
+        else
+            rc=$?
+        fi
+        wait_for_scope "$unit"
+        exit "$rc"
+    ) 9>/tmp/nks-agent-heavy-test.lock
+    exit $?
 fi
 
 run "$@"
