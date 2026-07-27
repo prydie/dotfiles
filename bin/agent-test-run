@@ -1,16 +1,31 @@
 #!/bin/sh
 
-set -eu
+set -efu
 
 usage() {
     echo "usage: agent-test-run [--heavy] COMMAND [ARGUMENT ...]" >&2
 }
 
 heavy=false
-if [ "${1:-}" = "--heavy" ]; then
-    heavy=true
-    shift
-fi
+nested=false
+command_arg_offset=2
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --heavy)
+            heavy=true
+            command_arg_offset=$((command_arg_offset + 1))
+            shift
+            ;;
+        --nested)
+            nested=true
+            command_arg_offset=$((command_arg_offset + 1))
+            shift
+            ;;
+        *)
+            break
+            ;;
+    esac
+done
 
 if [ "$#" -eq 0 ]; then
     usage
@@ -52,15 +67,45 @@ if ! command -v "$1" >/dev/null 2>&1; then
     exit 127
 fi
 
+tags_include_remote() {
+    tag_list=$1
+    saved_ifs=$IFS
+    IFS=,
+    # Split the comma-delimited Go tag list; glob expansion is disabled above.
+    # shellcheck disable=SC2086
+    set -- $tag_list
+    IFS=$saved_ifs
+    for tag do
+        case "$tag" in
+            integration | chaos)
+                return 0
+                ;;
+        esac
+    done
+    return 1
+}
+
 command_is_remote_only() {
+    program=${1##*/}
+    if [ "$program" = go ]; then
+        for go_flag in ${GOFLAGS:-}; do
+            case "$go_flag" in
+                -tags=* | --tags=*)
+                    tag_list=${go_flag#*=}
+                    if tags_include_remote "$tag_list"; then
+                        return 0
+                    fi
+                    ;;
+            esac
+        done
+    fi
+
     expect_tags=false
     for argument do
         if [ "$expect_tags" = true ]; then
-            case "$argument" in
-                *integration*)
-                    return 0
-                    ;;
-            esac
+            if tags_include_remote "$argument"; then
+                return 0
+            fi
             expect_tags=false
         fi
 
@@ -72,11 +117,21 @@ command_is_remote_only() {
         esac
         case "$argument" in
             *tlc2.TLC* | *tla2tools*.jar | test-integration | test-chaos | \
-                -tags=integration | -tags=*integration* | \
-                --tags=integration | --tags=*integration* | \
                 ./test/integration | ./test/integration/* | \
-                ../test/integration | ../test/integration/*)
+                ../test/integration | ../test/integration/* | \
+                test/integration | test/integration/* | \
+                ./test/chaos | ./test/chaos/* | \
+                ../test/chaos | ../test/chaos/* | \
+                test/chaos | test/chaos/* | \
+                */test/integration | */test/integration/* | \
+                */test/chaos | */test/chaos/*)
                 return 0
+                ;;
+            -tags=* | --tags=*)
+                tag_list=${argument#*=}
+                if tags_include_remote "$tag_list"; then
+                    return 0
+                fi
                 ;;
             -tags | --tags)
                 expect_tags=true
@@ -96,6 +151,16 @@ command_requires_heavy_lane() {
     package_count=0
     ginkgo_package_count=0
 
+    if [ "${1##*/}" = go ]; then
+        for go_flag in ${GOFLAGS:-}; do
+            case "$go_flag" in
+                -race | -race=*)
+                    return 0
+                    ;;
+            esac
+        done
+    fi
+
     for argument do
         base=${argument##*/}
         case "$base" in
@@ -114,6 +179,9 @@ command_requires_heavy_lane() {
             [ "$base" = test ]; then
             go_test=true
             continue
+        fi
+        if [ "$seen_go" = true ] && [ "$base" = generate ]; then
+            return 0
         fi
 
         if [ "$seen_make" = true ]; then
@@ -164,7 +232,8 @@ command_requires_heavy_lane() {
 
         if [ "$seen_ginkgo" = true ]; then
             case "$argument" in
-                -r | --recursive | -p | --procs | --procs=*)
+                -r | --recursive | -p | --procs | --procs=* | \
+                    --race | --race=*)
                     return 0
                     ;;
                 . | ./* | ../*)
@@ -186,14 +255,28 @@ command_requires_heavy_lane() {
 }
 
 if command_is_remote_only "$@"; then
-    echo "agent-test-run: run integration and TLA+ tests on cloud-dev" >&2
+    echo "agent-test-run: run integration, chaos, and TLA+ tests on cloud-dev" >&2
     echo "agent-test-run: copy or update the checkout there, then run:" >&2
-    echo "  ssh cloud-dev 'cd <remote-checkout> && flock -w 3600 /tmp/nks-agent-heavy-test.lock <command>'" >&2
+    echo "  ssh cloud-dev 'cd <remote-checkout> && <command>'" >&2
     exit 2
 fi
 
 if [ "$heavy" = false ] && command_requires_heavy_lane "$@"; then
     heavy=true
+fi
+
+if [ "$nested" = true ] && [ -r "/proc/$$/cgroup" ]; then
+    test_cgroup=$(cat "/proc/$$/cgroup")
+    case "$test_cgroup" in
+        *"/nks-agent-tests.slice/nks-agent-heavy-test-"*)
+            exec "$@"
+            ;;
+        *"/nks-agent-tests.slice/"*)
+            if [ "$heavy" = false ]; then
+                exec "$@"
+            fi
+            ;;
+    esac
 fi
 
 invoking_systemd_unit() {
@@ -218,7 +301,6 @@ run_named() {
         --collect \
         --wait \
         --pipe \
-        --expand-environment=no \
         --same-dir \
         --slice=nks-agent-tests.slice \
         --unit="$unit" \
@@ -228,7 +310,18 @@ run_named() {
         --property="After=$owner_unit" \
         -- \
         nice -n 10 ionice -c 3 \
-        "$agent_test_env_exec" "$caller_environment" "$@"
+        "$agent_test_env_exec" \
+        "$caller_environment" \
+        "$caller_command_line" \
+        "$command_arg_offset" &
+    waiting_pid=$!
+    if wait "$waiting_pid"; then
+        rc=0
+    else
+        rc=$?
+    fi
+    waiting_pid=
+    return "$rc"
 }
 
 wait_for_unit() {
@@ -248,6 +341,18 @@ wait_for_unit() {
 }
 
 active_unit=
+waiting_pid=
+
+stop_waiting_process() {
+    if [ -z "$waiting_pid" ]; then
+        return
+    fi
+
+    pid_to_stop=$waiting_pid
+    kill -TERM "$pid_to_stop" >/dev/null 2>&1 || true
+    wait "$pid_to_stop" >/dev/null 2>&1 || true
+    waiting_pid=
+}
 
 stop_active_unit() {
     if [ -z "$active_unit" ]; then
@@ -263,6 +368,7 @@ stop_active_unit() {
 handle_signal() {
     status=$1
     trap - HUP INT TERM
+    stop_waiting_process
     stop_active_unit
     exit "$status"
 }
@@ -301,6 +407,7 @@ esac
 agent_test_env_exec=${NKS_AGENT_TEST_ENV_EXEC:-$(readlink -f \
     "$(dirname "$(readlink -f "$0")")/../libexec/agent-test-env-exec")}
 caller_environment="/proc/$$/environ"
+caller_command_line="/proc/$$/cmdline"
 if [ ! -x "$agent_test_env_exec" ]; then
     echo "agent-test-run: environment launcher is unavailable: $agent_test_env_exec" >&2
     exit 1
@@ -309,7 +416,15 @@ fi
 if [ "$heavy" = true ]; then
     install_cleanup_traps
     exec 9>/tmp/nks-agent-heavy-test.lock
-    flock -w 3600 9
+    flock -w 3600 9 &
+    waiting_pid=$!
+    if wait "$waiting_pid"; then
+        waiting_pid=
+    else
+        rc=$?
+        waiting_pid=
+        exit "$rc"
+    fi
     # Keep the lock in this waiting wrapper and close its descriptor before
     # systemd-run starts workload processes. Cancellation stops the named unit
     # before the wrapper exits and releases the lock.

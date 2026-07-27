@@ -3,7 +3,24 @@
 set -eu
 
 program=${NKS_AGENT_TEST_PROGRAM:-${0##*/}}
-original_path=${NKS_AGENT_TEST_ORIGINAL_PATH:-${PATH:-}}
+shim_dir=$(readlink -f "$(dirname "$0")")
+path_to_clean=${NKS_AGENT_TEST_ORIGINAL_PATH:-${PATH:-}}
+original_path=
+saved_ifs=$IFS
+IFS=:
+for path_entry in $path_to_clean; do
+    if [ "$(readlink -f "$path_entry" 2>/dev/null || true)" = "$shim_dir" ]; then
+        continue
+    fi
+    if [ -z "$original_path" ]; then
+        original_path=$path_entry
+    else
+        original_path="$original_path:$path_entry"
+    fi
+done
+IFS=$saved_ifs
+NKS_AGENT_TEST_ORIGINAL_PATH=$original_path
+export NKS_AGENT_TEST_ORIGINAL_PATH
 
 real_program=$(PATH=$original_path command -v "$program" 2>/dev/null || true)
 if [ -z "$real_program" ]; then
@@ -11,15 +28,14 @@ if [ -z "$real_program" ]; then
     exit 127
 fi
 
-if [ -r "/proc/$$/cgroup" ] &&
-    grep -Fq "/nks-agent-tests.slice/" "/proc/$$/cgroup"; then
-    exec "$real_program" "$@"
-fi
-
 route=false
 case "$program" in
     go)
-        [ "${1:-}" = test ] && route=true
+        case "${1:-}" in
+            test | generate)
+                route=true
+                ;;
+        esac
         ;;
     make)
         for argument do
@@ -47,7 +63,7 @@ case "$program" in
 esac
 
 if [ "$route" = true ]; then
-    exec agent-test-run "$real_program" "$@"
+    exec agent-test-run --nested "$real_program" "$@"
 fi
 
 exec "$real_program" "$@"

@@ -139,6 +139,30 @@ class AgentRunTest(unittest.TestCase):
             result.stdout,
         )
 
+    def test_existing_shim_path_reconstructs_original_path(self) -> None:
+        shim = SCRIPT.parents[1] / "libexec" / "agent-test-shims"
+        environment = self.environment()
+        environment["PATH"] = f"{shim}:{self.bin}:{shim}:/usr/bin:/bin"
+
+        result = subprocess.run(
+            [str(SCRIPT), "probe", "existing-shim"],
+            cwd=self.root,
+            env=environment,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(
+            f"original-path={self.bin}:/usr/bin:/bin",
+            result.stdout,
+        )
+        self.assertIn(
+            f"path={shim}:{self.bin}:/usr/bin:/bin",
+            result.stdout,
+        )
+
     def test_refuses_to_run_without_expected_quota(self) -> None:
         environment = self.environment()
         environment["FAKE_QUOTA"] = "infinity"

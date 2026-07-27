@@ -52,16 +52,26 @@ if ! command -v "$1" >/dev/null 2>&1; then
 fi
 
 test_shim_dir="$HOME/.dotfiles/libexec/agent-test-shims"
-case ":$PATH:" in
-    *":$test_shim_dir:"*)
-        ;;
-    *)
-        if [ -z "${NKS_AGENT_TEST_ORIGINAL_PATH:-}" ]; then
-            NKS_AGENT_TEST_ORIGINAL_PATH=$PATH
-        fi
-        PATH="$test_shim_dir:$PATH"
-        ;;
-esac
+original_path=
+old_ifs=$IFS
+IFS=:
+for path_entry in $PATH; do
+    if [ "$path_entry" = "$test_shim_dir" ]; then
+        continue
+    fi
+    if [ -z "$original_path" ]; then
+        original_path=$path_entry
+    else
+        original_path="$original_path:$path_entry"
+    fi
+done
+IFS=$old_ifs
+NKS_AGENT_TEST_ORIGINAL_PATH=$original_path
+if [ -n "$original_path" ]; then
+    PATH="$test_shim_dir:$original_path"
+else
+    PATH=$test_shim_dir
+fi
 NKS_AGENT_TEST_SHIMS_ACTIVE=1
 export NKS_AGENT_TEST_ORIGINAL_PATH NKS_AGENT_TEST_SHIMS_ACTIVE PATH
 

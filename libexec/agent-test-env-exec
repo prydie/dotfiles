@@ -6,9 +6,9 @@ from pathlib import Path
 
 
 def main() -> int:
-    if len(sys.argv) < 3:
+    if len(sys.argv) != 4:
         print(
-            "agent-test-env-exec: expected ENVIRON_PATH COMMAND [ARGUMENT ...]",
+            "agent-test-env-exec: expected ENVIRON_PATH CMDLINE_PATH ARG_OFFSET",
             file=sys.stderr,
         )
         return 2
@@ -26,7 +26,21 @@ def main() -> int:
     environment["GOFLAGS"] = (
         f"{environment.get('GOFLAGS', '').strip()} -p=2".strip()
     )
-    os.execvpe(sys.argv[2], sys.argv[2:], environment)
+    command_line = [
+        os.fsdecode(argument)
+        for argument in Path(sys.argv[2]).read_bytes().split(b"\0")
+        if argument
+    ]
+    try:
+        argument_offset = int(sys.argv[3])
+    except ValueError:
+        print("agent-test-env-exec: ARG_OFFSET must be an integer", file=sys.stderr)
+        return 2
+    command = command_line[argument_offset:]
+    if not command:
+        print("agent-test-env-exec: caller command line has no command", file=sys.stderr)
+        return 2
+    os.execvpe(command[0], command, environment)
 
 
 if __name__ == "__main__":

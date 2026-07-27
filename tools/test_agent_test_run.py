@@ -54,6 +54,10 @@ class AgentTestRunTest(unittest.TestCase):
             """
             #!/bin/sh
             : > "$CAPTURE"
+            if [ -n "${LAUNCHER_PID:-}" ]; then
+                printf '%s\\n' "$$" > "$LAUNCHER_PID"
+            fi
+            sleep "${FAKE_SYSTEMD_RUN_START_DELAY:-0}"
             while [ "$#" -gt 0 ]; do
                 printf '%s\\n' "$1" >> "$CAPTURE"
                 if [ "$1" = "--" ]; then
@@ -165,12 +169,18 @@ class AgentTestRunTest(unittest.TestCase):
         sleep_variable: str,
         *,
         expected: bool,
+        extra_environment: dict[str, str] | None = None,
     ) -> None:
         lock = self.root / "heavy.lock"
+        environment = {
+            **self.environment(),
+            sleep_variable: "30",
+            **(extra_environment or {}),
+        }
         process = subprocess.Popen(
             [str(self.isolated_script(lock)), *command],
             cwd=self.root,
-            env={**self.environment(), sleep_variable: "30"},
+            env=environment,
             text=True,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
@@ -192,18 +202,31 @@ class AgentTestRunTest(unittest.TestCase):
             os.killpg(process.pid, signal.SIGTERM)
             process.wait(timeout=5)
 
-    def assert_remote_only(self, command: list[str]) -> None:
+    def assert_remote_only(
+        self,
+        command: list[str],
+        *,
+        extra_environment: dict[str, str] | None = None,
+    ) -> None:
         lock = self.root / "heavy.lock"
         result = subprocess.run(
             [str(self.isolated_script(lock)), *command],
             cwd=self.root,
-            env=self.environment(),
+            env={**self.environment(), **(extra_environment or {})},
             text=True,
             capture_output=True,
             check=False,
         )
         self.assertEqual(result.returncode, 2)
-        self.assertIn("run integration and TLA+ tests on cloud-dev", result.stderr)
+        self.assertIn(
+            "run integration, chaos, and TLA+ tests on cloud-dev",
+            result.stderr,
+        )
+        self.assertIn(
+            "ssh cloud-dev 'cd <remote-checkout> && <command>'",
+            result.stderr,
+        )
+        self.assertNotIn("flock", result.stderr)
         self.assertFalse(self.capture.exists())
 
     def test_launches_a_bounded_focused_command(self) -> None:
@@ -240,7 +263,6 @@ class AgentTestRunTest(unittest.TestCase):
                 "--collect",
                 "--wait",
                 "--pipe",
-                "--expand-environment=no",
                 "--same-dir",
                 "--slice=nks-agent-tests.slice",
                 "--service-type=exec",
@@ -248,6 +270,8 @@ class AgentTestRunTest(unittest.TestCase):
                 "--",
             ],
         )
+        command = self.exec_capture.read_text(encoding="utf-8").splitlines()
+        self.assertNotIn("hello world", command)
 
     def test_service_imports_caller_environment_by_name_without_logging_values(
         self,
@@ -368,6 +392,24 @@ class AgentTestRunTest(unittest.TestCase):
     def test_local_chaos_make_target_is_rejected(self) -> None:
         self.assert_remote_only(["make", "test-chaos"])
 
+    def test_local_chaos_go_tag_is_rejected(self) -> None:
+        self.assert_remote_only(["go", "test", "-tags=chaos", "."])
+
+    def test_local_chaos_package_is_rejected(self) -> None:
+        self.assert_remote_only(["go", "test", "./test/chaos/..."])
+
+    def test_effective_integration_goflags_are_rejected(self) -> None:
+        self.assert_remote_only(
+            ["go", "test", "./internal/controllers/rollout"],
+            extra_environment={"GOFLAGS": "-tags=integration"},
+        )
+
+    def test_effective_chaos_goflags_are_rejected(self) -> None:
+        self.assert_remote_only(
+            ["go", "test", "./internal/controllers/rollout"],
+            extra_environment={"GOFLAGS": "-tags=unit,chaos"},
+        )
+
     def test_local_tlc_is_rejected_without_starting_it(self) -> None:
         self.assert_remote_only(["tlc", "MC_example.cfg"])
 
@@ -389,6 +431,28 @@ class AgentTestRunTest(unittest.TestCase):
             ],
             "FAKE_GO_SLEEP",
             expected=False,
+        )
+
+    def test_go_generate_is_serialised(self) -> None:
+        self.assert_command_holds_heavy_lock(
+            ["go", "generate", "./internal/controllers/rollout"],
+            "FAKE_GO_SLEEP",
+            expected=True,
+        )
+
+    def test_ginkgo_race_is_serialised(self) -> None:
+        self.assert_command_holds_heavy_lock(
+            ["ginkgo", "--race", "./internal/controllers/rollout"],
+            "FAKE_GINKGO_SLEEP",
+            expected=True,
+        )
+
+    def test_effective_goflags_race_is_serialised(self) -> None:
+        self.assert_command_holds_heavy_lock(
+            ["go", "test", "./internal/controllers/rollout"],
+            "FAKE_GO_SLEEP",
+            expected=True,
+            extra_environment={"GOFLAGS": "-race"},
         )
 
     def test_refuses_to_run_without_a_memory_limit(self) -> None:
@@ -480,6 +544,36 @@ class AgentTestRunTest(unittest.TestCase):
         )
         self.assertEqual(probe.returncode, 0, probe.stderr)
 
+    def test_cancelling_during_service_creation_stops_the_launcher(self) -> None:
+        environment = self.environment()
+        environment["FAKE_SYSTEMD_RUN_START_DELAY"] = "30"
+        launcher_pid_file = self.root / "launcher.pid"
+        environment["LAUNCHER_PID"] = str(launcher_pid_file)
+        process = subprocess.Popen(
+            [str(SCRIPT), "probe", "creation-race"],
+            cwd=self.root,
+            env=environment,
+            text=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+        try:
+            self.wait_for_path(self.capture)
+            self.wait_for_path(launcher_pid_file)
+            process.terminate()
+            self.assertEqual(process.wait(timeout=2), 143)
+            launcher_pid = launcher_pid_file.read_text(encoding="utf-8").strip()
+            self.assertFalse(Path(f"/proc/{launcher_pid}").exists())
+        finally:
+            if process.poll() is None:
+                os.killpg(process.pid, signal.SIGKILL)
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            process.wait(timeout=5)
+
     def test_heavy_propagates_service_command_exit_status(self) -> None:
         lock = self.root / "heavy.lock"
         result = subprocess.run(
@@ -560,9 +654,31 @@ class AgentTestDispatchTest(unittest.TestCase):
         self.assertEqual(
             self.capture.read_text(encoding="utf-8").splitlines(),
             [
+                "--nested",
                 str(self.bin / "go"),
                 "test",
                 "-tags=envtest",
+                "./internal/controllers",
+            ],
+        )
+
+    def test_go_generate_is_routed_through_the_test_runner(self) -> None:
+        result = subprocess.run(
+            [str(DISPATCH), "generate", "./internal/controllers"],
+            cwd=self.root,
+            env={**self.environment(), "NKS_AGENT_TEST_PROGRAM": "go"},
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            self.capture.read_text(encoding="utf-8").splitlines(),
+            [
+                "--nested",
+                str(self.bin / "go"),
+                "generate",
                 "./internal/controllers",
             ],
         )
@@ -592,6 +708,27 @@ class AgentTestDispatchTest(unittest.TestCase):
             text=True,
             capture_output=True,
             check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), "direct-go:env GOMOD")
+        self.assertFalse(self.capture.exists())
+
+    def test_missing_original_path_does_not_recurse_through_shim(self) -> None:
+        environment = self.environment()
+        environment.pop("NKS_AGENT_TEST_ORIGINAL_PATH")
+        environment["PATH"] = (
+            f"{DISPATCH.parent}:{self.bin}:{DISPATCH.parent}:/usr/bin:/bin"
+        )
+
+        result = subprocess.run(
+            [str(DISPATCH), "env", "GOMOD"],
+            cwd=self.root,
+            env={**environment, "NKS_AGENT_TEST_PROGRAM": "go"},
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=1,
         )
 
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -658,9 +795,11 @@ class AgentTestRunSystemdTest(unittest.TestCase):
             environment = {
                 **os.environ,
                 "PATH": (
-                    f"{DISPATCH.parent}:{fake_bin}:/usr/bin:/bin"
+                    f"{DISPATCH.parent}:{SCRIPT.parent}:{fake_bin}:/usr/bin:/bin"
                 ),
-                "NKS_AGENT_TEST_ORIGINAL_PATH": f"{fake_bin}:/usr/bin:/bin",
+                "NKS_AGENT_TEST_ORIGINAL_PATH": (
+                    f"{SCRIPT.parent}:{fake_bin}:/usr/bin:/bin"
+                ),
                 "NKS_AGENT_TEST_SHIMS_ACTIVE": "1",
                 "RESULT_FILE": str(result_file),
             }
@@ -679,6 +818,105 @@ class AgentTestRunSystemdTest(unittest.TestCase):
             self.assertEqual(
                 result_file.read_text(encoding="utf-8").strip(),
                 "test ./focused",
+            )
+
+    def test_nested_integration_test_is_rejected_inside_test_slice(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            fake_bin = root / "bin"
+            fake_bin.mkdir()
+            result_file = root / "result"
+            fake_go = fake_bin / "go"
+            fake_go.write_text(
+                "#!/bin/sh\nprintf 'unexpected\\n' > \"$RESULT_FILE\"\n",
+                encoding="utf-8",
+            )
+            fake_go.chmod(0o755)
+            environment = {
+                **os.environ,
+                "PATH": (
+                    f"{DISPATCH.parent}:{SCRIPT.parent}:{fake_bin}:/usr/bin:/bin"
+                ),
+                "NKS_AGENT_TEST_ORIGINAL_PATH": (
+                    f"{SCRIPT.parent}:{fake_bin}:/usr/bin:/bin"
+                ),
+                "NKS_AGENT_TEST_SHIMS_ACTIVE": "1",
+                "RESULT_FILE": str(result_file),
+            }
+
+            result = subprocess.run(
+                [
+                    str(SCRIPT),
+                    "sh",
+                    "-c",
+                    "go test -tags=integration ./test/integration/cni",
+                ],
+                cwd=SCRIPT.parents[1],
+                env=environment,
+                text=True,
+                capture_output=True,
+                check=False,
+                timeout=5,
+            )
+
+            self.assertEqual(result.returncode, 2, result.stderr)
+            self.assertIn(
+                "run integration, chaos, and TLA+ tests on cloud-dev",
+                result.stderr,
+            )
+            self.assertFalse(result_file.exists())
+
+    def test_nested_broad_test_acquires_heavy_lane(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            fake_bin = root / "bin"
+            fake_bin.mkdir()
+            lock = root / "heavy.lock"
+            result_file = root / "result"
+            nested_runner = fake_bin / "agent-test-run"
+            nested_runner.write_text(
+                SCRIPT.read_text(encoding="utf-8").replace(
+                    "/tmp/nks-agent-heavy-test.lock",
+                    str(lock),
+                ),
+                encoding="utf-8",
+            )
+            nested_runner.chmod(0o755)
+            fake_go = fake_bin / "go"
+            fake_go.write_text(
+                "#!/bin/sh\n"
+                "if flock -n \"$EXPECTED_LOCK\" true; then\n"
+                "  printf 'free\\n' > \"$RESULT_FILE\"\n"
+                "else\n"
+                "  printf 'held\\n' > \"$RESULT_FILE\"\n"
+                "fi\n",
+                encoding="utf-8",
+            )
+            fake_go.chmod(0o755)
+            environment = {
+                **os.environ,
+                "PATH": f"{DISPATCH.parent}:{fake_bin}:/usr/bin:/bin",
+                "NKS_AGENT_TEST_ORIGINAL_PATH": f"{fake_bin}:/usr/bin:/bin",
+                "NKS_AGENT_TEST_ENV_EXEC": str(ENV_EXEC),
+                "NKS_AGENT_TEST_SHIMS_ACTIVE": "1",
+                "EXPECTED_LOCK": str(lock),
+                "RESULT_FILE": str(result_file),
+            }
+
+            result = subprocess.run(
+                [str(nested_runner), "sh", "-c", "go test ./..."],
+                cwd=SCRIPT.parents[1],
+                env=environment,
+                text=True,
+                capture_output=True,
+                check=False,
+                timeout=5,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(
+                result_file.read_text(encoding="utf-8").strip(),
+                "held",
             )
 
     def test_cancelling_wrapper_stops_its_transient_service(self) -> None:
@@ -728,7 +966,7 @@ class AgentTestRunSystemdTest(unittest.TestCase):
             else:
                 self.fail(f"{unit} did not become active")
 
-            os.killpg(process.pid, signal.SIGTERM)
+            process.terminate()
             self.assertEqual(process.wait(timeout=5), 143)
 
             for _ in range(100):
@@ -767,9 +1005,70 @@ class AgentTestRunSystemdTest(unittest.TestCase):
                 check=False,
             )
 
+    def test_cancelling_while_waiting_for_heavy_lock_exits_promptly(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            lock = root / "heavy.lock"
+            script = root / "agent-test-run"
+            script.write_text(
+                SCRIPT.read_text(encoding="utf-8").replace(
+                    "/tmp/nks-agent-heavy-test.lock",
+                    str(lock),
+                ),
+                encoding="utf-8",
+            )
+            script.chmod(0o755)
+            holder = subprocess.Popen(
+                ["flock", str(lock), "sleep", "60"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            for _ in range(100):
+                probe = subprocess.run(
+                    ["flock", "-n", str(lock), "true"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    check=False,
+                )
+                if probe.returncode != 0:
+                    break
+                time.sleep(0.01)
+            else:
+                self.fail("lock holder did not acquire the heavy lock")
+            process = subprocess.Popen(
+                [str(script), "--heavy", "true"],
+                cwd=SCRIPT.parents[1],
+                env={
+                    **os.environ,
+                    "NKS_AGENT_TEST_ENV_EXEC": str(ENV_EXEC),
+                },
+                text=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            try:
+                time.sleep(0.1)
+                process.terminate()
+                self.assertEqual(process.wait(timeout=2), 143)
+            finally:
+                if process.poll() is None:
+                    process.kill()
+                    process.wait(timeout=5)
+                holder.terminate()
+                holder.wait(timeout=5)
+
     def test_stopping_invoking_scope_stops_bound_test_service(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
-            pid_file = Path(temporary) / "wrapper.pid"
+            root = Path(temporary)
+            pid_file = root / "wrapper.pid"
+            owner_launcher = root / "owner-launcher"
+            owner_launcher.write_text(
+                "#!/bin/sh\n"
+                "printf '%s\\n' \"$$\" > \"$1\"\n"
+                "exec \"$2\" sh -c 'sleep 60'\n",
+                encoding="utf-8",
+            )
+            owner_launcher.chmod(0o755)
             owner = f"nks-agent-test-owner-{os.getpid()}.scope"
             launcher = subprocess.Popen(
                 [
@@ -778,14 +1077,10 @@ class AgentTestRunSystemdTest(unittest.TestCase):
                     "--scope",
                     "--quiet",
                     "--collect",
-                    "--expand-environment=no",
                     f"--unit={owner}",
                     "--same-dir",
                     "--",
-                    "sh",
-                    "-c",
-                    'echo "$$" > "$1"; exec "$2" sh -c "sleep 60"',
-                    "sh",
+                    str(owner_launcher),
                     str(pid_file),
                     str(SCRIPT),
                 ],
