@@ -36,7 +36,8 @@ teleport-community = "18.10.0"
 "pipx:python-openstackclient" = { version = "10.0.0", uvx_args = "--with python-octaviaclient==3.13.0" }
 nerdctl = "2.2.2"
 "pipx:oci-cli" = "3.83.0"
-regctl = "0.11.4"
+regctl = "0.11.5"
+cosign = "3.1.2"
 "pipx:ruff" = "latest"
 "github:pamburus/hl" = "0.36.3"  # pretty-print/filter JSON logs: kubectl logs -f ... | hl
 "github:tsenart/vegeta" = "v12.13.0"
