@@ -38,6 +38,7 @@ nerdctl = "2.2.2"
 "pipx:oci-cli" = "3.83.0"
 regctl = "0.11.4"
 "pipx:ruff" = "latest"
+"github:pamburus/hl" = "0.36.3"  # pretty-print/filter JSON logs: kubectl logs -f ... | hl
 "github:tsenart/vegeta" = "v12.13.0"
 "npm:@usebruno/cli" = "3.5.2"
 "npm:playwright" = "latest"  # headless browser automation; driven against system google-chrome (channel: 'chrome')
