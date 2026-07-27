@@ -21,18 +21,25 @@ fi
 
 source ~/.zplug/init.zsh
 
-zplug "zsh-users/zsh-syntax-highlighting", defer:2
-zplug "zsh-users/zsh-history-substring-search"
-zplug "zsh-users/zsh-completions"
+# zplug detects its long-removed `zplug a | zplug b` syntax by testing whether
+# stdin is a pipe, so any `foo | zsh -i` (e.g. an agent harness) makes every
+# line below warn "pipe syntax is deprecated". Registering plugins with stdin
+# from /dev/null keeps that heuristic from misfiring.
+{
+  zplug "zsh-users/zsh-syntax-highlighting", defer:2
+  zplug "zsh-users/zsh-history-substring-search"
+  zplug "zsh-users/zsh-completions"
+
+  zplug "lukechilds/zsh-nvm"
+
+  zplug "junegunn/fzf", as:command, use:bin/fzf-tmux
+
+  # Prompt
+  zplug mafredri/zsh-async, from:github
+} < /dev/null
 
 export NVM_LAZY_LOAD=true
 export NVM_COMPLETION=true
-zplug "lukechilds/zsh-nvm"
-
-zplug "junegunn/fzf", as:command, use:bin/fzf-tmux
-
-# Prompt
-zplug mafredri/zsh-async, from:github
 
 eval "$(starship init zsh)"
 
