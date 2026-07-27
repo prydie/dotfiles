@@ -19,39 +19,18 @@ if [ -x "$HOME/.local/bin/mise" ]; then
   eval "$("$HOME/.local/bin/mise" activate zsh)"
 fi
 
-source ~/.zplug/init.zsh
-
-# zplug detects its long-removed `zplug a | zplug b` syntax by testing whether
-# stdin is a pipe, so any `foo | zsh -i` (e.g. an agent harness) makes every
-# line below warn "pipe syntax is deprecated". Registering plugins with stdin
-# from /dev/null keeps that heuristic from misfiring.
-{
-  zplug "zsh-users/zsh-syntax-highlighting", defer:2
-  zplug "zsh-users/zsh-history-substring-search"
-  zplug "zsh-users/zsh-completions"
-
-  zplug "lukechilds/zsh-nvm"
-
-  zplug "junegunn/fzf", as:command, use:bin/fzf-tmux
-
-  # Prompt
-  zplug mafredri/zsh-async, from:github
-} < /dev/null
-
+# Plugins (antidote; the list lives in ~/.zsh_plugins.txt from this repo).
+# zsh-nvm reads NVM_* at source time, so they must be set before antidote load.
 export NVM_LAZY_LOAD=true
 export NVM_COMPLETION=true
 
-eval "$(starship init zsh)"
-
-# Install plugins if there are plugins that have not been installed
-if ! zplug check --verbose; then
-  printf "Install? [y/N]: "
-  if read -q; then
-    echo; zplug install
-  fi
+if [[ ! -d ~/.antidote ]]; then
+  git clone --depth=1 https://github.com/mattmc3/antidote ~/.antidote
 fi
+source ~/.antidote/antidote.zsh
+antidote load
 
-zplug load
+eval "$(starship init zsh)"
 
 # Environment
 #############

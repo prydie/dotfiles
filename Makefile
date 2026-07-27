@@ -116,12 +116,12 @@ firmware-overrides: ## Install managed local firmware overrides
 	@tools/xe_lnl_guc_firmware_override.sh install
 
 .PHONY: refresh-dev
-refresh-dev: ## Refresh user-level tooling/plugins (zplug, tmux TPM, Neovim lazy)
-	@if [ -s "$(HOME)/.zplug/init.zsh" ] && command -v zsh >/dev/null 2>&1; then \
-		echo "Updating zplug plugins..."; \
-		zsh -lc 'source "$(HOME)/.zplug/init.zsh"; zplug update || true'; \
+refresh-dev: ## Refresh user-level tooling/plugins (antidote, tmux TPM, Neovim lazy)
+	@if [ -s "$(HOME)/.antidote/antidote.zsh" ] && command -v zsh >/dev/null 2>&1; then \
+		echo "Updating antidote plugins..."; \
+		zsh -lc 'source "$(HOME)/.antidote/antidote.zsh"; antidote update || true'; \
 	else \
-		echo "Skipping zplug update (zplug/zsh not available)"; \
+		echo "Skipping antidote update (antidote/zsh not available)"; \
 	fi
 	@if [ -x "$(HOME)/.tmux/plugins/tpm/bin/update_plugins" ]; then \
 		echo "Updating tmux TPM plugins..."; \

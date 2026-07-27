@@ -327,7 +327,7 @@ mode in their OSD menus.
 - `PROFILE=core|dev|full` installs the Bruno desktop app from its official apt repository and the `bru` CLI through mise. Run standalone with `make bruno`.
 - Python tooling via `uv`.
 - Node tooling via `nvm`.
-- `PROFILE=core|dev|full` bootstraps zplug plugins and installs missing TPM plugins. Run standalone with `make tmux-plugins`.
+- `PROFILE=core|dev|full` bootstraps antidote-managed zsh plugins and installs missing TPM plugins. Run standalone with `make tmux-plugins`.
 - `PROFILE=dev|full` installs additive Codex and Claude session checkpoint hooks. Run standalone with `make agent-session-hooks`.
 - `PROFILE=dev|full` runs a headless lazy.nvim sync for the mise-managed Neovim (pinned in [config/mise/config.toml](config/mise/config.toml)).
 

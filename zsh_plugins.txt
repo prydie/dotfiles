@@ -1,0 +1,13 @@
+# Antidote plugin list (rcup symlinks this to ~/.zsh_plugins.txt). Antidote
+# rebundles its static cache automatically when this file changes; `make
+# refresh-dev` updates the plugin clones themselves.
+
+zsh-users/zsh-completions path:src kind:fpath
+lukechilds/zsh-nvm
+junegunn/fzf path:bin kind:path  # only for fzf-tmux; fzf itself comes from the OS package, which doesn't ship fzf-tmux everywhere
+
+# Deferred to first prompt so they wrap widgets defined later in zshrc
+# (atuin, custom bindkeys), like zplug's old defer:2. Highlighting must
+# stay before history-substring-search.
+zsh-users/zsh-syntax-highlighting kind:defer
+zsh-users/zsh-history-substring-search kind:defer

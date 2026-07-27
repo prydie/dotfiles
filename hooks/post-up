@@ -75,22 +75,22 @@ else
 fi
 
 if [[ "${PROFILE}" != "link" ]]; then
-  # install zplug if not installed
-  if [ ! -d "$HOME/.zplug" ]; then
-    git clone https://github.com/zplug/zplug "$HOME/.zplug"
+  # install antidote if not installed
+  if [ ! -d "$HOME/.antidote" ]; then
+    git clone --depth=1 https://github.com/mattmc3/antidote "$HOME/.antidote"
   fi
-  if [ -s "$HOME/.zplug/init.zsh" ]; then
+  if [ -s "$HOME/.antidote/antidote.zsh" ]; then
     if command -v zsh >/dev/null 2>&1; then
-      # Install zplug plugins non-interactively so shell setup is fully bootstrapped.
-      zsh -lc 'source "$HOME/.zplug/init.zsh"; zplug check || zplug install' || true
+      # Clone plugins non-interactively so shell setup is fully bootstrapped.
+      zsh -lc 'source "$HOME/.antidote/antidote.zsh"; antidote bundle <"$HOME/.zsh_plugins.txt" >/dev/null' || true
     else
-      log::f "Skipping zplug bootstrap: zsh not installed"
+      log::f "Skipping antidote bootstrap: zsh not installed"
     fi
   fi
 
   tools::install_tmux_plugins
 else
-  log::f "Skipping zplug/TPM bootstrap for PROFILE=link"
+  log::f "Skipping antidote/TPM bootstrap for PROFILE=link"
 fi
 
 if [ -f "$HOME/.config/zoomus.conf" ]; then
