@@ -18,13 +18,32 @@ class AgentRunTest(unittest.TestCase):
         self.bin = self.root / "bin"
         self.bin.mkdir()
         self.capture = self.root / "systemd-run-arguments"
+        self.reload_stamp = self.root / "daemon-reload-stamp"
         self.write_executable(
             "systemctl",
             """
             #!/bin/sh
+            reloaded() {
+                [ -e "${RELOAD_STAMP:-/nonexistent}" ]
+            }
             case "$*" in
-                *CPUQuotaPerSecUSec*) printf '%s\\n' "${FAKE_QUOTA:-4s}" ;;
-                *MemoryMax*) printf '%s\\n' "${FAKE_MEMORY_MAX:-25769803776}" ;;
+                *daemon-reload*)
+                    : > "${RELOAD_STAMP:-/dev/null}"
+                    ;;
+                *CPUQuotaPerSecUSec*)
+                    if reloaded && [ -n "${FAKE_QUOTA_AFTER_RELOAD:-}" ]; then
+                        printf '%s\\n' "$FAKE_QUOTA_AFTER_RELOAD"
+                    else
+                        printf '%s\\n' "${FAKE_QUOTA:-4s}"
+                    fi
+                    ;;
+                *MemoryMax*)
+                    if reloaded && [ -n "${FAKE_MEMORY_MAX_AFTER_RELOAD:-}" ]; then
+                        printf '%s\\n' "$FAKE_MEMORY_MAX_AFTER_RELOAD"
+                    else
+                        printf '%s\\n' "${FAKE_MEMORY_MAX:-25769803776}"
+                    fi
+                    ;;
                 *) exit 2 ;;
             esac
             """,
@@ -75,6 +94,7 @@ class AgentRunTest(unittest.TestCase):
         return {
             **environment,
             "CAPTURE": str(self.capture),
+            "RELOAD_STAMP": str(self.reload_stamp),
             "MARKER": "preserved",
             "PATH": f"{self.bin}:/usr/bin:/bin",
         }
@@ -195,7 +215,27 @@ class AgentRunTest(unittest.TestCase):
 
         self.assertEqual(result.returncode, 1)
         self.assertIn("does not have a finite memory limit", result.stderr)
+        self.assertTrue(self.reload_stamp.exists())
         self.assertFalse(self.capture.exists())
+
+    def test_daemon_reload_recovers_stale_limits(self) -> None:
+        environment = self.environment()
+        environment["FAKE_MEMORY_MAX"] = "infinity"
+        environment["FAKE_MEMORY_MAX_AFTER_RELOAD"] = "25769803776"
+
+        result = subprocess.run(
+            [str(SCRIPT), "probe", "recovered"],
+            cwd=self.root,
+            env=environment,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("argument=recovered", result.stdout)
+        self.assertTrue(self.reload_stamp.exists())
+        self.assertEqual(result.stderr, "")
 
 
 if __name__ == "__main__":
