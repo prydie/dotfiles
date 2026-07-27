@@ -200,10 +200,15 @@ restored tmux sessions use the same launcher.
 
 Run agent-initiated tests through `agent-test-run`. It places work in
 `nks-agent-tests.slice`, which caps the aggregate at two CPUs and 16 GiB of
-memory. Use `agent-test-run --heavy` for every multi-package, race, envtest,
-full-suite, generation, or parallel TLC command. The heavy mode serialises
-those commands through `/tmp/nks-agent-heavy-test.lock`; only a single-package,
-non-race focused test may omit it.
+memory. Agent shells route `go test`, test-oriented `make` targets, Ginkgo, and
+TLC through that runner automatically. A focused single-package unit or envtest
+may run concurrently inside the bounded slice. Full envtest, multi-package,
+race, full-suite, and generation commands serialise through
+`/tmp/nks-agent-heavy-test.lock`; `--heavy` remains an explicit override.
+Integration and TLA+ tests fail locally with a prompt to run them on
+`cloud-dev`. Each local test runs as a transient service with
+`KillMode=control-group`, so a completed or failed test cannot leave its
+kube-apiserver, etcd, or other child processes behind.
 
 Docker containers do not inherit the user slice and remain outside this initial
 limit.

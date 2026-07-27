@@ -52,16 +52,105 @@ if ! command -v "$1" >/dev/null 2>&1; then
     exit 127
 fi
 
+command_is_remote_only() {
+    for argument do
+        base=${argument##*/}
+        case "$base" in
+            tlc | tlc2.TLC)
+                return 0
+                ;;
+        esac
+        case "$argument" in
+            *tlc2.TLC* | *tla2tools*.jar | test-integration | \
+                -tags=integration | -tags=*integration* | \
+                ./test/integration | ./test/integration/* | \
+                ../test/integration | ../test/integration/*)
+                return 0
+                ;;
+        esac
+    done
+    return 1
+}
+
+command_requires_heavy_lane() {
+    seen_go=false
+    seen_make=false
+    go_test=false
+    package_count=0
+
+    for argument do
+        base=${argument##*/}
+        case "$base" in
+            go)
+                seen_go=true
+                ;;
+            make)
+                seen_make=true
+                ;;
+            test)
+                if [ "$seen_go" = true ]; then
+                    go_test=true
+                fi
+                ;;
+        esac
+
+        if [ "$seen_make" = true ]; then
+            case "$argument" in
+                test | test-envtest | test-unit | test-race | \
+                    verify-generate | check | generate)
+                    return 0
+                    ;;
+            esac
+        fi
+
+        if [ "$go_test" = true ]; then
+            case "$argument" in
+                -race | -race=*)
+                    return 0
+                    ;;
+                ./* | ../*)
+                    package_count=$((package_count + 1))
+                    case "$argument" in
+                        *...)
+                            return 0
+                            ;;
+                    esac
+                    ;;
+            esac
+        fi
+    done
+
+    [ "$go_test" = true ] && [ "$package_count" -gt 1 ]
+}
+
+if command_is_remote_only "$@"; then
+    echo "agent-test-run: run integration and TLA+ tests on cloud-dev" >&2
+    echo "agent-test-run: copy or update the checkout there, then run:" >&2
+    echo "  ssh cloud-dev 'cd <remote-checkout> && flock -w 3600 /tmp/nks-agent-heavy-test.lock <command>'" >&2
+    exit 2
+fi
+
+if [ "$heavy" = false ] && command_requires_heavy_lane "$@"; then
+    heavy=true
+fi
+
 run() {
     systemd-run \
         --user \
-        --scope \
         --quiet \
         --collect \
+        --wait \
+        --pipe \
         --same-dir \
         --slice=nks-agent-tests.slice \
+        --service-type=exec \
+        --property=KillMode=control-group \
         -- \
-        nice -n 10 ionice -c 3 env GOMAXPROCS=2 GOFLAGS=-p=2 "$@"
+        nice -n 10 ionice -c 3 env \
+        NKS_AGENT_TEST_RUN_ACTIVE=1 \
+        GOMAXPROCS=2 \
+        GOFLAGS=-p=2 \
+        "$@"
 }
 
 run_named() {
@@ -69,17 +158,24 @@ run_named() {
     shift
     systemd-run \
         --user \
-        --scope \
         --quiet \
         --collect \
+        --wait \
+        --pipe \
         --same-dir \
         --slice=nks-agent-tests.slice \
         --unit="$unit" \
+        --service-type=exec \
+        --property=KillMode=control-group \
         -- \
-        nice -n 10 ionice -c 3 env GOMAXPROCS=2 GOFLAGS=-p=2 "$@"
+        nice -n 10 ionice -c 3 env \
+        NKS_AGENT_TEST_RUN_ACTIVE=1 \
+        GOMAXPROCS=2 \
+        GOFLAGS=-p=2 \
+        "$@"
 }
 
-wait_for_scope() {
+wait_for_unit() {
     unit=$1
     while state=$(systemctl --user show "$unit" \
         --property=ActiveState \
@@ -99,15 +195,15 @@ if [ "$heavy" = true ]; then
     (
         flock -w 3600 9
         # Keep the lock in this waiting parent and close its descriptor before
-        # systemd-run starts workload processes. The named scope wait keeps
+        # systemd-run starts workload processes. The named unit wait keeps
         # surviving children serialised without letting them inherit the lock.
-        unit="nks-agent-heavy-test-$$.scope"
+        unit="nks-agent-heavy-test-$$.service"
         if run_named "$unit" "$@" 9>&-; then
             rc=0
         else
             rc=$?
         fi
-        wait_for_scope "$unit"
+        wait_for_unit "$unit"
         exit "$rc"
     ) 9>/tmp/nks-agent-heavy-test.lock
     exit $?

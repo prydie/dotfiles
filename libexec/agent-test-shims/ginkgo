@@ -1,0 +1,5 @@
+#!/bin/sh
+set -eu
+NKS_AGENT_TEST_PROGRAM='ginkgo'
+export NKS_AGENT_TEST_PROGRAM
+exec "$(dirname "$0")/agent-test-dispatch" "$@"

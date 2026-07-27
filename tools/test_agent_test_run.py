@@ -11,6 +11,12 @@ from pathlib import Path
 
 
 SCRIPT = Path(__file__).parents[1] / "bin" / "agent-test-run"
+DISPATCH = (
+    Path(__file__).parents[1]
+    / "libexec"
+    / "agent-test-shims"
+    / "agent-test-dispatch"
+)
 
 
 class AgentTestRunTest(unittest.TestCase):
@@ -86,6 +92,27 @@ class AgentTestRunTest(unittest.TestCase):
             printf 'goflags=%s\\n' "$GOFLAGS"
             """,
         )
+        self.write_executable(
+            "go",
+            """
+            #!/bin/sh
+            sleep "${FAKE_GO_SLEEP:-0}"
+            """,
+        )
+        self.write_executable(
+            "make",
+            """
+            #!/bin/sh
+            sleep "${FAKE_MAKE_SLEEP:-0}"
+            """,
+        )
+        self.write_executable(
+            "tlc",
+            """
+            #!/bin/sh
+            exit 99
+            """,
+        )
 
     def tearDown(self) -> None:
         self.temporary.cleanup()
@@ -137,14 +164,150 @@ class AgentTestRunTest(unittest.TestCase):
             self.capture.read_text(encoding="utf-8").splitlines(),
             [
                 "--user",
-                "--scope",
                 "--quiet",
                 "--collect",
+                "--wait",
+                "--pipe",
                 "--same-dir",
                 "--slice=nks-agent-tests.slice",
+                "--service-type=exec",
+                "--property=KillMode=control-group",
                 "--",
             ],
         )
+
+    def test_focused_envtest_remains_parallel(self) -> None:
+        lock = self.root / "heavy.lock"
+        environment = self.environment()
+        environment["FAKE_GO_SLEEP"] = "30"
+        process = subprocess.Popen(
+            [
+                str(self.isolated_script(lock)),
+                "go",
+                "test",
+                "-tags=envtest",
+                "./internal/controllers/rollout",
+            ],
+            cwd=self.root,
+            env=environment,
+            text=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+        try:
+            self.wait_for_path(self.capture)
+            probe = subprocess.run(
+                ["flock", "-n", str(lock), "true"],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(probe.returncode, 0, probe.stderr)
+        finally:
+            os.killpg(process.pid, signal.SIGTERM)
+            process.wait(timeout=5)
+
+    def test_full_envtest_target_is_serialised(self) -> None:
+        lock = self.root / "heavy.lock"
+        environment = self.environment()
+        environment["FAKE_MAKE_SLEEP"] = "30"
+        process = subprocess.Popen(
+            [
+                str(self.isolated_script(lock)),
+                "make",
+                "test-envtest",
+            ],
+            cwd=self.root,
+            env=environment,
+            text=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+        try:
+            self.wait_for_path(self.capture)
+            probe = subprocess.run(
+                ["flock", "-n", str(lock), "true"],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertNotEqual(probe.returncode, 0)
+        finally:
+            os.killpg(process.pid, signal.SIGTERM)
+            process.wait(timeout=5)
+
+    def test_local_integration_test_is_rejected_with_remote_guidance(self) -> None:
+        lock = self.root / "heavy.lock"
+        result = subprocess.run(
+            [
+                str(self.isolated_script(lock)),
+                "go",
+                "test",
+                "-tags=integration",
+                "./test/integration/cni",
+            ],
+            cwd=self.root,
+            env=self.environment(),
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("run integration and TLA+ tests on cloud-dev", result.stderr)
+        self.assertFalse(self.capture.exists())
+
+    def test_local_tlc_is_rejected_without_starting_it(self) -> None:
+        lock = self.root / "heavy.lock"
+        result = subprocess.run(
+            [
+                str(self.isolated_script(lock)),
+                "tlc",
+                "MC_example.cfg",
+            ],
+            cwd=self.root,
+            env=self.environment(),
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("run integration and TLA+ tests on cloud-dev", result.stderr)
+        self.assertFalse(self.capture.exists())
+
+    def test_focused_unit_test_remains_parallel(self) -> None:
+        lock = self.root / "heavy.lock"
+        environment = self.environment()
+        environment["FAKE_GO_SLEEP"] = "30"
+        process = subprocess.Popen(
+            [
+                str(self.isolated_script(lock)),
+                "go",
+                "test",
+                "./internal/controllers/rollout",
+            ],
+            cwd=self.root,
+            env=environment,
+            text=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+        try:
+            self.wait_for_path(self.capture)
+            probe = subprocess.run(
+                ["flock", "-n", str(lock), "true"],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(probe.returncode, 0, probe.stderr)
+        finally:
+            os.killpg(process.pid, signal.SIGTERM)
+            process.wait(timeout=5)
 
     def test_refuses_to_run_without_a_memory_limit(self) -> None:
         environment = self.environment()
@@ -163,7 +326,7 @@ class AgentTestRunTest(unittest.TestCase):
         self.assertIn("does not have a finite memory limit", result.stderr)
         self.assertFalse(self.capture.exists())
 
-    def test_heavy_lock_is_held_while_scope_runs(self) -> None:
+    def test_heavy_lock_is_held_while_service_runs(self) -> None:
         lock = self.root / "heavy.lock"
         process = subprocess.Popen(
             [str(self.isolated_script(lock)), "--heavy", "sleep", "30"],
@@ -187,7 +350,7 @@ class AgentTestRunTest(unittest.TestCase):
             os.killpg(process.pid, signal.SIGTERM)
             process.wait(timeout=5)
 
-    def test_heavy_lock_is_not_inherited_when_scope_launcher_crashes(self) -> None:
+    def test_heavy_lock_is_not_inherited_when_service_launcher_crashes(self) -> None:
         lock = self.root / "heavy.lock"
         child_pid_file = self.root / "child.pid"
         child_result = self.root / "child-result"
@@ -235,7 +398,7 @@ class AgentTestRunTest(unittest.TestCase):
         )
         self.assertEqual(probe.returncode, 0, probe.stderr)
 
-    def test_heavy_propagates_scope_command_exit_status(self) -> None:
+    def test_heavy_propagates_service_command_exit_status(self) -> None:
         lock = self.root / "heavy.lock"
         result = subprocess.run(
             [
@@ -261,6 +424,80 @@ class AgentTestRunTest(unittest.TestCase):
             text=True,
         )
         self.assertEqual(probe.returncode, 0, probe.stderr)
+
+
+class AgentTestDispatchTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temporary = tempfile.TemporaryDirectory()
+        self.root = Path(self.temporary.name)
+        self.bin = self.root / "bin"
+        self.bin.mkdir()
+        self.capture = self.root / "capture"
+        self.write_executable(
+            "go",
+            """
+            #!/bin/sh
+            printf 'direct-go:%s\\n' "$*"
+            """,
+        )
+        self.write_executable(
+            "agent-test-run",
+            """
+            #!/bin/sh
+            printf '%s\\n' "$@" > "$CAPTURE"
+            """,
+        )
+
+    def tearDown(self) -> None:
+        self.temporary.cleanup()
+
+    def write_executable(self, name: str, source: str) -> None:
+        path = self.bin / name
+        path.write_text(textwrap.dedent(source).lstrip(), encoding="utf-8")
+        path.chmod(0o755)
+
+    def environment(self) -> dict[str, str]:
+        return {
+            **os.environ,
+            "CAPTURE": str(self.capture),
+            "NKS_AGENT_TEST_ORIGINAL_PATH": f"{self.bin}:/usr/bin:/bin",
+            "PATH": f"{DISPATCH.parent}:{self.bin}:/usr/bin:/bin",
+        }
+
+    def test_direct_go_test_is_routed_through_the_test_runner(self) -> None:
+        result = subprocess.run(
+            [str(DISPATCH), "test", "-tags=envtest", "./internal/controllers"],
+            cwd=self.root,
+            env={**self.environment(), "NKS_AGENT_TEST_PROGRAM": "go"},
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            self.capture.read_text(encoding="utf-8").splitlines(),
+            [
+                str(self.bin / "go"),
+                "test",
+                "-tags=envtest",
+                "./internal/controllers",
+            ],
+        )
+
+    def test_non_test_go_command_runs_without_the_test_runner(self) -> None:
+        result = subprocess.run(
+            [str(DISPATCH), "env", "GOMOD"],
+            cwd=self.root,
+            env={**self.environment(), "NKS_AGENT_TEST_PROGRAM": "go"},
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), "direct-go:env GOMOD")
+        self.assertFalse(self.capture.exists())
 
 
 if __name__ == "__main__":

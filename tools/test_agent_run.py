@@ -51,6 +51,9 @@ class AgentRunTest(unittest.TestCase):
             #!/bin/sh
             printf 'argument=%s\n' "$1"
             printf 'marker=%s\n' "$MARKER"
+            printf 'test-shims=%s\n' "$NKS_AGENT_TEST_SHIMS_ACTIVE"
+            printf 'original-path=%s\n' "$NKS_AGENT_TEST_ORIGINAL_PATH"
+            printf 'path=%s\n' "$PATH"
             pwd
             """,
         )
@@ -64,8 +67,13 @@ class AgentRunTest(unittest.TestCase):
         path.chmod(0o755)
 
     def environment(self) -> dict[str, str]:
+        environment = {
+            key: value
+            for key, value in os.environ.items()
+            if not key.startswith("NKS_AGENT_TEST_")
+        }
         return {
-            **os.environ,
+            **environment,
             "CAPTURE": str(self.capture),
             "MARKER": "preserved",
             "PATH": f"{self.bin}:/usr/bin:/bin",
@@ -84,6 +92,16 @@ class AgentRunTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("argument=hello world", result.stdout)
         self.assertIn("marker=preserved", result.stdout)
+        self.assertIn("test-shims=1", result.stdout)
+        self.assertIn(
+            f"original-path={self.bin}:/usr/bin:/bin",
+            result.stdout,
+        )
+        self.assertIn(
+            f"path={SCRIPT.parents[1] / 'libexec' / 'agent-test-shims'}:"
+            f"{self.bin}:/usr/bin:/bin",
+            result.stdout,
+        )
         self.assertIn(str(self.root), result.stdout)
         self.assertEqual(
             self.capture.read_text(encoding="utf-8").splitlines(),

@@ -1,0 +1,52 @@
+#!/bin/sh
+
+set -eu
+
+program=${NKS_AGENT_TEST_PROGRAM:-${0##*/}}
+original_path=${NKS_AGENT_TEST_ORIGINAL_PATH:-${PATH:-}}
+
+real_program=$(PATH=$original_path command -v "$program" 2>/dev/null || true)
+if [ -z "$real_program" ]; then
+    echo "agent-test-dispatch: command not found outside the agent shim path: $program" >&2
+    exit 127
+fi
+
+if [ "${NKS_AGENT_TEST_RUN_ACTIVE:-}" = 1 ]; then
+    exec "$real_program" "$@"
+fi
+
+route=false
+case "$program" in
+    go)
+        [ "${1:-}" = test ] && route=true
+        ;;
+    make)
+        for argument do
+            case "$argument" in
+                test | test-* | check | generate | verify-generate)
+                    route=true
+                    break
+                    ;;
+            esac
+        done
+        ;;
+    ginkgo | tlc)
+        route=true
+        ;;
+    java)
+        for argument do
+            case "$argument" in
+                *tlc2.TLC* | *tla2tools*.jar)
+                    route=true
+                    break
+                    ;;
+            esac
+        done
+        ;;
+esac
+
+if [ "$route" = true ]; then
+    exec agent-test-run "$real_program" "$@"
+fi
+
+exec "$real_program" "$@"
