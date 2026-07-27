@@ -193,20 +193,22 @@ checkpoints do not require another manual remote-session registration.
 ## Agent resource headroom
 
 Interactive `codex`, `claude`, and `gemini` commands run through `agent-run`.
-Their processes and local build/test children share `agents.slice`, which caps
+Their processes and ordinary local children share `agents.slice`, which caps
 them at four CPUs and 24 GiB of memory, and gives them less CPU and I/O weight
 than interactive desktop applications. The managed Codex app-server and
 restored tmux sessions use the same launcher.
 
 Run agent-initiated tests and compile-heavy validation through `agent-test-run`.
-It places work in `nks-agent-tests.slice`, which caps the aggregate at two CPUs
-and 16 GiB of memory. Agent shells route Go build, generate, test and vet
+It places work in `nks-agent-tests.slice`, which caps the aggregate at six CPUs,
+with a 20 GiB memory soft limit and 28 GiB hard limit. Agent shells route Go
+build, generate, test and vet
 commands; validation-oriented `make` targets; Ginkgo; `golangci-lint`;
 `govulncheck`; and TLC through that runner automatically. A focused
 single-package unit or envtest may run concurrently inside the bounded slice.
 Full envtest, multi-package, race, full-suite, lint, vulnerability, build, and
-generation commands serialise through
-`/tmp/nks-agent-heavy-test.lock`; `--heavy` remains an explicit override.
+generation commands use three bounded heavy-work slots; `--heavy` remains an
+explicit override. Each process stays at `GOMAXPROCS=2` and `-p=2`. Test scratch
+space uses disk-backed `~/.cache/nks-agent-tests`, not the RAM-backed `/tmp`.
 Integration, chaos, and TLA+ tests fail locally with a prompt to run them on
 `cloud-dev`. Run envtest and integration work directly and concurrently there;
 their resources are unique and the host has capacity, so the workstation's

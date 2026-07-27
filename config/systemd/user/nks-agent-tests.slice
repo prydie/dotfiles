@@ -2,13 +2,13 @@
 Description=Resource-bounded NKS agent test workloads
 
 [Slice]
-# One broad workload at a time should fit comfortably while preserving desktop,
-# local-cluster, and agent-server headroom.
-CPUQuota=200%
+# Up to three broad jobs run with GOMAXPROCS=2. This leaves six of the
+# workstation's sixteen CPUs for the desktop, local cluster, and agent server.
+CPUQuota=600%
 CPUWeight=10
 IOWeight=10
 MemoryAccounting=yes
-MemoryHigh=12G
-MemoryMax=16G
+MemoryHigh=20G
+MemoryMax=28G
 MemorySwapMax=2G
 TasksMax=1024

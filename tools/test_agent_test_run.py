@@ -99,6 +99,8 @@ class AgentTestRunTest(unittest.TestCase):
             printf 'argument=%s\\n' "$1"
             printf 'gomaxprocs=%s\\n' "$GOMAXPROCS"
             printf 'goflags=%s\\n' "$GOFLAGS"
+            printf 'tmpdir=%s\\n' "$TMPDIR"
+            printf 'gotmpdir=%s\\n' "$GOTMPDIR"
             """,
         )
         self.write_executable(
@@ -145,6 +147,8 @@ class AgentTestRunTest(unittest.TestCase):
             "EXEC_CAPTURE": str(self.exec_capture),
             "NKS_AGENT_TEST_ENV_EXEC": str(ENV_EXEC),
             "NKS_AGENT_TEST_GO_FLAGS_HELPER": str(GO_FLAGS),
+            "NKS_AGENT_HEAVY_SLOTS": "1",
+            "XDG_CACHE_HOME": str(self.root / "cache"),
             "PATH": f"{self.bin}:/usr/bin:/bin",
         }
 
@@ -245,6 +249,11 @@ class AgentTestRunTest(unittest.TestCase):
         self.assertIn("argument=hello world", result.stdout)
         self.assertIn("gomaxprocs=2", result.stdout)
         self.assertIn("goflags=-p=2", result.stdout)
+        self.assertIn(f"tmpdir={self.root / 'cache' / 'nks-agent-tests'}", result.stdout)
+        self.assertIn(
+            f"gotmpdir={self.root / 'cache' / 'nks-agent-tests'}",
+            result.stdout,
+        )
         arguments = self.capture.read_text(encoding="utf-8").splitlines()
         self.assertEqual(
             [
@@ -1227,6 +1236,7 @@ class AgentTestRunSystemdTest(unittest.TestCase):
                     **os.environ,
                     "NKS_AGENT_TEST_ENV_EXEC": str(ENV_EXEC),
                     "NKS_AGENT_TEST_GO_FLAGS_HELPER": str(GO_FLAGS),
+                    "NKS_AGENT_HEAVY_SLOTS": "1",
                 },
                 text=True,
                 stdout=subprocess.DEVNULL,

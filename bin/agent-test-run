@@ -440,17 +440,40 @@ fi
 
 if [ "$heavy" = true ]; then
     install_cleanup_traps
-    exec 9>/tmp/nks-agent-heavy-test.lock
-    launching=true
-    flock -w 3600 9 &
-    publish_waiting_pid "$!"
-    if wait "$waiting_pid"; then
-        waiting_pid=
-    else
-        rc=$?
-        waiting_pid=
-        exit "$rc"
-    fi
+    heavy_slots=${NKS_AGENT_HEAVY_SLOTS:-3}
+    case "$heavy_slots" in
+        1 | 2 | 3)
+            ;;
+        *)
+            echo "agent-test-run: NKS_AGENT_HEAVY_SLOTS must be 1, 2, or 3" >&2
+            exit 2
+            ;;
+    esac
+    while :; do
+        slot=0
+        while [ "$slot" -lt "$heavy_slots" ]; do
+            lock=/tmp/nks-agent-heavy-test.lock
+            if [ "$slot" -gt 0 ]; then
+                lock="$lock.$slot"
+            fi
+            exec 9>"$lock"
+            if flock -n 9; then
+                break 2
+            fi
+            exec 9>&-
+            slot=$((slot + 1))
+        done
+        launching=true
+        sleep 0.1 &
+        publish_waiting_pid "$!"
+        if wait "$waiting_pid"; then
+            waiting_pid=
+        else
+            rc=$?
+            waiting_pid=
+            exit "$rc"
+        fi
+    done
     # Keep the lock in this waiting wrapper and close its descriptor before
     # systemd-run starts workload processes. Cancellation stops the named unit
     # before the wrapper exits and releases the lock.
