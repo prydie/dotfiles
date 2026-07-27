@@ -6,6 +6,7 @@
 # go in an untracked ~/.config/mise/config.local.toml, which mise loads
 # automatically and which is gitignored so it never lands on other machines.
 [tools]
+node = "24.18.0"  # LTS; also satisfies the npm: backend below, which needs npm on PATH even in non-interactive shells where zsh-nvm never loads
 neovim = "0.12.2"
 starship = "1.25.1"
 atuin = "18.16.1"
