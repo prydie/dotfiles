@@ -1001,7 +1001,6 @@ os::ubuntu::install_packages_dev() {
   nvm::install_node_default
   mkdir -p "${HOME}/.local/bin"
   npm install -g --prefix "${HOME}/.local" \
-    @anthropic-ai/claude-code \
     @google/gemini-cli \
     @openai/codex \
     @ansible/ansible-language-server \
@@ -1012,11 +1011,24 @@ os::ubuntu::install_packages_dev() {
     pyright \
     vscode-langservers-extracted \
     yaml-language-server
+  tools::install_claude_code
   tools::install_codex_superpowers_optional
   if ! python3 "${_ROOT}/bin/agent-sessions" install-hooks; then
     log::e "Agent session hooks were not installed; rerun make agent-session-hooks"
   fi
   tools::verify_dev_cli
+}
+
+tools::install_claude_code() {
+  # Claude Code's native installer owns ~/.local/bin/claude (a symlink into
+  # ~/.local/share/claude) and self-updates, so installing the npm package
+  # alongside it fails with EEXIST. Use the native installer exclusively.
+  if command -v claude >/dev/null 2>&1; then
+    log::f "Claude Code already installed: $(claude --version 2>/dev/null | head -n1)"
+    return 0
+  fi
+
+  curl -fsSL https://claude.ai/install.sh | bash
 }
 
 tools::configure_helm_repos() {

@@ -335,7 +335,7 @@ mode in their OSD menus.
 - Vale uses the repo-managed global config at [config/vale/vale.ini](config/vale/vale.ini), with the `general` profile: `Vale + write-good + alex`.
 - `core` writes Zsh completions for `kubectl` to `${XDG_DATA_HOME:-$HOME/.local/share}/zsh/site-functions/_kubectl`.
 - `PROFILE=dev|full` installs Go developer tools (`gopls`, `golangci-lint`, `govulncheck`, `modvendor`) via `go install`, installs TLA+ validation/proof tooling (`tlc`, `sany`, `pcal`, `tla2tex`, `apalache-mc`, `tlapm`, `tla`, `tla-mcp`), and writes Zsh completions for `kubebuilder`, Helm, and `kind`. (All mise-managed CLIs, including the dev tooling, come from `config.toml` at the `core` step above.)
-- `dev`: `core` + developer tools such as `1password-cli`, `ansible`, `go`, `tofu` (OpenTofu), `doctl`, `gh`, `aws`, `openstack`, `hugo`, `picocom`, Claude Code (`@anthropic-ai/claude-code`), Codex CLI (`@openai/codex`), Gemini CLI (`@google/gemini-cli`), and ESP tooling (`esptool` + `idf.py` bootstrap), plus Neovim bootstrap.
+- `dev`: `core` + developer tools such as `1password-cli`, `ansible`, `go`, `tofu` (OpenTofu), `doctl`, `gh`, `aws`, `openstack`, `hugo`, `picocom`, Claude Code (native installer), Codex CLI (`@openai/codex`), Gemini CLI (`@google/gemini-cli`), and ESP tooling (`esptool` + `idf.py` bootstrap), plus Neovim bootstrap.
 - Go is installed from the official tarball into `~/.local/opt/go` with `~/.local/bin/go` symlinked ahead of system Go, so the repo can enforce a minimum version.
 - `full`: `dev` + heavier extras such as `nerdctl`, `regctl`, `vegeta`, `oci-cli`, `autopep8`, and YubiKey tooling from [hooks/os](hooks/os).
 
