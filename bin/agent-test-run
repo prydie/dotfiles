@@ -53,7 +53,17 @@ if ! command -v "$1" >/dev/null 2>&1; then
 fi
 
 command_is_remote_only() {
+    expect_tags=false
     for argument do
+        if [ "$expect_tags" = true ]; then
+            case "$argument" in
+                *integration*)
+                    return 0
+                    ;;
+            esac
+            expect_tags=false
+        fi
+
         base=${argument##*/}
         case "$base" in
             tlc | tlc2.TLC)
@@ -61,11 +71,15 @@ command_is_remote_only() {
                 ;;
         esac
         case "$argument" in
-            *tlc2.TLC* | *tla2tools*.jar | test-integration | \
+            *tlc2.TLC* | *tla2tools*.jar | test-integration | test-chaos | \
                 -tags=integration | -tags=*integration* | \
+                --tags=integration | --tags=*integration* | \
                 ./test/integration | ./test/integration/* | \
                 ../test/integration | ../test/integration/*)
                 return 0
+                ;;
+            -tags | --tags)
+                expect_tags=true
                 ;;
         esac
     done
@@ -74,9 +88,13 @@ command_is_remote_only() {
 
 command_requires_heavy_lane() {
     seen_go=false
+    seen_ginkgo=false
     seen_make=false
     go_test=false
+    go_expect_value=false
+    go_after_args=false
     package_count=0
+    ginkgo_package_count=0
 
     for argument do
         base=${argument##*/}
@@ -84,19 +102,24 @@ command_requires_heavy_lane() {
             go)
                 seen_go=true
                 ;;
+            ginkgo)
+                seen_ginkgo=true
+                ;;
             make)
                 seen_make=true
                 ;;
-            test)
-                if [ "$seen_go" = true ]; then
-                    go_test=true
-                fi
-                ;;
         esac
+
+        if [ "$seen_go" = true ] && [ "$go_test" = false ] &&
+            [ "$base" = test ]; then
+            go_test=true
+            continue
+        fi
 
         if [ "$seen_make" = true ]; then
             case "$argument" in
                 test | test-envtest | test-unit | test-race | \
+                    test-postdeploy | test-conformance | \
                     verify-generate | check | generate)
                     return 0
                     ;;
@@ -104,12 +127,48 @@ command_requires_heavy_lane() {
         fi
 
         if [ "$go_test" = true ]; then
+            if [ "$go_after_args" = true ]; then
+                continue
+            fi
+            if [ "$go_expect_value" = true ]; then
+                go_expect_value=false
+                continue
+            fi
             case "$argument" in
+                -args)
+                    go_after_args=true
+                    ;;
                 -race | -race=*)
                     return 0
                     ;;
-                ./* | ../*)
+                -C | -asmflags | -bench | -benchtime | -count | \
+                    -covermode | -coverpkg | -coverprofile | -cpu | \
+                    -exec | -fuzz | -fuzzminimizetime | -fuzztime | \
+                    -gcflags | -ldflags | -list | -mod | -modfile | \
+                    -o | -overlay | -p | -parallel | -pkgdir | -run | \
+                    -shuffle | -tags | -timeout | -toolexec | -vet)
+                    go_expect_value=true
+                    ;;
+                -*)
+                    ;;
+                *)
                     package_count=$((package_count + 1))
+                    case "$argument" in
+                        all | std | cmd/... | *...)
+                            return 0
+                            ;;
+                    esac
+                    ;;
+            esac
+        fi
+
+        if [ "$seen_ginkgo" = true ]; then
+            case "$argument" in
+                -r | --recursive | -p | --procs | --procs=*)
+                    return 0
+                    ;;
+                . | ./* | ../*)
+                    ginkgo_package_count=$((ginkgo_package_count + 1))
                     case "$argument" in
                         *...)
                             return 0
@@ -120,7 +179,10 @@ command_requires_heavy_lane() {
         fi
     done
 
-    [ "$go_test" = true ] && [ "$package_count" -gt 1 ]
+    if [ "$go_test" = true ] && [ "$package_count" -gt 1 ]; then
+        return 0
+    fi
+    [ "$seen_ginkgo" = true ] && [ "$ginkgo_package_count" -gt 1 ]
 }
 
 if command_is_remote_only "$@"; then
@@ -134,23 +196,17 @@ if [ "$heavy" = false ] && command_requires_heavy_lane "$@"; then
     heavy=true
 fi
 
-run() {
-    systemd-run \
-        --user \
-        --quiet \
-        --collect \
-        --wait \
-        --pipe \
-        --same-dir \
-        --slice=nks-agent-tests.slice \
-        --service-type=exec \
-        --property=KillMode=control-group \
-        -- \
-        nice -n 10 ionice -c 3 env \
-        NKS_AGENT_TEST_RUN_ACTIVE=1 \
-        GOMAXPROCS=2 \
-        GOFLAGS=-p=2 \
-        "$@"
+invoking_systemd_unit() {
+    LC_ALL=C awk -F/ '
+        /^0::/ {
+            for (field = NF; field > 0; field--) {
+                if ($field ~ /\.(scope|service)$/) {
+                    print $field
+                    exit
+                }
+            }
+        }
+    ' "/proc/$$/cgroup"
 }
 
 run_named() {
@@ -162,17 +218,17 @@ run_named() {
         --collect \
         --wait \
         --pipe \
+        --expand-environment=no \
         --same-dir \
         --slice=nks-agent-tests.slice \
         --unit="$unit" \
         --service-type=exec \
         --property=KillMode=control-group \
+        --property="BindsTo=$owner_unit" \
+        --property="After=$owner_unit" \
         -- \
-        nice -n 10 ionice -c 3 env \
-        NKS_AGENT_TEST_RUN_ACTIVE=1 \
-        GOMAXPROCS=2 \
-        GOFLAGS=-p=2 \
-        "$@"
+        nice -n 10 ionice -c 3 \
+        "$agent_test_env_exec" "$caller_environment" "$@"
 }
 
 wait_for_unit() {
@@ -191,22 +247,81 @@ wait_for_unit() {
     done
 }
 
-if [ "$heavy" = true ]; then
-    (
-        flock -w 3600 9
-        # Keep the lock in this waiting parent and close its descriptor before
-        # systemd-run starts workload processes. The named unit wait keeps
-        # surviving children serialised without letting them inherit the lock.
-        unit="nks-agent-heavy-test-$$.service"
-        if run_named "$unit" "$@" 9>&-; then
-            rc=0
-        else
-            rc=$?
-        fi
-        wait_for_unit "$unit"
-        exit "$rc"
-    ) 9>/tmp/nks-agent-heavy-test.lock
-    exit $?
+active_unit=
+
+stop_active_unit() {
+    if [ -z "$active_unit" ]; then
+        return
+    fi
+
+    unit_to_stop=$active_unit
+    systemctl --user stop "$unit_to_stop" >/dev/null 2>&1 || true
+    wait_for_unit "$unit_to_stop"
+    active_unit=
+}
+
+handle_signal() {
+    status=$1
+    trap - HUP INT TERM
+    stop_active_unit
+    exit "$status"
+}
+
+install_cleanup_traps() {
+    trap 'handle_signal 129' HUP
+    trap 'handle_signal 130' INT
+    trap 'handle_signal 143' TERM
+    trap 'stop_active_unit' EXIT
+}
+
+run_managed_unit() {
+    unit=$1
+    shift
+    active_unit=$unit
+    if run_named "$unit" "$@"; then
+        rc=0
+    else
+        rc=$?
+    fi
+    wait_for_unit "$unit"
+    active_unit=
+    return "$rc"
+}
+
+owner_unit=$(invoking_systemd_unit)
+case "$owner_unit" in
+    *.scope | *.service)
+        ;;
+    *)
+        echo "agent-test-run: cannot identify the invoking systemd scope or service" >&2
+        exit 1
+        ;;
+esac
+
+agent_test_env_exec=${NKS_AGENT_TEST_ENV_EXEC:-$(readlink -f \
+    "$(dirname "$(readlink -f "$0")")/../libexec/agent-test-env-exec")}
+caller_environment="/proc/$$/environ"
+if [ ! -x "$agent_test_env_exec" ]; then
+    echo "agent-test-run: environment launcher is unavailable: $agent_test_env_exec" >&2
+    exit 1
 fi
 
-run "$@"
+if [ "$heavy" = true ]; then
+    install_cleanup_traps
+    exec 9>/tmp/nks-agent-heavy-test.lock
+    flock -w 3600 9
+    # Keep the lock in this waiting wrapper and close its descriptor before
+    # systemd-run starts workload processes. Cancellation stops the named unit
+    # before the wrapper exits and releases the lock.
+    unit="nks-agent-heavy-test-$$.service"
+    if run_managed_unit "$unit" "$@" 9>&-; then
+        rc=0
+    else
+        rc=$?
+    fi
+    exec 9>&-
+    exit "$rc"
+fi
+
+install_cleanup_traps
+run_managed_unit "nks-agent-test-$$.service" "$@"

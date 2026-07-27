@@ -51,12 +51,19 @@ if ! command -v "$1" >/dev/null 2>&1; then
     exit 127
 fi
 
-if [ "${NKS_AGENT_TEST_SHIMS_ACTIVE:-}" != 1 ]; then
-    NKS_AGENT_TEST_ORIGINAL_PATH=$PATH
-    NKS_AGENT_TEST_SHIMS_ACTIVE=1
-    PATH="$HOME/.dotfiles/libexec/agent-test-shims:$PATH"
-    export NKS_AGENT_TEST_ORIGINAL_PATH NKS_AGENT_TEST_SHIMS_ACTIVE PATH
-fi
+test_shim_dir="$HOME/.dotfiles/libexec/agent-test-shims"
+case ":$PATH:" in
+    *":$test_shim_dir:"*)
+        ;;
+    *)
+        if [ -z "${NKS_AGENT_TEST_ORIGINAL_PATH:-}" ]; then
+            NKS_AGENT_TEST_ORIGINAL_PATH=$PATH
+        fi
+        PATH="$test_shim_dir:$PATH"
+        ;;
+esac
+NKS_AGENT_TEST_SHIMS_ACTIVE=1
+export NKS_AGENT_TEST_ORIGINAL_PATH NKS_AGENT_TEST_SHIMS_ACTIVE PATH
 
 exec systemd-run \
     --user \

@@ -205,10 +205,12 @@ TLC through that runner automatically. A focused single-package unit or envtest
 may run concurrently inside the bounded slice. Full envtest, multi-package,
 race, full-suite, and generation commands serialise through
 `/tmp/nks-agent-heavy-test.lock`; `--heavy` remains an explicit override.
-Integration and TLA+ tests fail locally with a prompt to run them on
-`cloud-dev`. Each local test runs as a transient service with
-`KillMode=control-group`, so a completed or failed test cannot leave its
-kube-apiserver, etcd, or other child processes behind.
+Integration, chaos, and TLA+ tests fail locally with a prompt to run them on
+`cloud-dev`. Each local test runs as a transient service which imports the
+caller's environment without recording values in its command line, binds to the
+invoking agent scope, and uses `KillMode=control-group`. Completion,
+cancellation, or agent exit therefore cannot leave its kube-apiserver, etcd, or
+other child processes behind.
 
 Docker containers do not inherit the user slice and remain outside this initial
 limit.

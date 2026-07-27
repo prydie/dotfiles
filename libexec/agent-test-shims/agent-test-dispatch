@@ -11,7 +11,8 @@ if [ -z "$real_program" ]; then
     exit 127
 fi
 
-if [ "${NKS_AGENT_TEST_RUN_ACTIVE:-}" = 1 ]; then
+if [ -r "/proc/$$/cgroup" ] &&
+    grep -Fq "/nks-agent-tests.slice/" "/proc/$$/cgroup"; then
     exec "$real_program" "$@"
 fi
 

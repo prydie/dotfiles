@@ -116,6 +116,29 @@ class AgentRunTest(unittest.TestCase):
             ],
         )
 
+    def test_stale_active_marker_does_not_disable_test_shims(self) -> None:
+        environment = self.environment()
+        environment["NKS_AGENT_TEST_SHIMS_ACTIVE"] = "1"
+
+        result = subprocess.run(
+            [str(SCRIPT), "probe", "marker"],
+            cwd=self.root,
+            env=environment,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(
+            f"path={SCRIPT.parents[1] / 'libexec' / 'agent-test-shims'}:",
+            result.stdout,
+        )
+        self.assertIn(
+            f"original-path={self.bin}:/usr/bin:/bin",
+            result.stdout,
+        )
+
     def test_refuses_to_run_without_expected_quota(self) -> None:
         environment = self.environment()
         environment["FAKE_QUOTA"] = "infinity"
