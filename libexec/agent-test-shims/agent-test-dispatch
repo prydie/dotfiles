@@ -31,7 +31,27 @@ fi
 route=false
 case "$program" in
     go)
-        case "${1:-}" in
+        go_subcommand() {
+            while [ "$#" -gt 0 ]; do
+                case "$1" in
+                    -C)
+                        shift
+                        if [ "$#" -eq 0 ]; then
+                            return
+                        fi
+                        shift
+                        ;;
+                    -C=*)
+                        shift
+                        ;;
+                    *)
+                        printf '%s\n' "$1"
+                        return
+                        ;;
+                esac
+            done
+        }
+        case "$(go_subcommand "$@")" in
             test | generate)
                 route=true
                 ;;

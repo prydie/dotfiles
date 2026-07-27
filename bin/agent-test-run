@@ -67,6 +67,13 @@ if ! command -v "$1" >/dev/null 2>&1; then
     exit 127
 fi
 
+agent_test_go_flags=${NKS_AGENT_TEST_GO_FLAGS_HELPER:-$(readlink -f \
+    "$(dirname "$(readlink -f "$0")")/../libexec/agent-test-go-flags")}
+if [ ! -x "$agent_test_go_flags" ]; then
+    echo "agent-test-run: Go flag classifier is unavailable: $agent_test_go_flags" >&2
+    exit 1
+fi
+
 tags_include_remote() {
     tag_list=$1
     saved_ifs=$IFS
@@ -87,17 +94,9 @@ tags_include_remote() {
 
 command_is_remote_only() {
     program=${1##*/}
-    if [ "$program" = go ]; then
-        for go_flag in ${GOFLAGS:-}; do
-            case "$go_flag" in
-                -tags=* | --tags=*)
-                    tag_list=${go_flag#*=}
-                    if tags_include_remote "$tag_list"; then
-                        return 0
-                    fi
-                    ;;
-            esac
-        done
+    if [ "$program" = go ] && [ -n "${GOFLAGS:-}" ] &&
+        "$agent_test_go_flags" remote "$GOFLAGS"; then
+        return 0
     fi
 
     expect_tags=false
@@ -151,14 +150,9 @@ command_requires_heavy_lane() {
     package_count=0
     ginkgo_package_count=0
 
-    if [ "${1##*/}" = go ]; then
-        for go_flag in ${GOFLAGS:-}; do
-            case "$go_flag" in
-                -race | -race=*)
-                    return 0
-                    ;;
-            esac
-        done
+    if [ "${1##*/}" = go ] && [ -n "${GOFLAGS:-}" ] &&
+        "$agent_test_go_flags" race "$GOFLAGS"; then
+        return 0
     fi
 
     for argument do
@@ -233,7 +227,7 @@ command_requires_heavy_lane() {
         if [ "$seen_ginkgo" = true ]; then
             case "$argument" in
                 -r | --recursive | -p | --procs | --procs=* | \
-                    --race | --race=*)
+                    -race | -race=* | --race | --race=*)
                     return 0
                     ;;
                 . | ./* | ../*)
@@ -295,6 +289,7 @@ invoking_systemd_unit() {
 run_named() {
     unit=$1
     shift
+    launching=true
     systemd-run \
         --user \
         --quiet \
@@ -314,7 +309,10 @@ run_named() {
         "$caller_environment" \
         "$caller_command_line" \
         "$command_arg_offset" &
-    waiting_pid=$!
+    if [ "${NKS_AGENT_TEST_SIGNAL_DURING_PID_PUBLICATION:-}" = 1 ]; then
+        kill -TERM "$$"
+    fi
+    publish_waiting_pid "$!"
     if wait "$waiting_pid"; then
         rc=0
     else
@@ -342,6 +340,18 @@ wait_for_unit() {
 
 active_unit=
 waiting_pid=
+launching=false
+pending_signal_status=
+
+publish_waiting_pid() {
+    waiting_pid=$1
+    launching=false
+    if [ -n "$pending_signal_status" ]; then
+        status=$pending_signal_status
+        pending_signal_status=
+        handle_signal "$status"
+    fi
+}
 
 stop_waiting_process() {
     if [ -z "$waiting_pid" ]; then
@@ -367,6 +377,10 @@ stop_active_unit() {
 
 handle_signal() {
     status=$1
+    if [ "$launching" = true ]; then
+        pending_signal_status=$status
+        return
+    fi
     trap - HUP INT TERM
     stop_waiting_process
     stop_active_unit
@@ -416,8 +430,9 @@ fi
 if [ "$heavy" = true ]; then
     install_cleanup_traps
     exec 9>/tmp/nks-agent-heavy-test.lock
+    launching=true
     flock -w 3600 9 &
-    waiting_pid=$!
+    publish_waiting_pid "$!"
     if wait "$waiting_pid"; then
         waiting_pid=
     else

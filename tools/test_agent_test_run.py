@@ -19,6 +19,7 @@ DISPATCH = (
     / "agent-test-dispatch"
 )
 ENV_EXEC = Path(__file__).parents[1] / "libexec" / "agent-test-env-exec"
+GO_FLAGS = Path(__file__).parents[1] / "libexec" / "agent-test-go-flags"
 
 
 class AgentTestRunTest(unittest.TestCase):
@@ -143,6 +144,7 @@ class AgentTestRunTest(unittest.TestCase):
             "CAPTURE": str(self.capture),
             "EXEC_CAPTURE": str(self.exec_capture),
             "NKS_AGENT_TEST_ENV_EXEC": str(ENV_EXEC),
+            "NKS_AGENT_TEST_GO_FLAGS_HELPER": str(GO_FLAGS),
             "PATH": f"{self.bin}:/usr/bin:/bin",
         }
 
@@ -404,6 +406,12 @@ class AgentTestRunTest(unittest.TestCase):
             extra_environment={"GOFLAGS": "-tags=integration"},
         )
 
+    def test_quoted_effective_integration_goflags_are_rejected(self) -> None:
+        self.assert_remote_only(
+            ["go", "test", "./internal/controllers/rollout"],
+            extra_environment={"GOFLAGS": "'-tags=integration'"},
+        )
+
     def test_effective_chaos_goflags_are_rejected(self) -> None:
         self.assert_remote_only(
             ["go", "test", "./internal/controllers/rollout"],
@@ -447,12 +455,27 @@ class AgentTestRunTest(unittest.TestCase):
             expected=True,
         )
 
+    def test_ginkgo_single_dash_race_is_serialised(self) -> None:
+        self.assert_command_holds_heavy_lock(
+            ["ginkgo", "-race=true", "./internal/controllers/rollout"],
+            "FAKE_GINKGO_SLEEP",
+            expected=True,
+        )
+
     def test_effective_goflags_race_is_serialised(self) -> None:
         self.assert_command_holds_heavy_lock(
             ["go", "test", "./internal/controllers/rollout"],
             "FAKE_GO_SLEEP",
             expected=True,
             extra_environment={"GOFLAGS": "-race"},
+        )
+
+    def test_double_dash_effective_goflags_race_is_serialised(self) -> None:
+        self.assert_command_holds_heavy_lock(
+            ["go", "test", "./internal/controllers/rollout"],
+            "FAKE_GO_SLEEP",
+            expected=True,
+            extra_environment={"GOFLAGS": "'--race'"},
         )
 
     def test_refuses_to_run_without_a_memory_limit(self) -> None:
@@ -562,12 +585,37 @@ class AgentTestRunTest(unittest.TestCase):
             self.wait_for_path(self.capture)
             self.wait_for_path(launcher_pid_file)
             process.terminate()
-            self.assertEqual(process.wait(timeout=2), 143)
+            self.assertEqual(process.wait(timeout=5), 143)
             launcher_pid = launcher_pid_file.read_text(encoding="utf-8").strip()
             self.assertFalse(Path(f"/proc/{launcher_pid}").exists())
         finally:
             if process.poll() is None:
                 os.killpg(process.pid, signal.SIGKILL)
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            process.wait(timeout=5)
+
+    def test_signal_between_fork_and_pid_publication_stops_launcher(self) -> None:
+        environment = self.environment()
+        environment["FAKE_SYSTEMD_RUN_START_DELAY"] = "30"
+        environment["NKS_AGENT_TEST_SIGNAL_DURING_PID_PUBLICATION"] = "1"
+
+        process = subprocess.Popen(
+            [str(SCRIPT), "probe", "publication-race"],
+            cwd=self.root,
+            env=environment,
+            text=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+        try:
+            self.assertEqual(process.wait(timeout=5), 143)
+            with self.assertRaises(ProcessLookupError):
+                os.killpg(process.pid, 0)
+        finally:
             try:
                 os.killpg(process.pid, signal.SIGKILL)
             except ProcessLookupError:
@@ -680,6 +728,37 @@ class AgentTestDispatchTest(unittest.TestCase):
                 str(self.bin / "go"),
                 "generate",
                 "./internal/controllers",
+            ],
+        )
+
+    def test_go_global_directory_flag_still_routes_test(self) -> None:
+        result = subprocess.run(
+            [
+                str(DISPATCH),
+                "-C",
+                "/checkout",
+                "test",
+                "-tags=integration",
+                "./test/integration/cni",
+            ],
+            cwd=self.root,
+            env={**self.environment(), "NKS_AGENT_TEST_PROGRAM": "go"},
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            self.capture.read_text(encoding="utf-8").splitlines(),
+            [
+                "--nested",
+                str(self.bin / "go"),
+                "-C",
+                "/checkout",
+                "test",
+                "-tags=integration",
+                "./test/integration/cni",
             ],
         )
 
@@ -866,6 +945,48 @@ class AgentTestRunSystemdTest(unittest.TestCase):
             )
             self.assertFalse(result_file.exists())
 
+    def test_nested_go_directory_flag_cannot_bypass_integration_policy(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            fake_bin = root / "bin"
+            fake_bin.mkdir()
+            result_file = root / "result"
+            fake_go = fake_bin / "go"
+            fake_go.write_text(
+                "#!/bin/sh\nprintf 'unexpected\\n' > \"$RESULT_FILE\"\n",
+                encoding="utf-8",
+            )
+            fake_go.chmod(0o755)
+            environment = {
+                **os.environ,
+                "PATH": (
+                    f"{DISPATCH.parent}:{SCRIPT.parent}:{fake_bin}:/usr/bin:/bin"
+                ),
+                "NKS_AGENT_TEST_ORIGINAL_PATH": (
+                    f"{SCRIPT.parent}:{fake_bin}:/usr/bin:/bin"
+                ),
+                "NKS_AGENT_TEST_SHIMS_ACTIVE": "1",
+                "RESULT_FILE": str(result_file),
+            }
+
+            result = subprocess.run(
+                [
+                    str(SCRIPT),
+                    "sh",
+                    "-c",
+                    "go -C /checkout test -tags=integration ./focused",
+                ],
+                cwd=SCRIPT.parents[1],
+                env=environment,
+                text=True,
+                capture_output=True,
+                check=False,
+                timeout=5,
+            )
+
+            self.assertEqual(result.returncode, 2, result.stderr)
+            self.assertFalse(result_file.exists())
+
     def test_nested_broad_test_acquires_heavy_lane(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -898,6 +1019,7 @@ class AgentTestRunSystemdTest(unittest.TestCase):
                 "PATH": f"{DISPATCH.parent}:{fake_bin}:/usr/bin:/bin",
                 "NKS_AGENT_TEST_ORIGINAL_PATH": f"{fake_bin}:/usr/bin:/bin",
                 "NKS_AGENT_TEST_ENV_EXEC": str(ENV_EXEC),
+                "NKS_AGENT_TEST_GO_FLAGS_HELPER": str(GO_FLAGS),
                 "NKS_AGENT_TEST_SHIMS_ACTIVE": "1",
                 "EXPECTED_LOCK": str(lock),
                 "RESULT_FILE": str(result_file),
@@ -1041,6 +1163,7 @@ class AgentTestRunSystemdTest(unittest.TestCase):
                 env={
                     **os.environ,
                     "NKS_AGENT_TEST_ENV_EXEC": str(ENV_EXEC),
+                    "NKS_AGENT_TEST_GO_FLAGS_HELPER": str(GO_FLAGS),
                 },
                 text=True,
                 stdout=subprocess.DEVNULL,
