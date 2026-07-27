@@ -141,6 +141,7 @@ command_is_remote_only() {
 }
 
 command_requires_heavy_lane() {
+    program=${1##*/}
     seen_go=false
     seen_ginkgo=false
     seen_make=false
@@ -149,6 +150,12 @@ command_requires_heavy_lane() {
     go_after_args=false
     package_count=0
     ginkgo_package_count=0
+
+    case "$program" in
+        golangci-lint | govulncheck)
+            return 0
+            ;;
+    esac
 
     if [ "${1##*/}" = go ] && [ -n "${GOFLAGS:-}" ] &&
         "$agent_test_go_flags" race "$GOFLAGS"; then
@@ -174,15 +181,19 @@ command_requires_heavy_lane() {
             go_test=true
             continue
         fi
-        if [ "$seen_go" = true ] && [ "$base" = generate ]; then
-            return 0
+        if [ "$seen_go" = true ]; then
+            case "$base" in
+                build | generate | vet)
+                    return 0
+                    ;;
+            esac
         fi
 
         if [ "$seen_make" = true ]; then
             case "$argument" in
-                test | test-envtest | test-unit | test-race | \
-                    test-postdeploy | test-conformance | \
-                    verify-generate | check | generate)
+                build | check | generate | lint | test | test-envtest | \
+                    test-unit | test-race | test-postdeploy | \
+                    test-conformance | validate | verify-generate | vulncheck)
                     return 0
                     ;;
             esac

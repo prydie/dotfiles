@@ -664,6 +664,14 @@ class AgentTestDispatchTest(unittest.TestCase):
             printf 'direct-go:%s\\n' "$*"
             """,
         )
+        for program in ("golangci-lint", "govulncheck", "make"):
+            self.write_executable(
+                program,
+                f"""
+                #!/bin/sh
+                printf 'direct-{program}:%s\\n' "$*"
+                """,
+            )
         self.write_executable(
             "agent-test-run",
             """
@@ -730,6 +738,61 @@ class AgentTestDispatchTest(unittest.TestCase):
                 "./internal/controllers",
             ],
         )
+
+    def test_go_build_and_vet_are_routed_through_the_test_runner(self) -> None:
+        for subcommand in ("build", "vet"):
+            with self.subTest(subcommand=subcommand):
+                self.capture.unlink(missing_ok=True)
+                result = subprocess.run(
+                    [str(DISPATCH), subcommand, "./internal/controllers/..."],
+                    cwd=self.root,
+                    env={**self.environment(), "NKS_AGENT_TEST_PROGRAM": "go"},
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                )
+
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(
+                    self.capture.read_text(encoding="utf-8").splitlines(),
+                    [
+                        "--nested",
+                        str(self.bin / "go"),
+                        subcommand,
+                        "./internal/controllers/...",
+                    ],
+                )
+
+    def test_compile_heavy_tools_are_routed_through_the_test_runner(self) -> None:
+        cases = (
+            ("golangci-lint", ("run", "./...")),
+            ("govulncheck", ("./...",)),
+            ("make", ("lint",)),
+        )
+        for program, arguments in cases:
+            with self.subTest(program=program):
+                self.capture.unlink(missing_ok=True)
+                result = subprocess.run(
+                    [str(DISPATCH), *arguments],
+                    cwd=self.root,
+                    env={
+                        **self.environment(),
+                        "NKS_AGENT_TEST_PROGRAM": program,
+                    },
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                )
+
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(
+                    self.capture.read_text(encoding="utf-8").splitlines(),
+                    [
+                        "--nested",
+                        str(self.bin / program),
+                        *arguments,
+                    ],
+                )
 
     def test_go_global_directory_flag_still_routes_test(self) -> None:
         result = subprocess.run(

@@ -52,7 +52,7 @@ case "$program" in
             done
         }
         case "$(go_subcommand "$@")" in
-            test | generate)
+            build | generate | test | vet)
                 route=true
                 ;;
         esac
@@ -60,14 +60,15 @@ case "$program" in
     make)
         for argument do
             case "$argument" in
-                test | test-* | check | generate | verify-generate)
+                build | check | copyright | generate | lint | test | test-* | \
+                    validate | verify-generate | vulncheck)
                     route=true
                     break
                     ;;
             esac
         done
         ;;
-    ginkgo | tlc)
+    ginkgo | golangci-lint | govulncheck | tlc)
         route=true
         ;;
     java)

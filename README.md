@@ -198,12 +198,14 @@ them at four CPUs and 24 GiB of memory, and gives them less CPU and I/O weight
 than interactive desktop applications. The managed Codex app-server and
 restored tmux sessions use the same launcher.
 
-Run agent-initiated tests through `agent-test-run`. It places work in
-`nks-agent-tests.slice`, which caps the aggregate at two CPUs and 16 GiB of
-memory. Agent shells route `go test`, test-oriented `make` targets, Ginkgo, and
-TLC through that runner automatically. A focused single-package unit or envtest
-may run concurrently inside the bounded slice. Full envtest, multi-package,
-race, full-suite, and generation commands serialise through
+Run agent-initiated tests and compile-heavy validation through `agent-test-run`.
+It places work in `nks-agent-tests.slice`, which caps the aggregate at two CPUs
+and 16 GiB of memory. Agent shells route Go build, generate, test and vet
+commands; validation-oriented `make` targets; Ginkgo; `golangci-lint`;
+`govulncheck`; and TLC through that runner automatically. A focused
+single-package unit or envtest may run concurrently inside the bounded slice.
+Full envtest, multi-package, race, full-suite, lint, vulnerability, build, and
+generation commands serialise through
 `/tmp/nks-agent-heavy-test.lock`; `--heavy` remains an explicit override.
 Integration, chaos, and TLA+ tests fail locally with a prompt to run them on
 `cloud-dev`. Run envtest and integration work directly and concurrently there;
