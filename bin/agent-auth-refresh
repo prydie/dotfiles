@@ -1,0 +1,48 @@
+#!/bin/sh
+
+set -eu
+
+runtime_dir=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/nks-agent-secrets
+token_file=$runtime_dir/github.token
+
+check() {
+    if [ ! -s "$token_file" ]; then
+        echo "agent-auth-refresh: no runtime GitHub credential; unlock the login keyring and run agent-auth-refresh" >&2
+        return 1
+    fi
+
+    GH_TOKEN=$(cat "$token_file")
+    export GH_TOKEN GH_PROMPT_DISABLED=1 GIT_TERMINAL_PROMPT=0
+    timeout 10s gh api user --jq .login >/dev/null
+}
+
+if [ "${1:-}" = "--check" ]; then
+    check
+    exit
+fi
+if [ "$#" -ne 0 ]; then
+    echo "usage: agent-auth-refresh [--check]" >&2
+    exit 2
+fi
+
+umask 077
+install -d -m 700 "$runtime_dir"
+candidate=$(mktemp "$runtime_dir/github.token.XXXXXX")
+trap 'rm -f "$candidate"' EXIT HUP INT TERM
+
+GH_PROMPT_DISABLED=1 GIT_TERMINAL_PROMPT=0 timeout 10s \
+    gh auth token -h github.com >"$candidate"
+test -s "$candidate"
+chmod 600 "$candidate"
+mv "$candidate" "$token_file"
+trap - EXIT HUP INT TERM
+
+GH_TOKEN=$(cat "$token_file")
+export GH_TOKEN
+systemctl --user set-environment \
+    "GH_TOKEN=$GH_TOKEN" \
+    GH_PROMPT_DISABLED=1 \
+    GIT_TERMINAL_PROMPT=0
+
+check
+echo "agent-auth-refresh: unattended GitHub credential is ready"
