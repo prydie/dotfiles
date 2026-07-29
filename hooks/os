@@ -1023,12 +1023,44 @@ tools::install_claude_code() {
   # Claude Code's native installer owns ~/.local/bin/claude (a symlink into
   # ~/.local/share/claude) and self-updates, so installing the npm package
   # alongside it fails with EEXIST. Use the native installer exclusively.
-  if command -v claude >/dev/null 2>&1; then
-    log::f "Claude Code already installed: $(claude --version 2>/dev/null | head -n1)"
-    return 0
+  #
+  # A legacy npm-global install (~/.local/lib/node_modules/@anthropic-ai/
+  # claude-code) does NOT keep self-updating once mise owns node: its `npm
+  # install -g` updater targets whatever `npm root -g` now resolves to (the
+  # mise node prefix), not the ~/.local prefix the binary was installed under,
+  # so the version on PATH silently freezes. Detect that case and migrate it to
+  # the native installer rather than treating any claude on PATH as done.
+  local claude_bin resolved
+  claude_bin="$(command -v claude 2>/dev/null || true)"
+  if [ -n "${claude_bin}" ]; then
+    resolved="$(readlink -f "${claude_bin}" 2>/dev/null || printf '%s' "${claude_bin}")"
+    case "${resolved}" in
+      *node_modules*)
+        log::f "Migrating npm-global Claude Code to the native installer"
+        tools::uninstall_npm_claude_code
+        ;;
+      *)
+        log::f "Claude Code already installed (native): $(claude --version 2>/dev/null | head -n1)"
+        return 0
+        ;;
+    esac
   fi
 
   curl -fsSL https://claude.ai/install.sh | bash
+}
+
+tools::uninstall_npm_claude_code() {
+  # Remove the legacy npm-global Claude Code so the native binary can own
+  # ~/.local/bin/claude without an EEXIST clash. Best-effort across both the
+  # historical ~/.local prefix and whatever `npm root -g` currently resolves
+  # to. Only the claude-code package is touched — ~/.local/lib/node_modules
+  # still holds other npm-global CLIs (gemini, codex, the LSP servers).
+  if command -v npm >/dev/null 2>&1; then
+    npm rm -g @anthropic-ai/claude-code >/dev/null 2>&1 || true
+    npm rm -g --prefix "${HOME}/.local" @anthropic-ai/claude-code >/dev/null 2>&1 || true
+  fi
+  rm -rf "${HOME}/.local/lib/node_modules/@anthropic-ai/claude-code"
+  rm -f "${HOME}/.local/bin/claude"
 }
 
 tools::configure_helm_repos() {
@@ -1865,6 +1897,9 @@ if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
     bruno)
       tools::install_bruno
       ;;
+    claude)
+      tools::install_claude_code
+      ;;
     install-dell-dock-fix)
       os::install_dell_dock_fix
       ;;
@@ -1872,11 +1907,11 @@ if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
       os::ghostty::install_terminfo
       ;;
     "")
-      echo "No action selected. Use: $0 codex-superpowers | ai-skills | tmux-plugins | tla-tools | verify-tla-tools | full-install | ghostty | bruno | install-dell-dock-fix | ghostty-terminfo"
+      echo "No action selected. Use: $0 codex-superpowers | ai-skills | tmux-plugins | tla-tools | verify-tla-tools | full-install | ghostty | bruno | claude | install-dell-dock-fix | ghostty-terminfo"
       ;;
     *)
       echo "Unknown action: $1"
-      echo "Usage: $0 codex-superpowers | ai-skills | tmux-plugins | tla-tools | verify-tla-tools | full-install | ghostty | bruno | install-dell-dock-fix | ghostty-terminfo"
+      echo "Usage: $0 codex-superpowers | ai-skills | tmux-plugins | tla-tools | verify-tla-tools | full-install | ghostty | bruno | claude | install-dell-dock-fix | ghostty-terminfo"
       exit 1
       ;;
   esac

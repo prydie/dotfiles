@@ -67,6 +67,10 @@ ghostty: ## Install Ghostty, using apt before snap fallback
 bruno: ## Install Bruno API client desktop app and CLI
 	@bash hooks/os bruno
 
+.PHONY: claude
+claude: ## Install/migrate Claude Code to the self-updating native installer
+	@bash hooks/os claude
+
 .PHONY: bootstrap
 bootstrap: ## Install bootstrap deps, link dotfiles, and run setup profile (PROFILE=link|core|dev|full)
 	@bash install.sh
