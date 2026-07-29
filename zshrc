@@ -1,11 +1,7 @@
-typeset -U path
-path=("$HOME/.local/bin" "$HOME/bin" "$HOME/go/bin" "/opt/nvim-linux-x86_64/bin" $path)
-export PATH
-export GOPATH=${HOME}/go
-export MISE_GLOBAL_CONFIG_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/mise/config.toml"
-if [ ! -f "${MISE_GLOBAL_CONFIG_FILE}" ] && [ -f "$HOME/.dotfiles/config/mise/config.toml" ]; then
-  export MISE_GLOBAL_CONFIG_FILE="$HOME/.dotfiles/config/mise/config.toml"
-fi
+# PATH, GOPATH, and MISE_GLOBAL_CONFIG_FILE moved to .zshenv so they also apply
+# to non-interactive shells (ssh commands, cron, agent runs). The mise activate
+# below layers per-directory env switching and the chpwd hook on top for
+# interactive sessions.
 export VALE_CONFIG_PATH="${XDG_CONFIG_HOME:-$HOME/.config}/vale/vale.ini"
 if [ ! -f "${VALE_CONFIG_PATH}" ] && [ -f "$HOME/.dotfiles/config/vale/vale.ini" ]; then
   export VALE_CONFIG_PATH="$HOME/.dotfiles/config/vale/vale.ini"

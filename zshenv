@@ -12,6 +12,28 @@ export SSH_ASKPASS_REQUIRE=never
 export GIT_SSH_COMMAND="${GIT_SSH_COMMAND:-ssh -o BatchMode=yes -o ConnectTimeout=20}"
 unset _nks_agent_github_token
 
+# Base PATH + tool managers. Set here in .zshenv (sourced by ALL zsh invocations,
+# including non-interactive ssh commands, cron, and agent runs) rather than only
+# .zshrc, so mise-managed tools and ~/.local/bin binaries (claude, mise itself)
+# resolve outside interactive sessions too. Putting mise's shims dir on PATH is
+# mise's recommended non-interactive integration; .zshrc layers the richer
+# `mise activate` hook (per-directory env, chpwd) on top for interactive use.
+typeset -U path
+path=(
+  "$HOME/.local/bin"
+  "$HOME/bin"
+  "$HOME/go/bin"
+  "$HOME/.local/share/mise/shims"
+  "/opt/nvim-linux-x86_64/bin"
+  $path
+)
+export PATH
+export GOPATH="$HOME/go"
+export MISE_GLOBAL_CONFIG_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/mise/config.toml"
+if [[ ! -f "$MISE_GLOBAL_CONFIG_FILE" && -f "$HOME/.dotfiles/config/mise/config.toml" ]]; then
+  export MISE_GLOBAL_CONFIG_FILE="$HOME/.dotfiles/config/mise/config.toml"
+fi
+
 if [[ -r /proc/$$/cgroup ]] &&
     [[ "$(< /proc/$$/cgroup)" == *"/agents.slice/"* ]]; then
   agent_test_shim_dir="$HOME/.dotfiles/libexec/agent-test-shims"
