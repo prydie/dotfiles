@@ -20,10 +20,10 @@ unset _nks_agent_github_token
 # `mise activate` hook (per-directory env, chpwd) on top for interactive use.
 typeset -U path
 path=(
+  "$HOME/.local/share/mise/shims"
   "$HOME/.local/bin"
   "$HOME/bin"
   "$HOME/go/bin"
-  "$HOME/.local/share/mise/shims"
   "/opt/nvim-linux-x86_64/bin"
   $path
 )

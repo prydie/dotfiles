@@ -1056,11 +1056,21 @@ tools::uninstall_npm_claude_code() {
   # to. Only the claude-code package is touched — ~/.local/lib/node_modules
   # still holds other npm-global CLIs (gemini, codex, the LSP servers).
   if command -v npm >/dev/null 2>&1; then
+    # Covers both the historical ~/.local prefix and whatever npm root -g now
+    # resolves to (the mise node prefix, where an in-place self-update can land
+    # a copy).
     npm rm -g @anthropic-ai/claude-code >/dev/null 2>&1 || true
     npm rm -g --prefix "${HOME}/.local" @anthropic-ai/claude-code >/dev/null 2>&1 || true
   fi
   rm -rf "${HOME}/.local/lib/node_modules/@anthropic-ai/claude-code"
   rm -f "${HOME}/.local/bin/claude"
+  # Drop the mise shim generated for a node-prefix copy; otherwise it lingers on
+  # PATH and (with the shims dir ahead of ~/.local/bin) shadows the native
+  # binary. A shim resolves to the mise launcher, not node_modules, so it would
+  # also slip past the install detector above on a later run.
+  if command -v mise >/dev/null 2>&1; then
+    mise reshim >/dev/null 2>&1 || true
+  fi
 }
 
 tools::configure_helm_repos() {
