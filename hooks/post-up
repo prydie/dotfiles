@@ -103,6 +103,17 @@ else
   log::f "Skipping Neovim bootstrap (requires PROFILE=dev|full)"
 fi
 
+# Provision the mattpocock/skills pilot subset (grill-me, grill-with-docs, …) for
+# Claude Code + Codex so every machine shares one skill set from the same source of
+# truth (AI_SKILLS in hooks/os), instead of it living only wherever `make ai-skills`
+# happened to be run. Needs npx (dev|full installs Node); the function self-guards
+# on npx and this never aborts the bootstrap. Also reachable standalone: make ai-skills.
+if [[ "${PROFILE}" == "dev" || "${PROFILE}" == "full" ]]; then
+  tools::install_ai_skills || log::f "AI skills install skipped"
+else
+  log::f "Skipping AI skills install (requires PROFILE=dev|full)"
+fi
+
 if [[ "${PROFILE}" == "full" ]]; then
   tools::full_install
 else
