@@ -110,9 +110,13 @@ autoload -Uz compinit
 typeset -g __zcompcache_dir="${XDG_CACHE_HOME:-$HOME/.cache}/zsh"
 typeset -g __zcompdump="${__zcompcache_dir}/.zcompdump-${ZSH_VERSION}"
 mkdir -p "${__zcompcache_dir}"
-if ! (( ${+_comps} )); then
-  compinit -d "${__zcompdump}"
-fi
+# Run compinit unconditionally here, after `antidote load` above. An antidote
+# plugin may already have initialised completion (${+_comps} set) with a
+# narrower fpath, so guarding on ${+_comps} would skip our own compinit and
+# leave ~/.local/share/zsh/site-functions (kubectl, helm, kind, …) unindexed —
+# making `compdef _kubectl kubectl k` below reference an unloadable function
+# ("command not found: _kubectl" on tab). Re-running compinit is idempotent.
+compinit -d "${__zcompdump}"
 if (( ${+commands[kubectl]} )); then
   compdef _kubectl kubectl k
 fi
