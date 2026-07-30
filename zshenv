@@ -37,11 +37,6 @@ fi
 if [[ -r /proc/$$/cgroup ]] &&
     [[ "$(< /proc/$$/cgroup)" == *"/agents.slice/"* ]]; then
   agent_test_shim_dir="$HOME/.dotfiles/libexec/agent-test-shims"
-  export GIT_CONFIG_COUNT=2
-  export GIT_CONFIG_KEY_0=commit.gpgSign
-  export GIT_CONFIG_VALUE_0=false
-  export GIT_CONFIG_KEY_1=gpg.program
-  export GIT_CONFIG_VALUE_1="$HOME/.dotfiles/libexec/agent-gpg-noninteractive"
   if [[ -z "${NKS_AGENT_TEST_ORIGINAL_PATH:-}" ]]; then
     agent_test_original_path=(${path:#"$agent_test_shim_dir"})
     export NKS_AGENT_TEST_ORIGINAL_PATH="${(j.:.)agent_test_original_path}"
