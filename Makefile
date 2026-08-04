@@ -27,6 +27,10 @@ up: ## Symlink dotfiles with rcm (rcup)
 setup: ## Run host setup profile (PROFILE=link|core|dev|full)
 	@PROFILE="$(PROFILE)" SHELL_DEFAULT="$(SHELL_DEFAULT)" NODE_VERSION="$(NODE_VERSION)" bash hooks/post-up
 
+.PHONY: test
+test: ## Run the Python tests covering bin/ tooling
+	@python3 -m unittest discover -s tools -p 'test_*.py'
+
 .PHONY: codex-sandbox-fix
 codex-sandbox-fix: ## Install AppArmor profile needed by Codex CLI bubblewrap sandbox
 	@bash -lc 'source hooks/os; os::ubuntu::ensure_bwrap_apparmor_profile'

@@ -1,0 +1,1589 @@
+#!/usr/bin/env python3
+"""Run a repository's GitHub Actions jobs natively on a remote Linux box.
+
+The tool is deliberately repository-agnostic: it reads a workflow file, keeps
+only the steps it can honestly execute outside GitHub's runner image (`run:`
+steps), and drives them over SSH against a persistent per-repository workspace.
+Nothing is written into the repository under test -- the workspace, the run
+state and the generated scripts all live under the remote host's `root`.
+
+Fidelity is a deliberate trade. `uses:` steps are skipped rather than emulated,
+and every skip is reported before a run starts, so the gap between "green here"
+and "green on GitHub" stays visible instead of implied.
+"""
+
+from __future__ import annotations
+
+import argparse
+import configparser
+import hashlib
+import json
+import os
+import re
+import shlex
+import subprocess
+import sys
+import tempfile
+import time
+from dataclasses import dataclass, field
+from pathlib import Path
+
+try:
+    import yaml
+except ImportError:  # pragma: no cover - environment guard
+    sys.stderr.write(
+        "ci-remote: PyYAML is required: apt install python3-yaml\n"
+    )
+    raise SystemExit(2)
+
+
+def config_paths() -> tuple[Path, ...]:
+    """Shared config first, then the untracked local override which wins."""
+    base = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config")
+    return (
+        base / "ci-remote" / "hosts.conf",
+        base / "ci-remote" / "hosts.local.conf",
+    )
+
+
+def state_dir() -> Path:
+    base = Path(os.environ.get("XDG_STATE_HOME") or Path.home() / ".local" / "state")
+    return base / "ci-remote"
+
+
+# Job and step identifiers end up in remote filenames and in an `xargs -I`
+# substitution, so anything outside this class is rejected rather than quoted.
+SAFE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
+
+DEFAULT_WORKFLOW_NAMES = (
+    "pull-request.yaml",
+    "pull-request.yml",
+    "pull_request.yaml",
+    "pull_request.yml",
+    "ci.yaml",
+    "ci.yml",
+)
+
+
+class Error(Exception):
+    """A user-facing failure: reported without a traceback."""
+
+
+# ---------------------------------------------------------------------------
+# host configuration
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class Host:
+    name: str
+    ssh: str
+    prelude: str = ""
+    root: str = ".ci-remote"
+    parallel: int = 4
+    nice: str = ""
+    env: dict[str, str] = field(default_factory=dict)
+    min_free_gb: float = 10.0
+    keep_runs: int = 20
+    workspace_ttl_days: int = 14
+    min_free_tmp_gb: float = 5.0
+    isolate_jobs: bool = True
+
+    @property
+    def ssh_target(self) -> str:
+        return self.ssh or self.name
+
+
+def load_hosts() -> tuple[dict[str, Host], str | None]:
+    parser = configparser.ConfigParser(interpolation=None)
+    read_any = False
+    paths = config_paths()
+    for path in paths:
+        if path.exists():
+            parser.read(path)
+            read_any = True
+    if not read_any:
+        raise Error(
+            "no host configuration found; expected "
+            f"{paths[0]} (see the dotfiles config/ci-remote/hosts.conf)"
+        )
+
+    default_host = None
+    hosts: dict[str, Host] = {}
+    for section in parser.sections():
+        values = parser[section]
+        if section == "defaults":
+            default_host = values.get("host") or None
+            continue
+        env = {}
+        for item in values.get("env", "").split():
+            key, _, value = item.partition("=")
+            if key:
+                env[key] = value
+        hosts[section] = Host(
+            name=section,
+            ssh=values.get("ssh", section),
+            prelude=values.get("prelude", "").strip(),
+            root=values.get("root", ".ci-remote"),
+            parallel=values.getint("parallel", 4),
+            nice=values.get("nice", "").strip(),
+            env=env,
+            min_free_gb=values.getfloat("min_free_gb", 10.0),
+            keep_runs=values.getint("keep_runs", 20),
+            workspace_ttl_days=values.getint("workspace_ttl_days", 14),
+            min_free_tmp_gb=values.getfloat("min_free_tmp_gb", 5.0),
+            isolate_jobs=values.getboolean("isolate_jobs", True),
+        )
+    if not hosts:
+        raise Error("host configuration defines no hosts")
+    return hosts, default_host
+
+
+def resolve_host(name: str | None) -> Host:
+    hosts, default_host = load_hosts()
+    chosen = name or os.environ.get("CI_REMOTE_HOST") or default_host
+    if not chosen:
+        raise Error(
+            "no host given and no [defaults] host set; "
+            f"known hosts: {', '.join(sorted(hosts))}"
+        )
+    if chosen not in hosts:
+        raise Error(
+            f"unknown host {chosen!r}; known hosts: {', '.join(sorted(hosts))}"
+        )
+    return hosts[chosen]
+
+
+# ---------------------------------------------------------------------------
+# workflow parsing
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class Step:
+    index: int
+    name: str
+    run: str
+    shell: str
+    env: dict[str, str]
+    working_directory: str | None
+    continue_on_error: bool
+
+
+@dataclass
+class Job:
+    key: str
+    name: str
+    needs: list[str]
+    steps: list[Step]
+    env: dict[str, str]
+    working_directory: str | None
+    continue_on_error: bool
+    skipped_uses: list[str]
+    notes: list[str]
+
+
+def _as_dict(value) -> dict[str, str]:
+    if not value:
+        return {}
+    if not isinstance(value, dict):
+        raise Error(f"expected a mapping, got {type(value).__name__}")
+    return {str(k): "" if v is None else str(v) for k, v in value.items()}
+
+
+def _truthy(value) -> bool:
+    # A `continue-on-error:` may be a literal bool or a GitHub expression. An
+    # expression cannot be evaluated here, so treat it as non-blocking and let
+    # the caller see the note.
+    if isinstance(value, bool):
+        return value
+    return bool(value)
+
+
+def discover_workflow(repo_root: Path, explicit: str | None) -> Path:
+    if explicit:
+        candidate = Path(explicit)
+        if not candidate.is_absolute():
+            candidate = repo_root / candidate
+        if not candidate.exists():
+            raise Error(f"workflow not found: {candidate}")
+        return candidate
+
+    directory = repo_root / ".github" / "workflows"
+    if not directory.is_dir():
+        raise Error(f"no .github/workflows directory under {repo_root}")
+
+    for name in DEFAULT_WORKFLOW_NAMES:
+        candidate = directory / name
+        if candidate.exists():
+            return candidate
+
+    available = sorted(
+        p.name for p in directory.iterdir() if p.suffix in (".yaml", ".yml")
+    )
+    raise Error(
+        "could not guess a workflow; pass --workflow. Available: "
+        + (", ".join(available) or "none")
+    )
+
+
+def parse_workflow(path: Path) -> list[Job]:
+    with path.open("r", encoding="utf-8") as handle:
+        document = yaml.safe_load(handle)
+    if not isinstance(document, dict):
+        raise Error(f"{path}: not a workflow mapping")
+
+    raw_jobs = document.get("jobs")
+    if not isinstance(raw_jobs, dict) or not raw_jobs:
+        raise Error(f"{path}: no jobs defined")
+
+    workflow_env = _as_dict(document.get("env"))
+    jobs: list[Job] = []
+
+    for key, spec in raw_jobs.items():
+        key = str(key)
+        if not SAFE_NAME.match(key):
+            raise Error(
+                f"{path}: job id {key!r} contains characters this runner "
+                "cannot safely place in a remote path"
+            )
+        if not isinstance(spec, dict):
+            raise Error(f"{path}: job {key} is not a mapping")
+
+        notes: list[str] = []
+        if "strategy" in spec and isinstance(spec["strategy"], dict):
+            if "matrix" in spec["strategy"]:
+                notes.append(
+                    "job declares a strategy matrix, which this runner cannot "
+                    "expand; run it on GitHub"
+                )
+        if spec.get("uses"):
+            notes.append("job calls a reusable workflow (`uses:`) and is skipped")
+        if "if" in spec:
+            notes.append(
+                "job carries an `if:` condition that is not evaluated here"
+            )
+
+        needs = spec.get("needs") or []
+        if isinstance(needs, str):
+            needs = [needs]
+        needs = [str(item) for item in needs]
+
+        defaults = spec.get("defaults") or {}
+        run_defaults = defaults.get("run") or {} if isinstance(defaults, dict) else {}
+        job_workdir = run_defaults.get("working-directory")
+        default_shell = run_defaults.get("shell", "bash")
+
+        env = dict(workflow_env)
+        env.update(_as_dict(spec.get("env")))
+
+        steps: list[Step] = []
+        skipped: list[str] = []
+        for raw_step in spec.get("steps") or []:
+            if not isinstance(raw_step, dict):
+                continue
+            label = str(raw_step.get("name") or "").strip()
+            if "run" not in raw_step:
+                uses = str(raw_step.get("uses") or "<no run, no uses>")
+                skipped.append(f"{label or uses} ({uses})")
+                continue
+            if "if" in raw_step:
+                notes.append(
+                    f"step {label or len(steps) + 1!r} has an `if:` condition "
+                    "that is not evaluated here; it will run"
+                )
+            body = raw_step["run"]
+            # YAML coerces bare `run: true` / `run: null` to Python scalars;
+            # str() would then emit "True"/"None", which is not the command
+            # the author wrote.
+            if isinstance(body, bool):
+                body = "true" if body else "false"
+            elif body is None:
+                body = ""
+            shell = str(raw_step.get("shell") or default_shell or "bash")
+            base = shell.split()[0]
+            if base not in ("bash", "sh"):
+                raise Error(
+                    f"{path}: job {key} step {label or '<unnamed>'} uses "
+                    f"shell {shell!r}, which this runner does not support"
+                )
+            steps.append(
+                Step(
+                    index=len(steps) + 1,
+                    name=label or f"step {len(steps) + 1}",
+                    run=str(body),
+                    shell=base,
+                    env=_as_dict(raw_step.get("env")),
+                    working_directory=raw_step.get("working-directory")
+                    or job_workdir,
+                    continue_on_error=_truthy(raw_step.get("continue-on-error")),
+                )
+            )
+
+        jobs.append(
+            Job(
+                key=key,
+                name=str(spec.get("name") or key),
+                needs=needs,
+                steps=steps,
+                env=env,
+                working_directory=job_workdir,
+                continue_on_error=_truthy(spec.get("continue-on-error")),
+                skipped_uses=skipped,
+                notes=notes,
+            )
+        )
+
+    return jobs
+
+
+def order_jobs(jobs: list[Job]) -> list[list[Job]]:
+    """Group jobs into dependency waves; `needs:` outside the set is ignored."""
+    by_key = {job.key: job for job in jobs}
+    remaining = dict(by_key)
+    waves: list[list[Job]] = []
+    satisfied: set[str] = set()
+
+    while remaining:
+        ready = [
+            job
+            for job in remaining.values()
+            if all(dep in satisfied or dep not in by_key for dep in job.needs)
+        ]
+        if not ready:
+            cycle = ", ".join(sorted(remaining))
+            raise Error(f"cyclic `needs:` among jobs: {cycle}")
+        ready.sort(key=lambda job: job.key)
+        waves.append(ready)
+        for job in ready:
+            satisfied.add(job.key)
+            del remaining[job.key]
+
+    return waves
+
+
+# ---------------------------------------------------------------------------
+# ssh / rsync plumbing
+# ---------------------------------------------------------------------------
+
+
+def ssh_run(
+    host: Host,
+    command: str,
+    *,
+    check: bool = True,
+    capture: bool = True,
+) -> subprocess.CompletedProcess:
+    """Run a snippet remotely under bash, fed on stdin.
+
+    `ssh host '<command>'` would hand the string to the account's login shell,
+    which is not necessarily POSIX-ish: zsh, for one, makes a non-matching glob
+    a hard error rather than leaving it unexpanded. Piping the script into
+    `bash -s` pins the interpreter and sidesteps a layer of quoting.
+    """
+    argv = ["ssh", "-o", "BatchMode=yes", host.ssh_target, "bash -s"]
+    result = subprocess.run(
+        argv,
+        input=command,
+        text=True,
+        stdout=subprocess.PIPE if capture else None,
+        stderr=subprocess.PIPE if capture else None,
+    )
+    if check and result.returncode != 0:
+        detail = (result.stderr or "").strip() or f"exit {result.returncode}"
+        raise Error(f"ssh {host.ssh_target}: {detail}")
+    return result
+
+
+def remote_home(host: Host) -> str:
+    return ssh_run(host, "printf %s \"$HOME\"").stdout.strip()
+
+
+def remote_root(host: Host) -> str:
+    root = host.root
+    if root.startswith("~/"):
+        root = root[2:]
+    if root.startswith("/"):
+        return root.rstrip("/")
+    return f"{remote_home(host)}/{root}".rstrip("/")
+
+
+def workspace_key(repo_root: Path) -> str:
+    digest = hashlib.sha1(str(repo_root).encode()).hexdigest()[:8]
+    return f"{repo_root.name}-{digest}"
+
+
+def free_gb(host: Host, path: str) -> float | None:
+    # Ask about the deepest existing ancestor: df on a missing path fails.
+    probe = (
+        f"p={shlex.quote(path)}; "
+        'while [ ! -d "$p" ] && [ "$p" != "/" ]; do p=$(dirname "$p"); done; '
+        'df -Pk "$p" | tail -1'
+    )
+    result = ssh_run(host, probe, check=False)
+    fields = (result.stdout or "").split()
+    if len(fields) < 4:
+        return None
+    try:
+        return int(fields[3]) / (1024 * 1024)
+    except ValueError:
+        return None
+
+
+def check_free_space(host: Host, root: str, force: bool) -> None:
+    """Guard the workspace filesystem AND the job scratch filesystem.
+
+    These are routinely different devices, and checking only the workspace
+    gives false confidence: a box can have terabytes free for the checkout
+    while the filesystem holding /tmp is full, at which point jobs fail deep in
+    a test tier with ENOSPC or an opaque control-plane timeout that looks
+    exactly like a code failure.
+    """
+    problems = []
+
+    workspace_free = free_gb(host, root)
+    if workspace_free is not None and workspace_free < host.min_free_gb:
+        problems.append(
+            f"{workspace_free:.1f} GiB free under {root} "
+            f"(min_free_gb={host.min_free_gb:g})"
+        )
+
+    temp = host.env.get("TMPDIR", "/tmp")
+    temp_free = free_gb(host, temp)
+    if temp_free is not None and temp_free < host.min_free_tmp_gb:
+        problems.append(
+            f"{temp_free:.1f} GiB free under {temp}, where tests write scratch "
+            f"(min_free_tmp_gb={host.min_free_tmp_gb:g})"
+        )
+
+    if not problems:
+        return
+
+    message = f"{host.name}: " + "; ".join(problems) + (
+        f". Reclaim space or run `ci-remote gc --host {host.name}`."
+    )
+    if not force:
+        raise Error(message + " Use --force to run anyway.")
+    sys.stderr.write(f"ci-remote: warning: {message}\n")
+
+
+def git_dirs(repo_root: Path) -> tuple[str, str]:
+    """This checkout's git dir and its common dir, both absolute."""
+
+    def ask(*flags: str) -> str:
+        result = subprocess.run(
+            ["git", "-C", str(repo_root), "rev-parse", *flags],
+            text=True,
+            capture_output=True,
+        )
+        if result.returncode != 0:
+            raise Error(f"git rev-parse failed in {repo_root}: {result.stderr.strip()}")
+        return result.stdout.strip()
+
+    return (
+        ask("--absolute-git-dir"),
+        ask("--path-format=absolute", "--git-common-dir"),
+    )
+
+
+def sync_git_dir(host: Host, git_dir: str, common_dir: str, workspace: str) -> None:
+    """Give a linked worktree a real .git on the remote.
+
+    In a `git worktree`, `.git` is a text file holding `gitdir: <absolute path
+    into the MAIN repo>`. rsync copies that pointer faithfully and it resolves
+    to nothing on the box, so every Make target that shells out to git fails
+    with "not a git repository" -- including inside jobs that otherwise pass,
+    where the noise is easy to miss. Since worktrees are the normal way agents
+    work, the workspace gets an assembled, standalone .git instead:
+
+      1. the common dir (objects, refs, config) minus its worktrees/ admin,
+      2. this worktree's own files (HEAD, index, ...) layered on top,
+      3. the markers that would make git treat it as linked, removed.
+    """
+    def push(source: str, delete: bool, extra: list[str] | None = None) -> None:
+        argv = ["rsync", "-a", "--compress", "-e", "ssh -o BatchMode=yes"]
+        if delete:
+            argv.append("--delete")
+        argv += extra or []
+        argv += [f"{source.rstrip('/')}/", f"{host.ssh_target}:{workspace}/.git/"]
+        result = subprocess.run(argv)
+        if result.returncode != 0:
+            raise Error(f"rsync of {source} failed (exit {result.returncode})")
+
+    # A workspace synced before this fix (or by a plain checkout) has .git as a
+    # pointer FILE; rsync cannot then create the directory over it.
+    ssh_run(
+        host,
+        f"target={shlex.quote(workspace)}/.git\n"
+        '[ -f "$target" ] && rm -f "$target"\n'
+        'mkdir -p "$target"\n'
+        "exit 0\n",
+        check=False,
+    )
+
+    # worktrees/ is per-worktree admin for OTHER worktrees; it is dead weight
+    # here and its gitdir pointers would dangle.
+    push(common_dir, delete=True, extra=["--exclude=/worktrees/"])
+    # No --delete: this must layer over the common dir, not replace it.
+    push(git_dir, delete=False)
+
+    ssh_run(
+        host,
+        f"cd {shlex.quote(workspace)}/.git || exit 1\n"
+        "rm -f commondir gitdir\n"
+        # core.worktree would point at a local path that means nothing here.
+        "git config --unset core.worktree 2>/dev/null || true\n"
+        "exit 0\n",
+        check=False,
+    )
+
+
+def git_ignored_paths(repo_root: Path) -> list[str]:
+    """Ask git which paths to skip, rather than approximating it in rsync.
+
+    rsync's `--filter=':- .gitignore'` looks equivalent but is not: it does not
+    implement git's negation semantics, so a repo that ignores a directory and
+    then re-includes part of it (`/.claude/*` followed by `!/.claude/skills/`)
+    loses the re-included files. When those files are tracked, they arrive on
+    the remote as deletions and every "is the tree clean" gate fails there for
+    a reason that does not exist locally. Let git answer the question it owns.
+    """
+    result = subprocess.run(
+        [
+            "git",
+            "-C",
+            str(repo_root),
+            "ls-files",
+            "-z",
+            "--others",
+            "--ignored",
+            "--exclude-standard",
+            "--directory",
+        ],
+        text=True,
+        capture_output=True,
+    )
+    if result.returncode != 0:
+        raise Error(f"git ls-files failed in {repo_root}: {result.stderr.strip()}")
+    return [path for path in result.stdout.split("\0") if path]
+
+
+def find_seed_workspace(
+    host: Host, root: str, workspace: str, repo_name: str
+) -> str | None:
+    """A sibling workspace of the same repo to seed a new one from.
+
+    Workspaces are per checkout path, so every new worktree of a repo would
+    otherwise pay a full first sync -- for a repo with a large .git, most of
+    that is history the box already has in the workspace next door. rsync's
+    --copy-dest lets the receiver take identical files from there locally
+    instead of pulling them over the network.
+    """
+    prefix = f"{root}/workspaces/{repo_name}-"
+    probe = (
+        f"[ -d {shlex.quote(workspace)} ] && exit 0\n"
+        f"ls -1dt {shlex.quote(prefix)}*/ 2>/dev/null | head -1\n"
+    )
+    result = ssh_run(host, probe, check=False)
+    candidate = (result.stdout or "").strip().rstrip("/")
+    if not candidate or candidate == workspace:
+        return None
+    return candidate
+
+
+def active_run_for(host: Host, root: str, workspace: str) -> str | None:
+    """A still-running run against this workspace, if any.
+
+    Workspaces are keyed by the absolute local checkout path, so agents working
+    in different worktrees never collide. Two runs from the SAME checkout do:
+    the second would rsync --delete over a tree the first is still building in.
+    Each run records the workspace it owns, so that case is detectable.
+    """
+    probe = (
+        f"cd {shlex.quote(root)}/runs 2>/dev/null || exit 0\n"
+        "for d in */; do\n"
+        '  [ -d "$d" ] || continue\n'
+        '  [ -e "$d/finished" ] && continue\n'
+        '  [ -e "$d/workspace" ] || continue\n'
+        f'  [ "$(cat "$d/workspace" 2>/dev/null)" = {shlex.quote(workspace)} ] '
+        "|| continue\n"
+        '  printf "%s\\n" "${d%/}"\n'
+        "done\n"
+    )
+    result = ssh_run(host, probe, check=False)
+    for line in (result.stdout or "").splitlines():
+        if line.strip():
+            return line.strip()
+    return None
+
+
+def claim_workspace(host: Host, run_dir: str, workspace: str) -> None:
+    """Record ownership before syncing, to narrow the claim race."""
+    ssh_run(
+        host,
+        f"mkdir -p {shlex.quote(run_dir)}\n"
+        f"printf %s {shlex.quote(workspace)} > {shlex.quote(run_dir)}/workspace\n",
+    )
+
+
+def release_claim(host: Host, run_dir: str) -> None:
+    """Mark a run terminal so its workspace claim does not leak."""
+    ssh_run(
+        host,
+        f"[ -d {shlex.quote(run_dir)} ] && date +%s > {shlex.quote(run_dir)}/finished\n"
+        "exit 0\n",
+        check=False,
+    )
+
+
+def sync_workspace(
+    host: Host,
+    repo_root: Path,
+    workspace: str,
+    verbose: bool,
+    seed: str | None = None,
+) -> None:
+    ssh_run(host, f"mkdir -p {shlex.quote(workspace)}")
+
+    # Anchored to the transfer root so a name cannot match at another depth.
+    # Excluded paths are also protected from --delete, so ignored build output
+    # already on the box survives a re-sync.
+    git_dir, common_dir = git_dirs(repo_root)
+    linked_worktree = git_dir != common_dir
+
+    excludes = "".join(f"/{path}\n" for path in git_ignored_paths(repo_root))
+    with tempfile.NamedTemporaryFile("w", suffix=".ci-remote-excludes") as handle:
+        handle.write(excludes)
+        handle.write("/.git/index.lock\n")
+        if linked_worktree:
+            # The pointer file must not land on, or delete, the .git assembled
+            # for it below.
+            handle.write("/.git\n")
+        # Protect the retention stamp from --delete: it lives in the workspace
+        # but has no counterpart in the local tree.
+        handle.write(f"/{WORKSPACE_STAMP}\n")
+        handle.flush()
+
+        argv = [
+            "rsync",
+            "-a",
+            "--delete",
+            "--compress",
+            f"--exclude-from={handle.name}",
+            "-e",
+            "ssh -o BatchMode=yes",
+        ]
+        if seed:
+            argv.append(f"--copy-dest={seed}")
+        argv += [
+            f"{repo_root}/",
+            f"{host.ssh_target}:{workspace}/",
+        ]
+        if verbose:
+            argv.insert(1, "--info=progress2")
+        result = subprocess.run(argv)
+
+    if result.returncode != 0:
+        raise Error(f"rsync to {host.ssh_target} failed (exit {result.returncode})")
+
+    if linked_worktree:
+        sync_git_dir(host, git_dir, common_dir, workspace)
+
+    # Refresh the liveness stamp so retention cannot age out a workspace that
+    # is still in regular use. Written after the sync, which would otherwise
+    # delete it as an unknown file.
+    ssh_run(host, f"touch {shlex.quote(workspace)}/{WORKSPACE_STAMP}")
+
+
+# ---------------------------------------------------------------------------
+# script generation
+# ---------------------------------------------------------------------------
+
+
+def exports(env: dict[str, str]) -> str:
+    return "".join(
+        f"export {key}={shlex.quote(value)}\n" for key, value in sorted(env.items())
+    )
+
+
+def render_job_driver(host: Host, job: Job, run_dir: str, workspace: str) -> str:
+    job_dir = f"{run_dir}/{job.key}"
+
+    lines = [
+        "#!/usr/bin/env bash",
+        f"# ci-remote job driver: {job.key}",
+        "set -u",
+        f"RUN_DIR={shlex.quote(run_dir)}",
+        f"JOB_DIR={shlex.quote(job_dir)}",
+        'JOB_START=$(date +%s)',
+        'printf %s "$JOB_START" > "$RUN_DIR/' + job.key + '.started"',
+        "",
+    ]
+    # Order matters: base environment, then the prelude (arbitrary shell, so it
+    # can derive values from what came before -- e.g. mkdir a per-job TMPDIR),
+    # then the workflow's own env last so it wins, as it does on GitHub.
+    lines += [
+        "export CI=true",
+        exports(host.env).rstrip("\n"),
+        "",
+    ]
+    if host.prelude:
+        lines += ["# host prelude", host.prelude, ""]
+    lines += [
+        exports(job.env).rstrip("\n"),
+        "",
+    ]
+
+    if host.isolate_jobs:
+        # GitHub gives every job its own checkout. Sharing one tree lets a job
+        # that rewrites generated files (a `make generate` drift gate deletes
+        # and re-copies CRDs) race a job reading them, which surfaces as a
+        # bogus failure in the READING job -- the worst kind of wrong answer.
+        # A local copy on the box costs a couple of seconds and removes the
+        # whole class of problem.
+        lines += [
+            'WORKTREE="$JOB_DIR/tree"',
+            'rm -rf "$WORKTREE"',
+            f'cp -a {shlex.quote(workspace)} "$WORKTREE" || {{',
+            '  printf "ci-remote: could not create an isolated tree\\n" >&2',
+            '  printf "127 %s %s\\n" "$JOB_START" "$(date +%s)" '
+            f'> "$RUN_DIR/{job.key}.rc"',
+            "  exit 127",
+            "}",
+            "",
+        ]
+    else:
+        lines += [f'WORKTREE={shlex.quote(workspace)}', ""]
+
+    workdir = '"$WORKTREE"'
+    if job.working_directory:
+        workdir = f'"$WORKTREE"/{shlex.quote(job.working_directory)}'
+
+    lines += [
+        f"cd {workdir} || {{",
+        '  printf "ci-remote: cannot cd to %s\\n" ' + workdir + " >&2",
+        '  printf "127 %s %s\\n" "$JOB_START" "$(date +%s)" '
+        f'> "$RUN_DIR/{job.key}.rc"',
+        "  exit 127",
+        "}",
+        "",
+        "overall=0",
+        "",
+        "finish() {",
+        # Drop the copy: logs and step rcs are the diagnostic surface, and
+        # keeping nine 1.4 GB trees per run would dwarf everything else.
+        "  cd / 2>/dev/null || true",
+        '  if [ "${WORKTREE:-}" != ' + shlex.quote(workspace) + ' ]; then',
+        '    rm -rf "$WORKTREE"',
+        "  fi",
+        '  printf "%s %s %s\\n" "$overall" "$JOB_START" "$(date +%s)" '
+        f'> "$RUN_DIR/{job.key}.rc"',
+        '  exit "$overall"',
+        "}",
+        "",
+    ]
+
+    total = len(job.steps)
+    for step in job.steps:
+        script = f"{job_dir}/step-{step.index:02d}.sh"
+        step_workdir = '"$WORKTREE"'
+        if step.working_directory:
+            step_workdir = f'"$WORKTREE"/{shlex.quote(step.working_directory)}'
+        label = f"{step.index}/{total} {step.name}"
+        runner = f"{host.nice} " if host.nice else ""
+        lines += [
+            f'printf "\\n===== step %s =====\\n" {shlex.quote(label)}',
+            "step_start=$(date +%s)",
+            exports(step.env).rstrip("\n"),
+            f"( cd {step_workdir} && exec {runner}"
+            f"{step.shell} --noprofile --norc -eo pipefail {shlex.quote(script)} )",
+            "rc=$?",
+            'printf "===== step %s -> rc=%s (%ss) =====\\n" '
+            f'{shlex.quote(label)} "$rc" "$(( $(date +%s) - step_start ))"',
+        ]
+        if step.continue_on_error:
+            lines += [
+                "if [ $rc -ne 0 ]; then",
+                f'  printf "ci-remote: step %s failed but is advisory '
+                f'(continue-on-error)\\n" {shlex.quote(label)}',
+                "fi",
+            ]
+        else:
+            lines += [
+                "if [ $rc -ne 0 ]; then",
+                "  overall=$rc",
+                "  finish",
+                "fi",
+            ]
+        lines.append("")
+
+    lines.append("finish")
+    return "\n".join(line for line in lines if line is not None) + "\n"
+
+
+def render_dispatch(run_dir: str, waves: list[list[Job]], parallel: int) -> str:
+    lines = [
+        "#!/usr/bin/env bash",
+        "# ci-remote dispatcher",
+        "set -u",
+        f"export RD={shlex.quote(run_dir)}",
+        'date +%s > "$RD/started"',
+        # setsid makes this the session and process-group leader, so its pid
+        # doubles as the pgid `cancel` signals to take down every job at once.
+        'printf %s "$$" > "$RD/dispatch.pid"',
+        "",
+    ]
+    for number, wave in enumerate(waves, start=1):
+        names = " ".join(shlex.quote(job.key) for job in wave)
+        lines += [
+            f"# wave {number}",
+            f"printf '%s\\n' {names} | xargs -r -P {parallel} -n 1 -I JOBKEY "
+            "bash -c 'bash \"$RD/JOBKEY/run.sh\" > \"$RD/JOBKEY.log\" 2>&1'",
+            "",
+        ]
+    lines += ['date +%s > "$RD/finished"', ""]
+    return "\n".join(lines)
+
+
+WORKSPACE_STAMP = ".ci-remote-lastused"
+
+
+def render_prune(root: str, keep_runs: int, workspace_ttl_days: int) -> str:
+    """Retention for the tool's own directory, scoped strictly under `root`.
+
+    Runs are cheap (logs and scripts) but unbounded; workspaces are a synced
+    checkout each and there is one per checkout path, so on a box with many
+    worktrees they are what actually fills a disk. Neither is ever pruned
+    silently -- every removal prints.
+
+    An in-flight run has no `finished` marker and is never touched. A workspace
+    is kept alive by its stamp, which every sync refreshes, so one in active
+    use cannot age out from under a run.
+    """
+    parts = ["set -u", f"root={shlex.quote(root)}"]
+
+    if keep_runs > 0:
+        parts.append(
+            f'if cd "$root/runs" 2>/dev/null; then\n'
+            f"  ls -1dt */ 2>/dev/null | tail -n +{keep_runs + 1} | "
+            'while read -r d; do\n'
+            '    [ -e "$d/finished" ] || continue\n'
+            '    rm -rf -- "$d" && printf "ci-remote: pruned run %s\\n" "${d%/}"\n'
+            "  done\n"
+            "fi"
+        )
+
+    if workspace_ttl_days > 0:
+        parts.append(
+            f'if cd "$root/workspaces" 2>/dev/null; then\n'
+            "  for w in */; do\n"
+            '    [ -d "$w" ] || continue\n'
+            f'    stamp="$w{WORKSPACE_STAMP}"\n'
+            '    [ -e "$stamp" ] || continue\n'
+            f'    [ -n "$(find "$stamp" -maxdepth 0 -mtime +{workspace_ttl_days} '
+            '-print 2>/dev/null)" ] || continue\n'
+            '    rm -rf -- "$w" && printf "ci-remote: pruned workspace %s '
+            '(unused > ' + str(workspace_ttl_days) + ' days)\\n" "${w%/}"\n'
+            "  done\n"
+            "fi"
+        )
+
+    parts.append("exit 0")
+    return "\n".join(parts) + "\n"
+
+
+def prune_remote(host: Host, root: str) -> None:
+    if host.keep_runs <= 0 and host.workspace_ttl_days <= 0:
+        return
+    result = ssh_run(
+        host,
+        render_prune(root, host.keep_runs, host.workspace_ttl_days),
+        check=False,
+    )
+    sys.stdout.write(result.stdout or "")
+
+
+def render_launch(run_dir: str) -> str:
+    """Start the dispatcher so that ssh can return immediately.
+
+    The dispatcher must be orphaned inside a subshell. Backgrounding it
+    directly leaves the remote shell alive as its parent, holding the ssh
+    channel open until the whole run finishes -- which makes `--detach` block
+    for the entire pipeline, the one thing the flag exists to prevent. The
+    trailing `exit 0` keeps that shell from lingering on the last background
+    job.
+    """
+    quoted = shlex.quote(run_dir)
+    return (
+        f"cd {quoted} || exit 1\n"
+        f"( setsid bash {quoted}/dispatch.sh "
+        f"> {quoted}/dispatch.log 2>&1 < /dev/null & )\n"
+        "exit 0\n"
+    )
+
+
+def upload_tree(host: Host, files: dict[str, str]) -> None:
+    """Write generated scripts remotely in one SSH round trip."""
+    parts = ["set -eu"]
+    directories = sorted({str(Path(path).parent) for path in files})
+    parts.append("mkdir -p " + " ".join(shlex.quote(d) for d in directories))
+    for path, content in files.items():
+        marker = "CI_REMOTE_EOF"
+        parts.append(f"cat > {shlex.quote(path)} <<'{marker}'\n{content}{marker}")
+        parts.append(f"chmod +x {shlex.quote(path)}")
+    ssh_run(host, "\n".join(parts))
+
+
+# ---------------------------------------------------------------------------
+# run state
+# ---------------------------------------------------------------------------
+
+
+def save_manifest(manifest: dict) -> Path:
+    runs = state_dir() / "runs"
+    runs.mkdir(parents=True, exist_ok=True)
+    path = runs / f"{manifest['run_id']}.json"
+    path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    (state_dir() / "last-run").write_text(manifest["run_id"] + "\n", encoding="utf-8")
+    return path
+
+
+def load_manifest(run_id: str | None) -> dict:
+    if not run_id:
+        pointer = state_dir() / "last-run"
+        if not pointer.exists():
+            raise Error("no run id given and no previous run recorded")
+        run_id = pointer.read_text(encoding="utf-8").strip()
+    path = state_dir() / "runs" / f"{run_id}.json"
+    if not path.exists():
+        raise Error(f"unknown run {run_id}")
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def fetch_status(host: Host, run_dir: str) -> dict:
+    probe = (
+        f"cd {shlex.quote(run_dir)} 2>/dev/null || exit 3\n"
+        'printf "N %s\\n" "$(date +%s)"\n'
+        'for f in *.started; do [ -e "$f" ] || continue; '
+        'printf "S %s %s\\n" "${f%.started}" "$(cat "$f")"; done\n'
+        'for f in *.rc; do [ -e "$f" ] || continue; '
+        'printf "R %s %s\\n" "${f%.rc}" "$(cat "$f")"; done\n'
+        '[ -e finished ] && printf "F %s\\n" "$(cat finished)"\n'
+        "exit 0"
+    )
+    result = ssh_run(host, probe, check=False)
+    if result.returncode == 3:
+        raise Error(f"run directory is gone on {host.name}: {run_dir}")
+    if result.returncode != 0:
+        detail = (result.stderr or "").strip() or f"exit {result.returncode}"
+        raise Error(f"ssh {host.ssh_target}: {detail}")
+
+    state = {"now": 0, "started": {}, "results": {}, "finished": None}
+    for line in (result.stdout or "").splitlines():
+        fields = line.split()
+        if not fields:
+            continue
+        tag = fields[0]
+        if tag == "N" and len(fields) >= 2:
+            state["now"] = int(fields[1])
+        elif tag == "S" and len(fields) >= 3:
+            state["started"][fields[1]] = int(fields[2])
+        elif tag == "R" and len(fields) >= 3:
+            rc = int(fields[2])
+            start = int(fields[3]) if len(fields) > 3 else None
+            end = int(fields[4]) if len(fields) > 4 else None
+            state["results"][fields[1]] = {"rc": rc, "start": start, "end": end}
+        elif tag == "F" and len(fields) >= 2:
+            state["finished"] = int(fields[1])
+    return state
+
+
+def duration(seconds: int | None) -> str:
+    if seconds is None or seconds < 0:
+        return "-"
+    if seconds < 60:
+        return f"{seconds}s"
+    return f"{seconds // 60}m{seconds % 60:02d}s"
+
+
+def job_state(manifest: dict, state: dict, key: str) -> tuple[str, str]:
+    advisory = key in manifest.get("advisory", [])
+    if key in state["results"]:
+        entry = state["results"][key]
+        elapsed = None
+        if entry["start"] is not None and entry["end"] is not None:
+            elapsed = entry["end"] - entry["start"]
+        if entry["rc"] == 0:
+            return "PASS", duration(elapsed)
+        return ("FAIL(advisory)" if advisory else "FAIL"), duration(elapsed)
+    if key in state["started"]:
+        return "RUN", duration(state["now"] - state["started"][key])
+    return "PEND", "-"
+
+
+# ---------------------------------------------------------------------------
+# commands
+# ---------------------------------------------------------------------------
+
+
+def repo_root_of(path: Path) -> Path:
+    result = subprocess.run(
+        ["git", "-C", str(path), "rev-parse", "--show-toplevel"],
+        text=True,
+        capture_output=True,
+    )
+    if result.returncode != 0:
+        raise Error(f"not inside a git repository: {path}")
+    return Path(result.stdout.strip())
+
+
+def head_description(repo_root: Path) -> str:
+    result = subprocess.run(
+        ["git", "-C", str(repo_root), "rev-parse", "--short", "HEAD"],
+        text=True,
+        capture_output=True,
+    )
+    sha = result.stdout.strip() if result.returncode == 0 else "unknown"
+    dirty = subprocess.run(
+        ["git", "-C", str(repo_root), "status", "--porcelain"],
+        text=True,
+        capture_output=True,
+    )
+    suffix = "+dirty" if dirty.stdout.strip() else ""
+    return f"{sha}{suffix}"
+
+
+def select_jobs(jobs: list[Job], wanted: list[str]) -> list[Job]:
+    if not wanted:
+        return [job for job in jobs if job.steps]
+    by_key = {job.key.lower(): job for job in jobs}
+    chosen = []
+    for name in wanted:
+        job = by_key.get(name.lower())
+        if job is None:
+            raise Error(
+                f"unknown job {name!r}; available: "
+                + ", ".join(job.key for job in jobs)
+            )
+        chosen.append(job)
+    return chosen
+
+
+def report_fidelity(jobs: list[Job], stream) -> None:
+    for job in jobs:
+        for note in job.notes:
+            stream.write(f"  ! {job.key}: {note}\n")
+        for skipped in job.skipped_uses:
+            stream.write(f"  - {job.key}: skipping {skipped}\n")
+        if not job.steps:
+            stream.write(f"  - {job.key}: no runnable steps\n")
+
+
+def cmd_jobs(args: argparse.Namespace) -> int:
+    repo_root = repo_root_of(Path.cwd())
+    workflow = discover_workflow(repo_root, args.workflow)
+    jobs = parse_workflow(workflow)
+    print(f"workflow: {workflow.relative_to(repo_root)}")
+    for job in jobs:
+        marker = " (no runnable steps)" if not job.steps else ""
+        needs = f" needs={','.join(job.needs)}" if job.needs else ""
+        print(f"\n{job.key}{needs}{marker}")
+        for step in job.steps:
+            flag = " [advisory]" if step.continue_on_error else ""
+            first = step.run.strip().splitlines()
+            summary = first[0] if first else ""
+            if len(first) > 1:
+                summary += f" … (+{len(first) - 1} lines)"
+            print(f"  {step.index:2d}. {step.name}{flag}: {summary}")
+    skipped = [job for job in jobs if job.skipped_uses or job.notes]
+    if skipped:
+        print("\nnot executed here:")
+        report_fidelity(skipped, sys.stdout)
+    return 0
+
+
+def cmd_hosts(args: argparse.Namespace) -> int:
+    hosts, default_host = load_hosts()
+    for name, host in sorted(hosts.items()):
+        mark = " (default)" if name == default_host else ""
+        print(f"{name}{mark}")
+        print(f"  ssh      {host.ssh_target}")
+        print(f"  root     {host.root}")
+        print(f"  parallel {host.parallel}")
+        if host.nice:
+            print(f"  nice     {host.nice}")
+        if host.prelude:
+            print(f"  prelude  {host.prelude}")
+    return 0
+
+
+def cmd_run(args: argparse.Namespace) -> int:
+    host = resolve_host(args.host)
+    repo_root = repo_root_of(Path.cwd())
+    workflow = discover_workflow(repo_root, args.workflow)
+    all_jobs = parse_workflow(workflow)
+    jobs = select_jobs(all_jobs, args.job)
+    if not jobs:
+        raise Error("no runnable jobs selected")
+
+    blocked = [job for job in jobs if not job.steps]
+    if blocked:
+        raise Error(
+            "selected jobs have no runnable steps: "
+            + ", ".join(job.key for job in blocked)
+        )
+
+    waves = order_jobs(jobs)
+    root = remote_root(host)
+    workspace = f"{root}/workspaces/{workspace_key(repo_root)}"
+    run_id = f"{time.strftime('%Y%m%dT%H%M%S')}-{os.urandom(2).hex()}"
+    run_dir = f"{root}/runs/{run_id}"
+
+    print(f"ci-remote: host {host.name} ({host.ssh_target})")
+    print(f"ci-remote: repo {repo_root} @ {head_description(repo_root)}")
+    print(f"ci-remote: workflow {workflow.relative_to(repo_root)}")
+    print(f"ci-remote: jobs {' '.join(job.key for job in jobs)}")
+    report_fidelity(jobs, sys.stdout)
+
+    check_free_space(host, root, args.force)
+
+    active = active_run_for(host, root, workspace)
+    if active and not args.take_workspace:
+        raise Error(
+            f"run {active} is still using this checkout's workspace on "
+            f"{host.name}. Syncing now would overwrite the tree it is building "
+            f"in. Wait for it (`ci-remote status {active}`), stop it "
+            f"(`ci-remote cancel {active}`), or pass --take-workspace if you "
+            "know it is dead."
+        )
+
+    prune_remote(host, root)
+    claim_workspace(host, run_dir, workspace)
+
+    # Everything from here holds the workspace claim. If setup fails the claim
+    # must be released, or this checkout is locked out until someone cancels a
+    # run that never actually started.
+    try:
+        seed = find_seed_workspace(host, root, workspace, repo_root.name)
+        if seed:
+            print(f"ci-remote: seeding new workspace from {Path(seed).name}")
+        print("ci-remote: syncing working tree …")
+        sync_workspace(host, repo_root, workspace, args.verbose, seed=seed)
+
+        files: dict[str, str] = {}
+        for job in jobs:
+            files[f"{run_dir}/{job.key}/run.sh"] = render_job_driver(
+                host, job, run_dir, workspace
+            )
+            for step in job.steps:
+                files[f"{run_dir}/{job.key}/step-{step.index:02d}.sh"] = (
+                    step.run if step.run.endswith("\n") else step.run + "\n"
+                )
+        parallel = args.parallel or host.parallel
+        files[f"{run_dir}/dispatch.sh"] = render_dispatch(run_dir, waves, parallel)
+        upload_tree(host, files)
+    except BaseException:
+        release_claim(host, run_dir)
+        raise
+
+    manifest = {
+        "run_id": run_id,
+        "host": host.name,
+        "ssh": host.ssh_target,
+        "run_dir": run_dir,
+        "workspace": workspace,
+        "repo": str(repo_root),
+        "revision": head_description(repo_root),
+        "workflow": str(workflow.relative_to(repo_root)),
+        "jobs": [job.key for job in jobs],
+        "advisory": [job.key for job in jobs if job.continue_on_error],
+        "created": int(time.time()),
+    }
+    save_manifest(manifest)
+
+    single = len(jobs) == 1
+    if args.detach or not single:
+        ssh_run(host, render_launch(run_dir))
+        print(f"ci-remote: run {run_id} started ({len(jobs)} jobs, -P {parallel})")
+        if args.detach:
+            print(f"ci-remote: follow with `ci-remote status {run_id}`")
+            return 0
+        return follow_run(host, manifest, args)
+
+    # Single job, attached: stream it live and mirror to the remote log.
+    job = jobs[0]
+    print(f"ci-remote: running {job.key} …\n", flush=True)
+    command = (
+        f"bash {shlex.quote(run_dir)}/{job.key}/run.sh 2>&1 | "
+        f"tee {shlex.quote(run_dir)}/{job.key}.log"
+    )
+    # stdout is inherited so the job streams live; the script goes in on stdin.
+    result = subprocess.run(
+        ["ssh", "-o", "BatchMode=yes", host.ssh_target, "bash -s"],
+        input=command,
+        text=True,
+    )
+    # The dispatcher writes this for detached runs; an attached one must too,
+    # or the workspace stays claimed and retention never reclaims the run.
+    ssh_run(host, f"date +%s > {shlex.quote(run_dir)}/finished", check=False)
+    state = fetch_status(host, run_dir)
+    status, elapsed = job_state(manifest, state, job.key)
+    print(f"\nci-remote: {job.key} {status} in {elapsed}  (run {run_id})")
+    if status.startswith("FAIL") and job.continue_on_error:
+        return 0
+    return 1 if status.startswith("FAIL") or result.returncode != 0 else 0
+
+
+def follow_run(host: Host, manifest: dict, args: argparse.Namespace) -> int:
+    """Print state transitions as they happen, then summarise.
+
+    With --fail-fast this returns on the first blocking failure instead of
+    sitting through the slowest job. That is the shape an agent wants: launch
+    detached, then background a `wait --fail-fast`, which comes back either
+    quickly with a real failure or at the end with a pass -- rather than a
+    fixed multi-minute block whatever the outcome.
+    """
+    fail_fast = getattr(args, "fail_fast", False)
+    reported: dict[str, str] = {}
+    failed_early = False
+
+    while True:
+        state = fetch_status(host, manifest["run_dir"])
+        for key in manifest["jobs"]:
+            status, elapsed = job_state(manifest, state, key)
+            previous = reported.get(key)
+            if status != previous and status != "PEND":
+                if status == "RUN" and previous is None:
+                    print(f"  {key:<28} started")
+                elif status != "RUN":
+                    print(f"  {key:<28} {status} in {elapsed}")
+                reported[key] = status
+            if fail_fast and status == "FAIL":
+                failed_early = True
+
+        if failed_early or state["finished"] is not None:
+            break
+        if len(state["results"]) == len(manifest["jobs"]):
+            break
+        time.sleep(args.interval)
+
+    if failed_early:
+        still_going = [
+            key
+            for key in manifest["jobs"]
+            if job_state(manifest, state, key)[0] in ("RUN", "PEND")
+        ]
+        code = summarise(host, manifest, tail=args.tail)
+        if still_going:
+            print(
+                f"ci-remote: returned on first failure; still running: "
+                f"{' '.join(still_going)}"
+            )
+            print(
+                f"ci-remote: `ci-remote cancel {manifest['run_id']}` stops them "
+                "and frees this checkout's workspace"
+            )
+        return code or 1
+
+    return summarise(host, manifest, tail=args.tail)
+
+
+def summarise(host: Host, manifest: dict, tail: int) -> int:
+    state = fetch_status(host, manifest["run_dir"])
+    failures = []
+    unfinished = []
+    print(f"\nrun {manifest['run_id']} on {manifest['host']} "
+          f"({manifest['repo']} @ {manifest['revision']})")
+    for key in manifest["jobs"]:
+        status, elapsed = job_state(manifest, state, key)
+        print(f"  {status:<15} {elapsed:>8}  {key}")
+        if status == "FAIL":
+            failures.append(key)
+        elif status in ("RUN", "PEND"):
+            unfinished.append(key)
+
+    if failures and tail:
+        for key in failures:
+            print(f"\n----- {key}: last {tail} log lines -----")
+            print(read_log(host, manifest, key, tail))
+
+    if failures:
+        print(f"\nci-remote: {len(failures)} job(s) failed: {' '.join(failures)}")
+        print(f"ci-remote: full logs via `ci-remote logs {manifest['run_id']} "
+              f"--job {failures[0]} --tail 0`")
+        return 1
+
+    # Never report success for a run that is still going: a mid-run `status`
+    # poll saying "all jobs passed" is a false verdict an agent will act on.
+    if unfinished:
+        done = len(manifest["jobs"]) - len(unfinished)
+        print(
+            f"\nci-remote: NOT FINISHED — {done}/{len(manifest['jobs'])} done, "
+            f"no failures yet, {len(unfinished)} outstanding: "
+            f"{' '.join(unfinished)}"
+        )
+        print(
+            "ci-remote: not a verdict. If someone is waiting on this run, "
+            "report these counts now and poll `status` again shortly."
+        )
+        return 3
+
+    print("\nci-remote: all jobs passed")
+    return 0
+
+
+def read_log(host: Host, manifest: dict, key: str, tail: int) -> str:
+    path = f"{manifest['run_dir']}/{key}.log"
+    command = (
+        f"tail -n {tail} {shlex.quote(path)}"
+        if tail
+        else f"cat {shlex.quote(path)}"
+    )
+    result = ssh_run(host, command, check=False)
+    if result.returncode != 0:
+        return f"(no log for {key})"
+    return result.stdout.rstrip("\n")
+
+
+def cmd_status(args: argparse.Namespace) -> int:
+    manifest = load_manifest(args.run)
+    host = resolve_host(manifest["host"])
+    if args.wait:
+        return follow_run(host, manifest, args)
+    return summarise(host, manifest, tail=args.tail if args.logs else 0)
+
+
+def cmd_logs(args: argparse.Namespace) -> int:
+    manifest = load_manifest(args.run)
+    host = resolve_host(manifest["host"])
+    if args.follow:
+        if not args.job:
+            raise Error("--follow needs a single --job")
+        path = f"{manifest['run_dir']}/{args.job}.log"
+        return subprocess.run(
+            ["ssh", "-o", "BatchMode=yes", host.ssh_target, "bash -s"],
+            input=f"tail -n {args.tail or 50} -f {shlex.quote(path)}",
+            text=True,
+        ).returncode
+
+    keys = [args.job] if args.job else manifest["jobs"]
+    if not args.job:
+        state = fetch_status(host, manifest["run_dir"])
+        failed = [
+            key
+            for key in manifest["jobs"]
+            if job_state(manifest, state, key)[0].startswith("FAIL")
+        ]
+        keys = failed or manifest["jobs"]
+    for key in keys:
+        print(f"----- {key} -----")
+        print(read_log(host, manifest, key, args.tail))
+    return 0
+
+
+def cmd_cancel(args: argparse.Namespace) -> int:
+    # A run that failed during setup never wrote a local manifest, and a run
+    # started from another machine has none here either -- but its claim still
+    # blocks the checkout. --host makes cancel work from the run id alone.
+    if args.host:
+        host = resolve_host(args.host)
+        if not args.run:
+            raise Error("cancel --host needs a run id")
+        run_dir = f"{remote_root(host)}/runs/{args.run}"
+        manifest = {"run_id": args.run}
+    else:
+        manifest = load_manifest(args.run)
+        host = resolve_host(manifest["host"])
+        run_dir = manifest["run_dir"]
+
+    # Signal the whole process group, so in-flight `go test` children die with
+    # the dispatcher rather than being orphaned. The cmdline check guards
+    # against a recycled pid belonging to something else entirely.
+    script = (
+        f"cd {shlex.quote(run_dir)} 2>/dev/null || exit 3\n"
+        'if [ -e dispatch.pid ]; then\n'
+        '  pid=$(cat dispatch.pid)\n'
+        '  if grep -qa dispatch.sh "/proc/$pid/cmdline" 2>/dev/null; then\n'
+        '    kill -TERM -"$pid" 2>/dev/null && printf "signalled %s\\n" "$pid"\n'
+        "    sleep 2\n"
+        '    kill -KILL -"$pid" 2>/dev/null\n'
+        "  else\n"
+        '    printf "dispatcher already gone\\n"\n'
+        "  fi\n"
+        "else\n"
+        '  printf "no dispatcher recorded\\n"\n'
+        "fi\n"
+        # Mark it terminal so the workspace claim releases and retention can
+        # reclaim the directory.
+        '[ -e finished ] || date +%s > finished\n'
+    )
+    result = ssh_run(host, script, check=False)
+    if result.returncode == 3:
+        raise Error(f"run directory is gone on {host.name}: {run_dir}")
+    sys.stdout.write(result.stdout or "")
+    print(f"ci-remote: cancelled {manifest['run_id']}")
+    return 0
+
+
+def cmd_list(args: argparse.Namespace) -> int:
+    runs = state_dir() / "runs"
+    if not runs.is_dir():
+        print("no runs recorded")
+        return 0
+    entries = sorted(runs.glob("*.json"), reverse=True)[: args.limit]
+    for path in entries:
+        manifest = json.loads(path.read_text(encoding="utf-8"))
+        print(
+            f"{manifest['run_id']}  {manifest['host']:<12} "
+            f"{Path(manifest['repo']).name} @ {manifest['revision']}  "
+            f"{len(manifest['jobs'])} jobs"
+        )
+    return 0
+
+
+def cmd_gc(args: argparse.Namespace) -> int:
+    host = resolve_host(args.host)
+    root = remote_root(host)
+
+    keep = args.keep if args.keep is not None else host.keep_runs
+    ttl = args.ttl if args.ttl is not None else host.workspace_ttl_days
+    result = ssh_run(host, render_prune(root, keep, ttl), check=False)
+    output = (result.stdout or "").strip()
+    print(output if output else "ci-remote: nothing to prune")
+
+    usage = ssh_run(
+        host,
+        f"du -sh {shlex.quote(root)} 2>/dev/null | tail -1\n"
+        f"du -sh {shlex.quote(root)}/workspaces/*/ 2>/dev/null",
+        check=False,
+    )
+    sys.stdout.write(usage.stdout or "")
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# entry point
+# ---------------------------------------------------------------------------
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="ci-remote",
+        description="Run a repository's GitHub Actions jobs on a remote Linux box.",
+    )
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    run = sub.add_parser("run", help="sync the working tree and run CI jobs")
+    run.add_argument("--host", help="host from the ci-remote config")
+    run.add_argument("--workflow", help="workflow file (default: guessed)")
+    run.add_argument(
+        "--job", action="append", default=[], help="job to run (repeatable)"
+    )
+    run.add_argument("--detach", action="store_true", help="return once started")
+    run.add_argument("--parallel", type=int, help="override the host's job slots")
+    run.add_argument("--interval", type=float, default=5.0, help="poll seconds")
+    run.add_argument("--tail", type=int, default=60, help="failure log lines")
+    run.add_argument(
+        "--fail-fast",
+        action="store_true",
+        help="return on the first blocking job failure, not at the end",
+    )
+    # Two distinct overrides, deliberately not one flag: ignoring low disk
+    # risks a slow failure, while seizing a workspace from a live run corrupts
+    # the tree it is building in.
+    run.add_argument(
+        "--force", action="store_true", help="start despite low disk space"
+    )
+    run.add_argument(
+        "--take-workspace",
+        action="store_true",
+        help="seize this checkout's workspace from a run believed dead",
+    )
+    run.add_argument("-v", "--verbose", action="store_true", help="rsync progress")
+    run.set_defaults(func=cmd_run)
+
+    status = sub.add_parser("status", help="show a run's job states")
+    status.add_argument("run", nargs="?")
+    status.add_argument("--wait", action="store_true", help="block until finished")
+    status.add_argument("--logs", action="store_true", help="tail failing logs")
+    status.add_argument("--tail", type=int, default=60)
+    status.add_argument("--interval", type=float, default=5.0)
+    status.set_defaults(func=cmd_status)
+
+    status.add_argument("--fail-fast", action="store_true")
+
+    wait = sub.add_parser("wait", help="block until a run finishes, then summarise")
+    wait.add_argument("run", nargs="?")
+    wait.add_argument("--tail", type=int, default=60)
+    wait.add_argument("--interval", type=float, default=5.0)
+    wait.add_argument(
+        "--fail-fast",
+        action="store_true",
+        help="return on the first blocking job failure, not at the end",
+    )
+    wait.set_defaults(
+        func=lambda a: cmd_status(
+            argparse.Namespace(**{**vars(a), "wait": True, "logs": True})
+        )
+    )
+
+    cancel = sub.add_parser("cancel", help="stop a run and free its workspace")
+    cancel.add_argument("run", nargs="?")
+    cancel.add_argument(
+        "--host", help="act by run id alone, without a local run record"
+    )
+    cancel.set_defaults(func=cmd_cancel)
+
+    logs = sub.add_parser("logs", help="print job logs from a run")
+    logs.add_argument("run", nargs="?")
+    logs.add_argument("--job", help="job id (default: failing jobs)")
+    logs.add_argument("--tail", type=int, default=0, help="0 prints the whole log")
+    logs.add_argument("--follow", action="store_true", help="tail -f a single job")
+    logs.set_defaults(func=cmd_logs)
+
+    jobs = sub.add_parser("jobs", help="list the jobs parsed from a workflow")
+    jobs.add_argument("--workflow")
+    jobs.set_defaults(func=cmd_jobs)
+
+    hosts = sub.add_parser("hosts", help="list configured hosts")
+    hosts.set_defaults(func=cmd_hosts)
+
+    runs = sub.add_parser("list", help="list recent local run records")
+    runs.add_argument("--limit", type=int, default=15)
+    runs.set_defaults(func=cmd_list)
+
+    gc = sub.add_parser("gc", help="apply retention on a host and report usage")
+    gc.add_argument("--host")
+    gc.add_argument(
+        "--keep", type=int, help="run directories to keep (default: host's keep_runs)"
+    )
+    gc.add_argument(
+        "--ttl",
+        type=int,
+        help="drop workspaces unused for this many days "
+        "(default: host's workspace_ttl_days; 0 disables)",
+    )
+    gc.set_defaults(func=cmd_gc)
+
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    # Agents capture this tool's output to a file or pipe, where stdout would
+    # otherwise be block-buffered and stderr not -- so an error surfaces above
+    # the progress lines that preceded it, and a detached run looks like it
+    # failed before it started. Line buffering keeps the transcript in order.
+    sys.stdout.reconfigure(line_buffering=True)
+    args = build_parser().parse_args(argv)
+    try:
+        return args.func(args)
+    except Error as error:
+        sys.stderr.write(f"ci-remote: {error}\n")
+        return 2
+    except KeyboardInterrupt:
+        sys.stderr.write("\nci-remote: interrupted (the remote run continues)\n")
+        return 130
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

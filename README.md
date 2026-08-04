@@ -222,6 +222,75 @@ cannot leave its kube-apiserver, etcd, or other child processes behind.
 Docker containers do not inherit the user slice and remain outside this initial
 limit.
 
+## Remote CI execution
+
+`bin/ci-remote` runs a repository's GitHub Actions jobs on a remote Linux box
+instead of pushing to GitHub for a verdict. It is repository-agnostic — the job
+list comes from the workflow file — and it writes nothing into the repository
+under test, so it works against any checkout or worktree.
+
+```bash
+cd <repo>                                   # any checkout or worktree
+ci-remote hosts                             # configured boxes
+ci-remote jobs                              # jobs parsed from the workflow
+ci-remote run                               # all of them, in parallel
+ci-remote run --job <Job>                   # one job, streaming
+ci-remote run --detach                      # returns a run id immediately
+ci-remote status <run-id>
+ci-remote logs <run-id> --job <Job> --tail 0
+```
+
+`run` exits non-zero if any blocking job failed, so it gates other work.
+
+The **working tree is rsynced, uncommitted changes included**, into a persistent
+per-checkout workspace, so a run needs no commit and a re-sync of an unchanged
+tree moves a few hundred KB rather than the whole checkout. `.git` is included,
+so targets that diff against the index (`verify-generate`, copyright checks)
+behave.
+
+Which paths to skip is answered by `git ls-files --ignored`, not by rsync's
+`.gitignore` filter. They are not equivalent: rsync does not implement git's
+negation patterns, so a repo that ignores a directory and re-includes part of
+it (`/.claude/*` then `!/.claude/skills/`) would lose the re-included files —
+and when those are tracked, they land on the box as deletions and every
+tree-is-clean gate fails there for a reason that does not exist locally.
+
+**Parallel agents.** A workspace is keyed by the absolute path of the local
+checkout, so agents working in different worktrees never share one. Two runs
+from the *same* checkout would collide, and the second is refused with the
+blocking run's id rather than allowed to rsync over a tree still being built
+in. A new worktree's first sync is seeded from a sibling workspace of the same
+repo with `--copy-dest`, so the box copies the shared history locally instead
+of pulling it over the network again.
+
+**It cleans up after itself.** Each run prunes finished run directories beyond
+the host's `keep_runs`, and workspaces untouched for `workspace_ttl_days`; an
+in-flight run and an unstamped workspace are never touched, and every removal
+prints. `ci-remote gc` applies the same policy on demand and reports usage.
+Set either to `0` to disable.
+
+Jobs run under GitHub's shell semantics (`bash --noprofile --norc -eo pipefail`)
+with workflow and job `env`, `working-directory` and `continue-on-error`
+honoured, plus `CI=true`. Dependency order from `needs:` is preserved.
+
+**Fidelity is bounded, deliberately.** Every `uses:` step — checkout, `setup-go`,
+cache restore — is skipped and listed before the run starts. The toolchain is
+therefore the box's rather than `ubuntu-latest`'s, so a green run here is not
+proof of a green run on GitHub for anything version-sensitive. A `strategy:
+matrix` cannot be expanded and `if:` conditions are not evaluated; both are
+reported as warnings.
+
+`config/ci-remote/hosts.conf` is a template only — this repo is public, so real
+hosts, mount points and cache paths go in the untracked
+`~/.config/ci-remote/hosts.local.conf`, which is read afterwards and wins.
+Each entry carries the PATH prelude that non-interactive SSH will not supply
+(it may reference `$RUN_DIR`/`$JOB_DIR`), the job concurrency, a scheduling
+prefix for behaving on a shared box, and any cache variables. Pointing
+`GOCACHE`/`GOMODCACHE` at a persistent per-host cache is what makes repeat runs
+fast. Because the override is untracked it does not sync between machines.
+
+Runs refuse to start when the target host is low on disk, before the rsync.
+
 ## Neovim Go workflow
 
 Go formatting is handled by Conform (`goimports`, then `gofumpt`). Live Go

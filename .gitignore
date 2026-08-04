@@ -14,3 +14,6 @@ __pycache__/
 # never publish it (this repo is public). The hq sidebar hooks are injected into
 # whatever local settings.json exists by hooks/claude/install-hooks instead.
 /claude/settings.json
+
+# Machine-local ci-remote host overrides (may name private hosts).
+/config/ci-remote/hosts.local.conf
