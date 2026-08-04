@@ -114,6 +114,11 @@ else
   log::f "Skipping AI skills install (requires PROFILE=dev|full)"
 fi
 
+# Skills authored in this repo (skills/<name>/SKILL.md) into both Claude Code and
+# Codex. Unlike the third-party set this needs no npx and no network, so it runs
+# on every profile -- a `make up` on a fresh box gets them even at PROFILE=link.
+tools::install_local_skills || log::f "Local skills install skipped"
+
 if [[ "${PROFILE}" == "full" ]]; then
   tools::full_install
 else

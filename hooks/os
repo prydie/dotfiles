@@ -1180,6 +1180,55 @@ tools::link_ai_skills_into_codex() {
   log::f "Linked ${#AI_SKILLS[@]} skills into ${codex_skills}"
 }
 
+# Skills authored in this repo, as opposed to the third-party set above. The
+# source of truth is ${DOTFILES}/skills/<name>/SKILL.md and the install is a
+# symlink into each agent's global skill directory, so an edit is live for both
+# agents with no re-install.
+#
+# Discovery is by directory listing, deliberately: adding a skill is `mkdir
+# skills/<name>` plus a SKILL.md, with no list to keep in sync here. Skills are
+# excluded from rcm in rcrc precisely so this owns them -- rcm would otherwise
+# link the directory to ~/.skills, which neither agent reads.
+# Takes the skills directory as an optional argument. Sourcing this file always
+# resets _ROOT to the repo it lives in, so an explicit parameter is the only way
+# to point the installer somewhere else -- which the tests rely on.
+tools::install_local_skills() {
+  local source claude_skills codex_skills path name linked=0
+  source="${1:-${_ROOT}/skills}"
+  claude_skills="${HOME}/.claude/skills"
+  codex_skills="${CODEX_HOME:-${HOME}/.codex}/skills"
+
+  if [ ! -d "${source}" ]; then
+    log::f "Skipping local skills: ${source} not found"
+    return 0
+  fi
+
+  mkdir -p "${claude_skills}" "${codex_skills}"
+  for path in "${source}"/*/; do
+    [ -d "${path}" ] || continue
+    name="$(basename "${path}")"
+
+    if [ ! -f "${path}SKILL.md" ]; then
+      log::e "Skipping local skill ${name}: no SKILL.md"
+      continue
+    fi
+
+    # A third-party skill of the same name is installed by skills.sh into
+    # ~/.agents/skills; clobbering it would silently change behaviour, so refuse
+    # and let the name collision be resolved deliberately.
+    if [ -e "${HOME}/.agents/skills/${name}" ]; then
+      log::e "Skipping local skill ${name}: name also provided by ~/.agents/skills"
+      continue
+    fi
+
+    ln -sfn "${source}/${name}" "${claude_skills}/${name}"
+    ln -sfn "${source}/${name}" "${codex_skills}/${name}"
+    linked=$((linked + 1))
+  done
+
+  log::f "Linked ${linked} local skill(s) into ${claude_skills} and ${codex_skills}"
+}
+
 tools::plugin_capable_codex_bin() {
   local candidate resolved
 
@@ -1887,6 +1936,9 @@ if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
       ;;
     ai-skills)
       tools::install_ai_skills
+      ;;
+    local-skills)
+      tools::install_local_skills
       ;;
     tmux-plugins)
       tools::install_tmux_plugins

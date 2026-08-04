@@ -95,6 +95,40 @@ tracked by this public repo. Superpowers scratch state under `.superpowers/` is
 also ignored; deliberate specs/plans under `docs/superpowers/` remain visible to
 Git review.
 
+## Agent skills authored here
+
+Skills written in this repo live in `skills/<name>/SKILL.md` and are installed
+for **both** Claude Code and Codex by `tools::install_local_skills`:
+
+```bash
+make skills
+```
+
+The install is a pair of symlinks per skill:
+
+```
+~/.claude/skills/<name> -> ~/.dotfiles/skills/<name>
+~/.codex/skills/<name>  -> ~/.dotfiles/skills/<name>
+```
+
+Both agents therefore read one source of truth, and editing a `SKILL.md` is
+live immediately — there is nothing to re-install after a change. `make up`
+runs the installer on every profile (it needs no network or Node), so a
+`git pull && make up` is enough to get a new skill onto the other machine.
+
+Adding a skill is `mkdir skills/<name>` plus a `SKILL.md`: discovery is a
+directory listing, so there is no manifest to keep in sync. A directory without
+a `SKILL.md` is skipped with a warning, and a name already provided by the
+third-party `~/.agents/skills` store is refused rather than silently
+overridden. `skills` is excluded from rcm in `rcrc` so this installer owns it —
+rcm would otherwise link the directory to `~/.skills`, which neither agent
+reads.
+
+Agents load skills at startup, so restart Claude Code / Codex to pick up a
+newly added one (an edit to an existing skill's body needs no restart).
+
+Current skills: `ci-remote` (see [Remote CI execution](#remote-ci-execution)).
+
 ## Agent skills (mattpocock/skills pilot)
 
 A conservative pilot subset of [`mattpocock/skills`](https://github.com/mattpocock/skills)
