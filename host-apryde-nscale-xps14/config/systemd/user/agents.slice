@@ -1,0 +1,20 @@
+[Unit]
+Description=Local AI agent workloads
+
+[Slice]
+# Keep twelve of this host's sixteen CPUs available for interactive work and
+# isolate agent cache growth from the desktop.
+CPUQuota=400%
+# Yield readily to the desktop and other user services under contention.
+CPUWeight=10
+IOWeight=10
+MemoryAccounting=yes
+# This is the 64 GiB laptop (apryde-nscale-xps14): allow the agent slice up to
+# half of system RAM, with the soft throttle just below the hard cap. Agent
+# working sets are largely shmem/anon (unswappable), so RAM headroom beats
+# reclaim-thrashing against a small swap allowance. The 32 GiB desktop keeps the
+# conservative base limits (16G/24G) — do NOT raise those there.
+MemoryHigh=30G
+MemoryMax=32G
+MemorySwapMax=2G
+TasksMax=2048
