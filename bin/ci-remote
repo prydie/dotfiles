@@ -1125,6 +1125,11 @@ def fetch_status(host: Host, run_dir: str) -> dict:
     return state
 
 
+# A job in any other state is still in flight. Kept as the single source of
+# truth so adding a state cannot quietly fall out of the verdict.
+TERMINAL_STATES = frozenset({"PASS", "FAIL", "FAIL(advisory)"})
+
+
 def duration(seconds: int | None) -> str:
     if seconds is None or seconds < 0:
         return "-"
@@ -1329,6 +1334,14 @@ def cmd_run(args: argparse.Namespace) -> int:
         "jobs": [job.key for job in jobs],
         "advisory": [job.key for job in jobs if job.continue_on_error],
         "created": int(time.time()),
+        # Recorded at launch so a verdict read later still knows what the run
+        # could not execute.
+        "coverage": {
+            "skipped_uses": sum(len(job.skipped_uses) for job in jobs),
+            "unsupported": sorted(
+                {note for job in jobs for note in job.notes}
+            ),
+        },
     }
     save_manifest(manifest)
 
@@ -1402,7 +1415,7 @@ def follow_run(host: Host, manifest: dict, args: argparse.Namespace) -> int:
         still_going = [
             key
             for key in manifest["jobs"]
-            if job_state(manifest, state, key)[0] in ("RUN", "PEND")
+            if job_state(manifest, state, key)[0] not in TERMINAL_STATES
         ]
         code = summarise(host, manifest, tail=args.tail)
         if still_going:
@@ -1430,7 +1443,12 @@ def summarise(host: Host, manifest: dict, tail: int) -> int:
         print(f"  {status:<15} {elapsed:>8}  {key}")
         if status == "FAIL":
             failures.append(key)
-        elif status in ("RUN", "PEND"):
+        elif status not in TERMINAL_STATES:
+            # Derived from the terminal set, never from a list of in-flight
+            # states: enumerating those meant adding QUEUE silently dropped it
+            # from the tally, so a run with one job still waiting on a lock and
+            # the rest green reported "all jobs passed" and exited 0. Any state
+            # this reducer does not recognise must count as unfinished.
             unfinished.append(key)
 
     if failures and tail:
@@ -1459,7 +1477,24 @@ def summarise(host: Host, manifest: dict, tail: int) -> int:
         )
         return 3
 
-    print("\nci-remote: all jobs passed")
+    # Say what the green covers. The skipped `uses:` steps are reported when a
+    # run starts, but a verdict read on its own -- or pasted into a PR -- would
+    # otherwise imply more than was actually executed.
+    coverage = manifest.get("coverage") or {}
+    print("\nci-remote: all jobs passed (runnable workflow steps only)")
+    if coverage.get("skipped_uses"):
+        print(
+            f"ci-remote: NOT covered — {coverage['skipped_uses']} `uses:` step(s) "
+            "skipped (checkout, toolchain setup, cache restore)"
+        )
+    if coverage.get("unsupported"):
+        print(
+            "ci-remote: NOT covered — "
+            + ", ".join(coverage["unsupported"])
+        )
+    print(
+        f"ci-remote: host {manifest['host']}; this is not proof GitHub CI will pass"
+    )
     return 0
 
 
@@ -1476,9 +1511,65 @@ def read_log(host: Host, manifest: dict, key: str, tail: int) -> str:
     return result.stdout.rstrip("\n")
 
 
+def status_json(host: Host, manifest: dict) -> tuple[dict, int]:
+    """Machine-readable verdict: one object, no parsing of human output."""
+    state = fetch_status(host, manifest["run_dir"])
+    jobs = []
+    failures = unfinished = 0
+    for key in manifest["jobs"]:
+        status, _ = job_state(manifest, state, key)
+        entry = state["results"].get(key, {})
+        queued = state["queued"].get(key)
+        started = state["started"].get(key)
+        # Queue time and work time are reported separately: a job held by
+        # admission control would otherwise inflate its apparent runtime.
+        jobs.append(
+            {
+                "job": key,
+                "state": status,
+                "advisory": key in manifest.get("advisory", []),
+                "returncode": entry.get("rc"),
+                "queue_seconds": (
+                    (started - queued) if queued and started else None
+                ),
+                "work_seconds": (
+                    (entry["end"] - entry["start"])
+                    if entry.get("start") and entry.get("end")
+                    else (state["now"] - started) if started else None
+                ),
+            }
+        )
+        if status == "FAIL":
+            failures += 1
+        elif status not in TERMINAL_STATES:
+            unfinished += 1
+
+    verdict = "failed" if failures else ("unfinished" if unfinished else "passed")
+    code = 1 if failures else (3 if unfinished else 0)
+    return (
+        {
+            "run_id": manifest["run_id"],
+            "host": manifest["host"],
+            "repo": manifest["repo"],
+            "revision": manifest["revision"],
+            "workflow": manifest.get("workflow"),
+            "verdict": verdict,
+            "exit_code": code,
+            "finished": state["finished"] is not None,
+            "coverage": manifest.get("coverage", {}),
+            "jobs": jobs,
+        },
+        code,
+    )
+
+
 def cmd_status(args: argparse.Namespace) -> int:
     manifest = load_manifest(args.run)
     host = resolve_host(manifest["host"])
+    if getattr(args, "json", False):
+        payload, code = status_json(host, manifest)
+        print(json.dumps(payload, indent=2))
+        return code
     if args.wait:
         return follow_run(host, manifest, args)
     return summarise(host, manifest, tail=args.tail if args.logs else 0)
@@ -1642,6 +1733,11 @@ def build_parser() -> argparse.ArgumentParser:
     status.set_defaults(func=cmd_status)
 
     status.add_argument("--fail-fast", action="store_true")
+    status.add_argument(
+        "--json",
+        action="store_true",
+        help="emit one machine-readable object instead of the table",
+    )
 
     wait = sub.add_parser("wait", help="block until a run finishes, then summarise")
     wait.add_argument("run", nargs="?")

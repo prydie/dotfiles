@@ -781,6 +781,80 @@ class TimeoutTest(unittest.TestCase):
         self.assertIn("JOB_TIMEOUT - ($(date +%s) - JOB_START)", driver)
 
 
+class StatusJsonTest(unittest.TestCase):
+    """The machine-readable contract agents branch on."""
+
+    def setUp(self) -> None:
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.bin = Path(self.temporary.name) / "bin"
+        self.bin.mkdir()
+        self.original_path = os.environ["PATH"]
+        os.environ["PATH"] = f"{self.bin}{os.pathsep}{self.original_path}"
+        self.addCleanup(lambda: os.environ.__setitem__("PATH", self.original_path))
+
+    def payload(self, stdout: str, jobs=("Unit", "Race"), advisory=()):
+        script = self.bin / "ssh"
+        script.write_text(
+            "#!/bin/sh\ncat <<'EOF'\n" + stdout + "\nEOF\n", encoding="utf-8"
+        )
+        script.chmod(0o755)
+        manifest = {
+            "run_id": "r1",
+            "host": "h",
+            "repo": "/repo",
+            "revision": "abc",
+            "workflow": "w.yaml",
+            "run_dir": "/r",
+            "jobs": list(jobs),
+            "advisory": list(advisory),
+            "coverage": {"skipped_uses": 4, "unsupported": []},
+        }
+        return ci.status_json(ci.Host(name="h", ssh="h"), manifest)
+
+    def test_queued_job_is_unfinished_not_passed(self) -> None:
+        # Same defect class as the summary reducer: QUEUE must not read green.
+        payload, code = self.payload("N 100\nQ Unit 10\nQ Race 10\nR Unit 0 10 40")
+        self.assertEqual(payload["verdict"], "unfinished")
+        self.assertEqual(code, 3)
+        self.assertFalse(payload["finished"])
+
+    def test_separates_queue_time_from_work_time(self) -> None:
+        payload, _ = self.payload(
+            "N 100\nQ Unit 10\nS Unit 40\nR Unit 0 40 70\nQ Race 10\nS Race 40"
+        )
+        unit = next(j for j in payload["jobs"] if j["job"] == "Unit")
+        self.assertEqual(unit["queue_seconds"], 30)
+        self.assertEqual(unit["work_seconds"], 30)
+
+    def test_reports_failure_and_returncode(self) -> None:
+        payload, code = self.payload(
+            "N 100\nQ Unit 0\nS Unit 0\nR Unit 2 0 30\n"
+            "Q Race 0\nS Race 0\nR Race 0 0 30\nF 30"
+        )
+        self.assertEqual(payload["verdict"], "failed")
+        self.assertEqual(code, 1)
+        unit = next(j for j in payload["jobs"] if j["job"] == "Unit")
+        self.assertEqual(unit["returncode"], 2)
+
+    def test_advisory_failure_does_not_fail_the_run(self) -> None:
+        payload, code = self.payload(
+            "N 100\nQ Unit 0\nS Unit 0\nR Unit 1 0 30\n"
+            "Q Race 0\nS Race 0\nR Race 0 0 30\nF 30",
+            advisory=("Unit",),
+        )
+        self.assertEqual(payload["verdict"], "passed")
+        self.assertEqual(code, 0)
+        self.assertTrue(next(j for j in payload["jobs"] if j["job"] == "Unit")["advisory"])
+
+    def test_carries_coverage_so_a_green_is_not_read_as_total(self) -> None:
+        payload, _ = self.payload(
+            "N 100\nQ Unit 0\nS Unit 0\nR Unit 0 0 30\n"
+            "Q Race 0\nS Race 0\nR Race 0 0 30\nF 30"
+        )
+        self.assertEqual(payload["coverage"]["skipped_uses"], 4)
+
+
 class ScratchResolutionTest(unittest.TestCase):
     """Where scratch really lands, not where `env` claims."""
 
@@ -855,6 +929,25 @@ class VerdictTest(unittest.TestCase):
         with contextlib.redirect_stdout(buffer):
             code = ci.summarise(ci.Host(name="h", ssh="h"), manifest, tail=0)
         return code, buffer.getvalue()
+
+    def test_a_queued_job_alongside_passing_ones_is_not_a_pass(self) -> None:
+        # Regression: QUEUE was absent from the reducer's non-terminal set, so
+        # a run with every other job green reported "all jobs passed" and
+        # exited 0 while a job was still waiting on a lock -- a false green
+        # that contradicted the per-job states printed directly above it.
+        code, output = self.summarise("N 1000\nQ Unit 900\nQ Race 900\nR Unit 0 900 950")
+        self.assertEqual(code, 3, "a queued job means the run is not finished")
+        self.assertIn("NOT FINISHED", output)
+        self.assertNotIn("all jobs passed", output)
+        self.assertIn("Race", output)
+
+    def test_no_reducer_enumerates_in_flight_states(self) -> None:
+        # The false green came from listing in-flight states instead of
+        # deriving them; every verdict path must use the terminal set so a
+        # future state cannot silently drop out again.
+        source = SCRIPT.read_text(encoding="utf-8")
+        self.assertNotIn('("RUN", "PEND")', source)
+        self.assertGreaterEqual(source.count("not in TERMINAL_STATES"), 3)
 
     def test_mid_run_is_not_reported_as_success(self) -> None:
         # Unit passed, Race still going: the old code said "all jobs passed".
