@@ -41,6 +41,14 @@ ordering is honoured.
 | 2 | Usage or config error (bad job name, unknown run id, host low on disk) |
 | 3 | Run has not finished — **no verdict yet** |
 
+Job states in `status`: `PEND` (not launched), `QUEUE` (launched, waiting on a
+host slot or an exclusive lock), `RUN`, `PASS`, `FAIL`, `FAIL(advisory)`.
+Elapsed time for `RUN` and finished jobs is work only — queue time is separate.
+
+A job is cancelled at its workflow's `timeout-minutes` (the host sets a default
+where the workflow gives none), so an abandoned job cannot hold a slot and a
+workspace forever.
+
 Code 2 means *you* got something wrong and can retry differently; code 1 is a
 genuine CI signal. Code 3 comes from polling `status` mid-run: treat it as "ask
 again later", never as success.
@@ -108,8 +116,17 @@ bind: address already in use
 
 That is a **concurrency artifact, not a code failure**. Re-run the affected job
 on its own (`ci-remote run --job Envtest`) to get a real verdict, and only
-believe the failure if it reproduces alone. Lowering the host's `parallel`
-makes it rarer. Filesystem state is not the issue — each job gets its own tree.
+believe the failure if it reproduces alone. Filesystem state is not the issue —
+each job gets its own tree.
+
+A host can list such jobs as `exclusive_jobs`, which serialises them against
+each other while everything else stays parallel; `ci-remote hosts` shows
+whether that is configured. A job held there reports `QUEUE`, not `RUN`, so
+waiting time is never mistaken for work.
+
+Job concurrency is also capped host-wide by `max_jobs` across every
+invocation — `parallel` alone bounds only your own run, so several agents
+launching at once would otherwise oversubscribe the box.
 
 ## Code shipping
 

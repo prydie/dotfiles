@@ -88,6 +88,15 @@ class Host:
     workspace_ttl_days: int = 14
     min_free_tmp_gb: float = 5.0
     isolate_jobs: bool = True
+    # `parallel` bounds ONE invocation. Two checkouts launching at once would
+    # each honour it and still oversubscribe the box, so max_jobs is a
+    # host-wide ceiling enforced by a lock directory shared by every run.
+    max_jobs: int = 0
+    # Jobs that cannot safely run beside each other on a single host, whatever
+    # the slot count: anything binding fixed ports, since all jobs share one
+    # network namespace here while GitHub gives each its own VM.
+    exclusive_jobs: list[str] = field(default_factory=list)
+    default_timeout_minutes: int = 360
 
     @property
     def ssh_target(self) -> str:
@@ -133,6 +142,13 @@ def load_hosts() -> tuple[dict[str, Host], str | None]:
             workspace_ttl_days=values.getint("workspace_ttl_days", 14),
             min_free_tmp_gb=values.getfloat("min_free_tmp_gb", 5.0),
             isolate_jobs=values.getboolean("isolate_jobs", True),
+            max_jobs=values.getint("max_jobs", 0),
+            exclusive_jobs=[
+                item
+                for item in re.split(r"[,\s]+", values.get("exclusive_jobs", ""))
+                if item
+            ],
+            default_timeout_minutes=values.getint("default_timeout_minutes", 360),
         )
     if not hosts:
         raise Error("host configuration defines no hosts")
@@ -174,6 +190,7 @@ class Step:
 class Job:
     key: str
     name: str
+    timeout_minutes: int | None
     needs: list[str]
     steps: list[Step]
     env: dict[str, str]
@@ -324,6 +341,11 @@ def parse_workflow(path: Path) -> list[Job]:
             Job(
                 key=key,
                 name=str(spec.get("name") or key),
+                timeout_minutes=(
+                    int(spec["timeout-minutes"])
+                    if isinstance(spec.get("timeout-minutes"), (int, float))
+                    else None
+                ),
                 needs=needs,
                 steps=steps,
                 env=env,
@@ -706,6 +728,11 @@ def exports(env: dict[str, str]) -> str:
     )
 
 
+def remote_root_of(run_dir: str) -> str:
+    """The host root from a run dir: locks are shared by every run on the box."""
+    return run_dir.rsplit("/runs/", 1)[0]
+
+
 def render_job_driver(host: Host, job: Job, run_dir: str, workspace: str) -> str:
     job_dir = f"{run_dir}/{job.key}"
 
@@ -715,8 +742,10 @@ def render_job_driver(host: Host, job: Job, run_dir: str, workspace: str) -> str
         "set -u",
         f"RUN_DIR={shlex.quote(run_dir)}",
         f"JOB_DIR={shlex.quote(job_dir)}",
-        'JOB_START=$(date +%s)',
-        'printf %s "$JOB_START" > "$RUN_DIR/' + job.key + '.started"',
+        # Queued now; started only once admission control lets it through, so
+        # reported durations are work rather than time spent waiting on a lock,
+        # and the timeout budget below measures the job like GitHub does.
+        'printf %s "$(date +%s)" > "$RUN_DIR/' + job.key + '.queued"',
         "",
     ]
     # Order matters: base environment, then the prelude (arbitrary shell, so it
@@ -731,6 +760,46 @@ def render_job_driver(host: Host, job: Job, run_dir: str, workspace: str) -> str
         lines += ["# host prelude", host.prelude, ""]
     lines += [
         exports(job.env).rstrip("\n"),
+        "",
+    ]
+
+    lock_dir = f"{remote_root_of(run_dir)}/locks"
+    if host.max_jobs > 0 or job.key in host.exclusive_jobs:
+        lines += [f"mkdir -p {shlex.quote(lock_dir)} 2>/dev/null || true", ""]
+
+    if host.max_jobs > 0:
+        # Host-wide admission. `parallel` only bounds one invocation, so two
+        # checkouts launching together would each honour it and still
+        # oversubscribe the box. The slot is held by an open fd for the life of
+        # this process, so a crashed job releases it without leaving stale
+        # state behind.
+        lines += [
+            'printf "ci-remote: waiting for a host slot...\\n"',
+            "slot_held=0",
+            "while [ $slot_held -eq 0 ]; do",
+            f"  for slot in $(seq 1 {host.max_jobs}); do",
+            f'    exec {{slot_fd}}>"{lock_dir}/slot.$slot" 2>/dev/null || continue',
+            '    if flock -n "$slot_fd"; then slot_held=1; break; fi',
+            '    exec {slot_fd}>&-',
+            "  done",
+            "  [ $slot_held -eq 0 ] && sleep 3",
+            "done",
+            "",
+        ]
+
+    if job.key in host.exclusive_jobs:
+        # A blocking, named lock: these jobs bind fixed ports and would collide
+        # with each other on a shared network namespace.
+        lines += [
+            'printf "ci-remote: waiting for the exclusive lock...\\n"',
+            f'exec {{excl_fd}}>"{lock_dir}/exclusive"',
+            'flock "$excl_fd"',
+            "",
+        ]
+
+    lines += [
+        "JOB_START=$(date +%s)",
+        'printf %s "$JOB_START" > "$RUN_DIR/' + job.key + '.started"',
         "",
     ]
 
@@ -783,6 +852,20 @@ def render_job_driver(host: Host, job: Job, run_dir: str, workspace: str) -> str
         "",
     ]
 
+    # GitHub cancels a job at timeout-minutes; without it an abandoned job
+    # holds a slot, a workspace claim and the box's resources indefinitely.
+    # The budget covers the job, so each step gets whatever remains of it.
+    limit_minutes = job.timeout_minutes or host.default_timeout_minutes
+    lines += [
+        f"JOB_TIMEOUT={int(limit_minutes) * 60}",
+        "",
+    ]
+    budget = (
+        '$(remaining=$(( JOB_TIMEOUT - ($(date +%s) - JOB_START) )); '
+        '[ $remaining -lt 1 ] && remaining=1; '
+        'printf "timeout --kill-after=30s %ss" "$remaining") '
+    )
+
     total = len(job.steps)
     for step in job.steps:
         script = f"{job_dir}/step-{step.index:02d}.sh"
@@ -795,9 +878,13 @@ def render_job_driver(host: Host, job: Job, run_dir: str, workspace: str) -> str
             f'printf "\\n===== step %s =====\\n" {shlex.quote(label)}',
             "step_start=$(date +%s)",
             exports(step.env).rstrip("\n"),
-            f"( cd {step_workdir} && exec {runner}"
+            f"( cd {step_workdir} && exec {runner}{budget}"
             f"{step.shell} --noprofile --norc -eo pipefail {shlex.quote(script)} )",
             "rc=$?",
+            # 124 is timeout(1)'s signal that the job's budget ran out.
+            'if [ $rc -eq 124 ]; then',
+            '  printf "ci-remote: job exceeded its timeout-minutes budget\\n" >&2',
+            'fi',
             'printf "===== step %s -> rc=%s (%ss) =====\\n" '
             f'{shlex.quote(label)} "$rc" "$(( $(date +%s) - step_start ))"',
         ]
@@ -964,6 +1051,8 @@ def fetch_status(host: Host, run_dir: str) -> dict:
     probe = (
         f"cd {shlex.quote(run_dir)} 2>/dev/null || exit 3\n"
         'printf "N %s\\n" "$(date +%s)"\n'
+        'for f in *.queued; do [ -e "$f" ] || continue; '
+        'printf "Q %s %s\\n" "${f%.queued}" "$(cat "$f")"; done\n'
         'for f in *.started; do [ -e "$f" ] || continue; '
         'printf "S %s %s\\n" "${f%.started}" "$(cat "$f")"; done\n'
         'for f in *.rc; do [ -e "$f" ] || continue; '
@@ -978,7 +1067,7 @@ def fetch_status(host: Host, run_dir: str) -> dict:
         detail = (result.stderr or "").strip() or f"exit {result.returncode}"
         raise Error(f"ssh {host.ssh_target}: {detail}")
 
-    state = {"now": 0, "started": {}, "results": {}, "finished": None}
+    state = {"now": 0, "queued": {}, "started": {}, "results": {}, "finished": None}
     for line in (result.stdout or "").splitlines():
         fields = line.split()
         if not fields:
@@ -986,6 +1075,8 @@ def fetch_status(host: Host, run_dir: str) -> dict:
         tag = fields[0]
         if tag == "N" and len(fields) >= 2:
             state["now"] = int(fields[1])
+        elif tag == "Q" and len(fields) >= 3:
+            state["queued"][fields[1]] = int(fields[2])
         elif tag == "S" and len(fields) >= 3:
             state["started"][fields[1]] = int(fields[2])
         elif tag == "R" and len(fields) >= 3:
@@ -1018,6 +1109,10 @@ def job_state(manifest: dict, state: dict, key: str) -> tuple[str, str]:
         return ("FAIL(advisory)" if advisory else "FAIL"), duration(elapsed)
     if key in state["started"]:
         return "RUN", duration(state["now"] - state["started"][key])
+    if key in state["queued"]:
+        # Launched but held by admission control; the elapsed time is waiting,
+        # not work, so it must not read as RUN.
+        return "QUEUE", duration(state["now"] - state["queued"][key])
     return "PEND", "-"
 
 

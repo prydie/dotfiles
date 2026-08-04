@@ -189,6 +189,7 @@ class JobOrderingTest(unittest.TestCase):
         return ci.Job(
             key=key,
             name=key,
+            timeout_minutes=None,
             needs=needs,
             steps=[],
             env={},
@@ -300,7 +301,8 @@ class ScriptRenderingTest(unittest.TestCase):
     def test_runs_each_step_with_github_bash_semantics(self) -> None:
         driver = self.driver("Static")
         self.assertIn("bash --noprofile --norc -eo pipefail /r/runs/1/Static/step-01.sh", driver)
-        self.assertIn("nice -n 19 bash --noprofile", driver)
+        # nice wraps the timeout budget, which wraps bash.
+        self.assertRegex(driver, r"nice -n 19 .*timeout --kill-after.*bash --noprofile")
 
     def test_blocking_step_failure_stops_the_job(self) -> None:
         driver = self.driver("Static")
@@ -464,6 +466,16 @@ class StatusParsingTest(unittest.TestCase):
             "#!/bin/sh\ncat <<'EOF'\n" + payload + "\nEOF\n", encoding="utf-8"
         )
         script.chmod(0o755)
+
+    def test_a_job_waiting_on_admission_reports_queue_not_run(self) -> None:
+        # The probe must actually emit Q lines; a job blocked on a lock
+        # otherwise reads as RUN and its wait is mistaken for work.
+        self.stub_ssh("N 1000\nQ Envtest 900\nQ Race 900\nS Race 950")
+        state = ci.fetch_status(ci.Host(name="h", ssh="h"), "/r")
+        manifest = {"jobs": ["Envtest", "Race"], "advisory": []}
+        self.assertEqual(ci.job_state(manifest, state, "Envtest"), ("QUEUE", "1m40s"))
+        # Race was admitted, so it times from its start, not from queueing.
+        self.assertEqual(ci.job_state(manifest, state, "Race"), ("RUN", "50s"))
 
     def test_parses_running_and_finished_jobs(self) -> None:
         self.stub_ssh("N 1000\nS Unit 900\nS Race 950\nR Unit 0 900 940")
@@ -658,6 +670,104 @@ class PruneTest(unittest.TestCase):
             ["bash", "-s"], input=script, text=True, capture_output=True
         )
         self.assertEqual(result.returncode, 0, result.stderr)
+
+
+class AdmissionControlTest(unittest.TestCase):
+    """Host-wide limits, which `parallel` alone cannot provide."""
+
+    def setUp(self) -> None:
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.root = Path(self.temporary.name)
+        self.jobs = {
+            job.key: job for job in ci.parse_workflow(write_workflow(self.root))
+        }
+
+    def driver(self, key: str, **host_kwargs) -> str:
+        host = ci.Host(name="box", ssh="box", **host_kwargs)
+        return ci.render_job_driver(host, self.jobs[key], "/r/runs/1", "/r/ws")
+
+    def test_locks_live_beside_runs_so_every_run_shares_them(self) -> None:
+        # A per-run lock directory would defeat the point: the limit has to
+        # bind across invocations from different checkouts.
+        self.assertEqual(ci.remote_root_of("/srv/ci/runs/20260101T000000-ab"), "/srv/ci")
+        driver = self.driver("Static", max_jobs=4)
+        self.assertIn("/r/locks/slot.", driver)
+        self.assertNotIn("/r/runs/1/locks", driver)
+
+    def test_takes_one_of_max_jobs_slots(self) -> None:
+        driver = self.driver("Static", max_jobs=4)
+        self.assertIn("seq 1 4", driver)
+        self.assertIn("flock -n", driver)
+
+    def test_no_admission_control_when_unset(self) -> None:
+        driver = self.driver("Static")
+        self.assertNotIn("slot.", driver)
+        self.assertNotIn("exclusive", driver)
+
+    def test_exclusive_job_takes_a_blocking_named_lock(self) -> None:
+        driver = self.driver("Static", exclusive_jobs=["Static"])
+        self.assertIn("/r/locks/exclusive", driver)
+        # Blocking, not -n: it must wait rather than fail.
+        self.assertIn('flock "$excl_fd"', driver)
+
+    def test_non_exclusive_job_is_unaffected(self) -> None:
+        driver = self.driver("Unit", exclusive_jobs=["Static"])
+        self.assertNotIn("exclusive", driver)
+
+    def test_slot_is_released_by_process_exit(self) -> None:
+        # Held via an open fd, so a killed job cannot leave a stale lock.
+        driver = self.driver("Static", max_jobs=2)
+        self.assertRegex(driver, r"exec \{slot_fd\}>")
+        self.assertNotIn("rm -f /r/locks", driver)
+
+    def test_admission_runs_before_the_expensive_tree_copy(self) -> None:
+        driver = self.driver("Static", max_jobs=2, isolate_jobs=True)
+        self.assertLess(driver.index("flock -n"), driver.index("cp -a"))
+
+
+class TimeoutTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.root = Path(self.temporary.name)
+        body = textwrap.dedent(
+            """
+            jobs:
+              Quick:
+                timeout-minutes: 7
+                steps:
+                - run: make test
+              Unbounded:
+                steps:
+                - run: make test
+            """
+        ).lstrip()
+        self.jobs = {
+            job.key: job
+            for job in ci.parse_workflow(write_workflow(self.root, body, "t.yaml"))
+        }
+
+    def test_reads_timeout_minutes_from_the_workflow(self) -> None:
+        self.assertEqual(self.jobs["Quick"].timeout_minutes, 7)
+        self.assertIsNone(self.jobs["Unbounded"].timeout_minutes)
+
+    def test_applies_the_job_budget_in_seconds(self) -> None:
+        host = ci.Host(name="b", ssh="b")
+        driver = ci.render_job_driver(host, self.jobs["Quick"], "/r/runs/1", "/r/ws")
+        self.assertIn("JOB_TIMEOUT=420", driver)
+        self.assertIn("timeout --kill-after=30s", driver)
+
+    def test_falls_back_to_the_host_default(self) -> None:
+        host = ci.Host(name="b", ssh="b", default_timeout_minutes=5)
+        driver = ci.render_job_driver(host, self.jobs["Unbounded"], "/r/runs/1", "/r/ws")
+        self.assertIn("JOB_TIMEOUT=300", driver)
+
+    def test_a_step_gets_only_the_time_left_in_the_job(self) -> None:
+        host = ci.Host(name="b", ssh="b")
+        driver = ci.render_job_driver(host, self.jobs["Quick"], "/r/runs/1", "/r/ws")
+        # Budget is computed per step from elapsed job time, not restarted.
+        self.assertIn("JOB_TIMEOUT - ($(date +%s) - JOB_START)", driver)
 
 
 class VerdictTest(unittest.TestCase):
