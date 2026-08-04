@@ -20,7 +20,10 @@ from typing import Any, Iterable
 
 
 STATE_VERSION = 1
-FIELD_SEPARATOR = "\x1f"
+# Field delimiter — tmux preserves tabs but mangles most control bytes (it
+# renders \x1f as the literal four characters "\037"), which silently reduced
+# every pane record to a single field. Matches the US delimiter in bin/hq.
+FIELD_SEPARATOR = "\t"
 SHELL_COMMANDS = {"bash", "dash", "fish", "sh", "zsh"}
 
 
@@ -164,7 +167,9 @@ def list_panes() -> list[Pane]:
     result = run_tmux("list-panes", "-a", "-F", format_string)
     panes: list[Pane] = []
     for line in result.stdout.splitlines():
-        fields = line.split(FIELD_SEPARATOR)
+        # pane_current_path is last, so cap the split: a separator inside the
+        # path lands in the final field instead of dropping the whole pane.
+        fields = line.split(FIELD_SEPARATOR, 6)
         if len(fields) != 7:
             continue
         try:
