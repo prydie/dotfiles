@@ -84,6 +84,22 @@ fi
 NKS_AGENT_TEST_SHIMS_ACTIVE=1
 export NKS_AGENT_TEST_ORIGINAL_PATH NKS_AGENT_TEST_SHIMS_ACTIVE PATH
 
+# Keep agent scratch off /tmp. /tmp is a tmpfs sized at half of RAM, and tmpfs
+# pages are charged as unevictable shmem against the agents.slice MemoryHigh
+# budget — GB-scale envtest and build scratch there pins the slice at its soft
+# limit and wedges it in permanent direct reclaim without ever tripping an OOM
+# kill. A disk-backed scratch dir is reclaimable page cache instead, so hot
+# files stay in RAM without being accounted against the slice.
+agent_tmpdir="${XDG_CACHE_HOME:-$HOME/.cache}/agent-tmp"
+if mkdir -p "$agent_tmpdir" 2>/dev/null && [ -w "$agent_tmpdir" ]; then
+    TMPDIR=$agent_tmpdir
+    export TMPDIR
+else
+    # An unusable scratch dir must not stop an agent from launching; the
+    # inherited default is slower to fail but still correct.
+    echo "agent-run: cannot use $agent_tmpdir, falling back to ${TMPDIR:-/tmp}" >&2
+fi
+
 exec systemd-run \
     --user \
     --scope \
@@ -91,4 +107,5 @@ exec systemd-run \
     --collect \
     --same-dir \
     --slice=agents.slice \
+    --setenv=TMPDIR="${TMPDIR:-/tmp}" \
     -- "$@"

@@ -19,6 +19,7 @@ class AgentRunTest(unittest.TestCase):
         self.bin.mkdir()
         self.capture = self.root / "systemd-run-arguments"
         self.reload_stamp = self.root / "daemon-reload-stamp"
+        self.cache = self.root / "cache"
         self.write_executable(
             "systemctl",
             """
@@ -73,6 +74,7 @@ class AgentRunTest(unittest.TestCase):
             printf 'test-shims=%s\n' "$NKS_AGENT_TEST_SHIMS_ACTIVE"
             printf 'original-path=%s\n' "$NKS_AGENT_TEST_ORIGINAL_PATH"
             printf 'path=%s\n' "$PATH"
+            printf 'tmpdir=%s\n' "$TMPDIR"
             pwd
             """,
         )
@@ -97,6 +99,9 @@ class AgentRunTest(unittest.TestCase):
             "RELOAD_STAMP": str(self.reload_stamp),
             "MARKER": "preserved",
             "PATH": f"{self.bin}:/usr/bin:/bin",
+            # Keep the scratch dir inside the fixture so the suite never touches
+            # the real cache directory.
+            "XDG_CACHE_HOME": str(self.cache),
         }
 
     def test_launches_command_in_aggregate_slice(self) -> None:
@@ -132,9 +137,47 @@ class AgentRunTest(unittest.TestCase):
                 "--collect",
                 "--same-dir",
                 "--slice=agents.slice",
+                f"--setenv=TMPDIR={self.cache / 'agent-tmp'}",
                 "--",
             ],
         )
+
+    def test_redirects_scratch_off_tmpfs(self) -> None:
+        expected = self.cache / "agent-tmp"
+
+        result = subprocess.run(
+            [str(SCRIPT), "probe", "scratch"],
+            cwd=self.root,
+            env=self.environment(),
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(f"tmpdir={expected}", result.stdout)
+        self.assertTrue(expected.is_dir(), "scratch dir should be created")
+        self.assertNotIn("falling back", result.stderr)
+
+    def test_unusable_scratch_dir_still_launches_agent(self) -> None:
+        # A regular file where the cache dir belongs makes mkdir -p fail.
+        self.cache.write_text("not a directory", encoding="utf-8")
+        environment = self.environment()
+        environment["TMPDIR"] = "/tmp"
+
+        result = subprocess.run(
+            [str(SCRIPT), "probe", "fallback"],
+            cwd=self.root,
+            env=environment,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("argument=fallback", result.stdout)
+        self.assertIn("tmpdir=/tmp", result.stdout)
+        self.assertIn("falling back", result.stderr)
 
     def test_stale_active_marker_does_not_disable_test_shims(self) -> None:
         environment = self.environment()
