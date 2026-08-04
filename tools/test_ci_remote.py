@@ -770,6 +770,43 @@ class TimeoutTest(unittest.TestCase):
         self.assertIn("JOB_TIMEOUT - ($(date +%s) - JOB_START)", driver)
 
 
+class ScratchResolutionTest(unittest.TestCase):
+    """Where scratch really lands, not where `env` claims."""
+
+    def setUp(self) -> None:
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.bin = Path(self.temporary.name) / "bin"
+        self.bin.mkdir()
+        # A stub ssh that runs the probe locally, so what is under test is the
+        # shell layering the real host would apply.
+        script = self.bin / "ssh"
+        script.write_text("#!/bin/sh\nexec bash\n", encoding="utf-8")
+        script.chmod(0o755)
+        self.original_path = os.environ["PATH"]
+        os.environ["PATH"] = f"{self.bin}{os.pathsep}{self.original_path}"
+        self.addCleanup(lambda: os.environ.__setitem__("PATH", self.original_path))
+
+    def test_prelude_wins_over_env(self) -> None:
+        # The regression: a prelude redirecting TMPDIR was ignored, so the
+        # check measured a /tmp the host never writes to.
+        host = ci.Host(
+            name="h",
+            ssh="h",
+            env={"TMPDIR": "/declared"},
+            prelude='export TMPDIR="$JOB_DIR/tmp"',
+        )
+        self.assertEqual(ci.effective_scratch(host, "/srv/ci"), "/srv/ci/.preflight/tmp")
+
+    def test_env_is_used_when_the_prelude_sets_nothing(self) -> None:
+        host = ci.Host(name="h", ssh="h", env={"TMPDIR": "/declared"})
+        self.assertEqual(ci.effective_scratch(host, "/srv/ci"), "/declared")
+
+    def test_falls_back_to_tmp_when_nothing_configures_it(self) -> None:
+        host = ci.Host(name="h", ssh="h")
+        self.assertEqual(ci.effective_scratch(host, "/srv/ci"), "/tmp")
+
+
 class VerdictTest(unittest.TestCase):
     """A run in flight must never be summarised as a pass."""
 

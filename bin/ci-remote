@@ -452,6 +452,34 @@ def free_gb(host: Host, path: str) -> float | None:
         return None
 
 
+def effective_scratch(host: Host, root: str) -> str:
+    """Where jobs will really write scratch, by asking the host.
+
+    Reading TMPDIR out of `env` alone is wrong: the prelude is arbitrary shell
+    and is the natural place to point scratch at a per-job directory, so a host
+    that redirects it there would be checked against a `/tmp` it never touches
+    -- reporting a full disk as fact and recommending a `gc` that cannot help.
+    Evaluating the same layering the job driver uses removes the need to
+    declare it twice and keeps the check honest.
+    """
+    probe = (
+        f"RUN_DIR={shlex.quote(root)}/.preflight\n"
+        f"JOB_DIR={shlex.quote(root)}/.preflight\n"
+        + exports(host.env)
+        + (f"{host.prelude}\n" if host.prelude else "")
+        + 'printf "%s" "${TMPDIR:-/tmp}"\n'
+        # A prelude that mkdir's its scratch dir would otherwise leave a stub
+        # behind on every pre-flight; only df's filesystem mattered.
+        + f"rm -rf {shlex.quote(root)}/.preflight 2>/dev/null\n"
+    )
+    result = ssh_run(host, probe, check=False)
+    resolved = (result.stdout or "").strip().splitlines()
+    for line in reversed(resolved):
+        if line.startswith("/"):
+            return line
+    return "/tmp"
+
+
 def check_free_space(host: Host, root: str, force: bool) -> None:
     """Guard the workspace filesystem AND the job scratch filesystem.
 
@@ -470,7 +498,7 @@ def check_free_space(host: Host, root: str, force: bool) -> None:
             f"(min_free_gb={host.min_free_gb:g})"
         )
 
-    temp = host.env.get("TMPDIR", "/tmp")
+    temp = effective_scratch(host, root)
     temp_free = free_gb(host, temp)
     if temp_free is not None and temp_free < host.min_free_tmp_gb:
         problems.append(
