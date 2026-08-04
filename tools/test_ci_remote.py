@@ -700,6 +700,17 @@ class AdmissionControlTest(unittest.TestCase):
         self.assertIn("seq 1 4", driver)
         self.assertIn("flock -n", driver)
 
+    def test_announces_a_wait_only_when_one_happens(self) -> None:
+        # An unconditional "waiting" line reads as contention in every log.
+        driver = self.driver("Static", max_jobs=4)
+        self.assertIn("try_slot ||", driver)
+        waiting = driver.index("slots busy; waiting")
+        self.assertLess(driver.index("try_slot ||"), waiting)
+
+    def test_exclusive_lock_is_attempted_before_announcing(self) -> None:
+        driver = self.driver("Static", exclusive_jobs=["Static"])
+        self.assertIn('if ! flock -n "$excl_fd"', driver)
+
     def test_no_admission_control_when_unset(self) -> None:
         driver = self.driver("Static")
         self.assertNotIn("slot.", driver)
