@@ -120,12 +120,21 @@ patching: sys-info ## Run apt patch cycle and reboot
 	@sudo apt upgrade -y
 	@sudo apt autoremove -y
 	@$(MAKE) firmware-overrides
+	@$(MAKE) dock-preboot-display
 	@sudo update-grub
 	@sudo shutdown -r now
 
 .PHONY: firmware-overrides
 firmware-overrides: ## Install managed local firmware overrides
 	@tools/xe_lnl_guc_firmware_override.sh install
+
+.PHONY: dock-preboot-display
+dock-preboot-display: ## Enable Thunderbolt dock display/keyboard at the LUKS prompt
+	@tools/dock_preboot_display.sh install
+
+.PHONY: dock-preboot-display-status
+dock-preboot-display-status: ## Show pre-boot Thunderbolt dock display support status
+	@tools/dock_preboot_display.sh status
 
 .PHONY: refresh-dev
 refresh-dev: ## Refresh user-level tooling/plugins (antidote, tmux TPM, Neovim lazy)
@@ -180,6 +189,7 @@ patching-full: refresh-dev sys-info ## Refresh user plugins, patch apt packages,
 	@sudo apt upgrade -y
 	@sudo apt autoremove -y
 	@$(MAKE) firmware-overrides
+	@$(MAKE) dock-preboot-display
 	@sudo update-grub
 	@sudo shutdown -r now
 
