@@ -750,6 +750,50 @@ def sync_workspace(
 # ---------------------------------------------------------------------------
 
 
+GITHUB_FILE_COMMAND_HELPERS = r"""# Apply a step's GITHUB_ENV to the steps after it: KEY=value lines, plus the
+# KEY<<DELIM heredoc form GitHub uses for values that span lines.
+ci_remote_apply_env_file() {
+  local file=$1 line key value delim
+  [ -s "$file" ] || return 0
+  while IFS= read -r line || [ -n "$line" ]; do
+    case $line in
+      *=*)
+        key=${line%%=*}
+        value=${line#*=}
+        [ -n "$key" ] && export "$key=$value"
+        ;;
+      *"<<"*)
+        key=${line%%<<*}
+        delim=${line#*<<}
+        value=""
+        while IFS= read -r line || [ -n "$line" ]; do
+          [ "$line" = "$delim" ] && break
+          if [ -z "$value" ]; then
+            value=$line
+          else
+            value="$value
+$line"
+          fi
+        done
+        [ -n "$key" ] && export "$key=$value"
+        ;;
+    esac
+  done < "$file"
+}
+
+# Apply a step's GITHUB_PATH to the steps after it. GitHub PREPENDS, so a tool
+# the workflow staged wins over one already installed on the box.
+ci_remote_apply_path_file() {
+  local file=$1 line
+  [ -s "$file" ] || return 0
+  while IFS= read -r line || [ -n "$line" ]; do
+    [ -n "$line" ] || continue
+    PATH=$line:$PATH
+  done < "$file"
+  export PATH
+}"""
+
+
 def exports(env: dict[str, str]) -> str:
     return "".join(
         f"export {key}={shlex.quote(value)}\n" for key, value in sorted(env.items())
@@ -860,6 +904,34 @@ def render_job_driver(host: Host, job: Job, run_dir: str, workspace: str) -> str
     else:
         lines += [f'WORKTREE={shlex.quote(workspace)}', ""]
 
+    # GitHub's "file commands". A step talks to the runner by APPENDING to paths
+    # the runner exports -- `echo "k=v" >> "$GITHUB_OUTPUT"` -- never by
+    # exporting anything itself. Leave them unset and `>> "$GITHUB_PATH"`
+    # redirects to the empty string: the step dies on a line that does no work
+    # and the job reads as a code failure. Each is a real per-step file here, so
+    # the append succeeds and whatever was written stays in the job dir.
+    #
+    # GITHUB_ENV and GITHUB_PATH are then APPLIED to the following steps, which
+    # is the half with behaviour -- a step that stages a tool on the PATH for
+    # later steps must really do it, or the later step fails obscurely.
+    # GITHUB_OUTPUT, GITHUB_STATE and GITHUB_STEP_SUMMARY are accepted and kept
+    # but go nowhere: carrying an output onward needs `${{ steps.x.outputs.y }}`
+    # evaluation, and this runner does not expand `${{ }}` at all. So a step
+    # that only PUBLISHES an output now passes honestly, while one whose later
+    # step CONSUMES it still meets an unexpanded expression, exactly as before.
+    #
+    # GITHUB_ACTIONS is deliberately NOT set. Tools branch on it to emit
+    # workflow annotations and to assume runner facilities absent here, and a
+    # box pretending to be GitHub fails in stranger ways than one that does not.
+    lines += [
+        'GITHUB_WORKSPACE="$WORKTREE"',
+        'RUNNER_TEMP="${TMPDIR:-/tmp}"',
+        'export GITHUB_WORKSPACE RUNNER_TEMP',
+        '',
+        GITHUB_FILE_COMMAND_HELPERS,
+        '',
+    ]
+
     workdir = '"$WORKTREE"'
     if job.working_directory:
         workdir = f'"$WORKTREE"/{shlex.quote(job.working_directory)}'
@@ -910,13 +982,27 @@ def render_job_driver(host: Host, job: Job, run_dir: str, workspace: str) -> str
             step_workdir = f'"$WORKTREE"/{shlex.quote(step.working_directory)}'
         label = f"{step.index}/{total} {step.name}"
         runner = f"{host.nice} " if host.nice else ""
+        stem = f"{job_dir}/step-{step.index:02d}"
         lines += [
             f'printf "\\n===== step %s =====\\n" {shlex.quote(label)}',
             "step_start=$(date +%s)",
+            f'GITHUB_OUTPUT={shlex.quote(stem + ".output")}',
+            f'GITHUB_ENV={shlex.quote(stem + ".env")}',
+            f'GITHUB_PATH={shlex.quote(stem + ".path")}',
+            f'GITHUB_STATE={shlex.quote(stem + ".state")}',
+            f'GITHUB_STEP_SUMMARY={shlex.quote(stem + ".summary")}',
+            "export GITHUB_OUTPUT GITHUB_ENV GITHUB_PATH GITHUB_STATE"
+            " GITHUB_STEP_SUMMARY",
+            ': > "$GITHUB_OUTPUT"; : > "$GITHUB_ENV"; : > "$GITHUB_PATH"',
+            ': > "$GITHUB_STATE"; : > "$GITHUB_STEP_SUMMARY"',
             exports(step.env).rstrip("\n"),
             f"( cd {step_workdir} && exec {runner}{budget}"
             f"{step.shell} --noprofile --norc -eo pipefail {shlex.quote(script)} )",
             "rc=$?",
+            # Applied even when the step failed: GitHub keeps what was written
+            # before it died, and rc is already captured so this cannot mask it.
+            'ci_remote_apply_env_file "$GITHUB_ENV"',
+            'ci_remote_apply_path_file "$GITHUB_PATH"',
             # 124 is timeout(1)'s signal that the job's budget ran out.
             'if [ $rc -eq 124 ]; then',
             '  printf "ci-remote: job exceeded its timeout-minutes budget\\n" >&2',
