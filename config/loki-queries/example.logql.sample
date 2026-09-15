@@ -1,0 +1,17 @@
+# Named LogQL queries for `lq q <name> [args...]`.
+#
+# Format, one per line:   <name> | <LogQL, with $1..$9 as placeholders>
+# Blank lines and #-comments are ignored. Arguments substitute literally --
+# they are never passed through a shell.
+#
+# Copy this file to a *.logql there to activate it. Real packs live in ${XDG_CONFIG_HOME:-~/.config}/loki-queries/*.logql and are
+# NOT tracked here: query templates encode a deployment's own namespaces, log
+# schema and field names. Copy this file there and edit it.
+#
+# Cheap line filter FIRST, then `| json`, then the field match. `| json` parses
+# every line it is given, so narrowing with |= "$1" beforehand is much faster
+# over a wide window.
+
+errors     | {namespace="$1"} | json | level="error"
+by-field   | {namespace="$1"} |= "$2" | json | $3="$2"
+grep       | {namespace="$1"} |= "$2"

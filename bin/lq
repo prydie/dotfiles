@@ -1,0 +1,169 @@
+#!/usr/bin/env bash
+# Point logcli at a Loki that is only reachable inside a Kubernetes cluster.
+#
+# Why this exists: logcli already does everything worth doing -- query, tail,
+# labels, series, stats -- and needs exactly two facts, both from the
+# environment. Neither is guessable here:
+#
+#   LOKI_ADDR    Loki has no ingress, so it needs a port-forward held open for
+#                the life of the shell, not the life of one command.
+#   LOKI_ORG_ID  the deployment runs with auth_enabled, and its tenant is NOT
+#                Loki's default `fake`. With the wrong tenant `/labels` still
+#                returns a full label list -- so it looks configured -- while
+#                every query and /series comes back empty rather than erroring.
+#                This reads the tenant from the log shipper's own client config
+#                and refuses to run rather than guess.
+#
+# Named queries live OUTSIDE this repo, because they encode local schema:
+#   ${XDG_CONFIG_HOME:-~/.config}/loki-queries/*.logql
+# See config/loki-queries/example.logql.sample for the format.
+#
+# Usage:
+#   eval "$(lq up <context-substring>)"   start a forward, export both vars
+#   lq down                               stop it
+#   lq env                                re-print the exports
+#   lq queries                            list named queries
+#   lq q <name> [args...] [-- logcli-args...]
+#                                         run a named query, $1..$9 substituted
+#
+# Everything else: use logcli directly once `lq up` has been eval'd.
+set -euo pipefail
+
+PROG=${0##*/}
+CTX_PATTERN="${LQ_CONTEXT_PATTERN:-}"
+NS="${LQ_LOKI_NAMESPACE:-loki}"
+SVC="${LQ_LOKI_SERVICE:-loki-gateway}"
+SVC_PORT="${LQ_LOKI_SERVICE_PORT:-80}"
+SHIPPER_NS="${LQ_SHIPPER_NAMESPACE:-promtail}"
+SHIPPER_SECRET="${LQ_SHIPPER_SECRET:-promtail}"
+SHIPPER_KEY="${LQ_SHIPPER_KEY:-promtail\.yaml}"
+QUERY_DIR="${LQ_QUERY_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/loki-queries}"
+STATE_DIR="${XDG_RUNTIME_DIR:-/tmp}/lq"
+
+die() { printf '%s: %s\n' "$PROG" "$*" >&2; exit 1; }
+need() { command -v "$1" >/dev/null 2>&1 || die "missing dependency: $1"; }
+
+resolve_ctx() {
+  local want=$1 all matches n
+  all=$(kubectl config get-contexts -o name 2>/dev/null)
+  if [ -n "$CTX_PATTERN" ]; then
+    all=$(printf '%s\n' "$all" | grep -- "$CTX_PATTERN" || true)
+  fi
+  matches=$(printf '%s\n' "$all" | grep -- "$want" || true)
+  n=$(printf '%s\n' "$matches" | grep -c . || true)
+  [ "$n" -eq 1 ] && { printf '%s\n' "$matches"; return; }
+  [ "$n" -eq 0 ] && die "no context matches '$want'"
+  die "'$want' matched $n contexts:
+$matches"
+}
+
+cmd_up() {
+  need kubectl; need curl; need python3
+  [ $# -ge 1 ] || die "usage: eval \"\$($PROG up <context-substring>)\""
+  local ctx port tenant i
+  ctx=$(resolve_ctx "$1")
+
+  tenant=$(kubectl --context "$ctx" -n "$SHIPPER_NS" get secret "$SHIPPER_SECRET" \
+             -o "jsonpath={.data.${SHIPPER_KEY}}" 2>/dev/null | base64 -d 2>/dev/null \
+           | sed -n 's/^[[:space:]-]*tenant_id:[[:space:]]*//p' | tr -d "\"'" | head -1)
+  [ -n "$tenant" ] || die "could not read the shipper's tenant_id from ${SHIPPER_NS}/${SHIPPER_SECRET} -- refusing to guess, because a wrong tenant returns empty rather than an error"
+
+  mkdir -p "$STATE_DIR"
+  cmd_down >/dev/null 2>&1 || true
+  port=$(python3 -c 'import socket;s=socket.socket();s.bind(("127.0.0.1",0));print(s.getsockname()[1]);s.close()')
+  kubectl --context "$ctx" -n "$NS" port-forward "svc/$SVC" "${port}:${SVC_PORT}" >/dev/null 2>&1 &
+  local pid=$!
+  for i in $(seq 1 40); do
+    kill -0 "$pid" 2>/dev/null || die "port-forward to $SVC died -- any result would NOT be evidence"
+    curl -s --max-time 2 "http://127.0.0.1:${port}/ready" >/dev/null 2>&1 && break
+    [ "$i" -eq 40 ] && { kill "$pid" 2>/dev/null; die "port-forward to $SVC never became ready -- any result would NOT be evidence"; }
+    sleep 1
+  done
+  printf '%s\n%s\n%s\n%s\n' "$pid" "$port" "$tenant" "$ctx" > "$STATE_DIR/current"
+  cmd_env
+}
+
+cmd_env() {
+  [ -f "$STATE_DIR/current" ] || die "nothing forwarded; run: eval \"\$($PROG up <context>)\""
+  local pid port tenant ctx
+  { read -r pid; read -r port; read -r tenant; read -r ctx; } < "$STATE_DIR/current"
+  kill -0 "$pid" 2>/dev/null || die "the forward for ${ctx##*/} is dead; run $PROG up again"
+  printf 'export LOKI_ADDR=http://127.0.0.1:%s\n' "$port"
+  printf 'export LOKI_ORG_ID=%s\n' "$tenant"
+  printf '# %s -> %s (pid %s)\n' "$ctx" "$tenant" "$pid"
+}
+
+cmd_down() {
+  [ -f "$STATE_DIR/current" ] || return 0
+  local pid; read -r pid < "$STATE_DIR/current"
+  kill "$pid" 2>/dev/null || true
+  rm -f "$STATE_DIR/current"
+  printf '%s: forward stopped; unset LOKI_ADDR LOKI_ORG_ID\n' "$PROG" >&2
+}
+
+query_files() { ls "$QUERY_DIR"/*.logql 2>/dev/null || true; }
+
+cmd_queries() {
+  local f
+  [ -n "$(query_files)" ] || die "no query packs in $QUERY_DIR (see config/loki-queries/example.logql.sample)"
+  for f in $(query_files); do
+    printf '# %s\n' "${f##*/}"
+    sed -n 's/^\([a-zA-Z0-9_-]\+\)[[:space:]]*|[[:space:]]*\(.*\)$/  \1\t\2/p' "$f"
+  done
+}
+
+cmd_q() {
+  need logcli
+  [ $# -ge 1 ] || die "usage: $PROG q <name> [args...] [-- logcli-args...]"
+  local name=$1; shift
+  local tmpl="" f
+  local -a hits=()
+  for f in $(query_files); do
+    if sed -n "s/^${name}[[:space:]]*|[[:space:]]*//p" "$f" | grep -q .; then
+      hits+=("$f")
+      [ -z "$tmpl" ] && tmpl=$(sed -n "s/^${name}[[:space:]]*|[[:space:]]*//p" "$f" | head -1)
+    fi
+  done
+  [ -n "$tmpl" ] || die "no query named '$name' (try: $PROG queries)"
+  [ "${#hits[@]}" -le 1 ] || die "'$name' is defined in ${#hits[@]} packs, so which wins depends on filename order: ${hits[*]}"
+
+  local -a passthru=()
+  local -a args=()
+  local seen_sep=0
+  for a in "$@"; do
+    if [ "$seen_sep" = 1 ]; then passthru+=("$a")
+    elif [ "$a" = "--" ]; then seen_sep=1
+    else args+=("$a"); fi
+  done
+
+  # Substitute $1..$9 with the positional args, literally -- no shell eval.
+  local q=$tmpl n=1
+  for a in ${args+"${args[@]}"}; do
+    q=${q//\$$n/$a}
+    n=$((n+1))
+  done
+  case "$q" in *'$'[1-9]*) die "query '$name' still has an unsubstituted placeholder: $q";; esac
+
+  [ -n "${LOKI_ADDR:-}" ] || die "LOKI_ADDR unset; run: eval \"\$($PROG up <context>)\""
+  printf '%s: %s\n' "$PROG" "$q" >&2
+  # logcli exits 0 and prints nothing when a query matches nothing, which is
+  # indistinguishable from a healthy quiet window. Say so rather than let an
+  # empty screen be read as an absence.
+  logcli query ${passthru+"${passthru[@]}"} "$q" | awk '{n++; print} END {
+    if (n == 0) {
+      print "lq: 0 lines. Loki reports success for a query matching nothing, so this is" > "/dev/stderr"
+      print "    an absence ONLY if the window is inside retention and the filter is right." > "/dev/stderr"
+      print "    Re-run with the `id` query to check without | json field matching." > "/dev/stderr"
+    } else print "lq: " n " lines" > "/dev/stderr"
+  }' 
+}
+
+case "${1:-}" in
+  up)      shift; cmd_up "$@";;
+  down)    shift; cmd_down "$@";;
+  env)     shift; cmd_env "$@";;
+  queries) shift; cmd_queries "$@";;
+  q)       shift; cmd_q "$@";;
+  -h|--help|"") sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//';;
+  *) die "unknown subcommand: $1 (try --help)";;
+esac

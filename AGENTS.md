@@ -38,6 +38,39 @@ Notes:
 - Shared boxes may already be running someone else's work. Check the load
   before launching a full pipeline, and leave the host's `nice` prefix alone.
 
+## Loki behind a port-forward
+
+`bin/lq` points `logcli` at a Loki that has no ingress. `logcli` does the real
+work -- query, tail, labels, series, stats -- and needs two environment facts,
+neither of which is guessable:
+
+```bash
+eval "$(lq up <context-substring>)"   # forward + export LOKI_ADDR/LOKI_ORG_ID
+logcli query --tail '{namespace="..."}'
+lq queries                            # named queries
+lq q <name> [args...] [-- logcli-args...]
+lq down
+```
+
+The forward outlives the `lq up` process, so `eval` works across commands;
+`lq env` re-prints the exports in a new shell.
+
+Two failure modes it refuses to paper over:
+- **The tenant is read, never guessed.** Where a deployment runs Loki with
+  `auth_enabled`, the wrong `LOKI_ORG_ID` makes `/labels` return a full label
+  list -- so it looks configured -- while every query and `/series` returns
+  empty instead of erroring. `lq` reads `tenant_id` from the log shipper's own
+  client config and refuses to start if it cannot.
+- **An empty result is not an absence.** A dead port-forward, and a query that
+  matches nothing, both look like a quiet window. `lq up` fails loudly, and
+  `lq q` reports the line count, saying what still needs confirming on zero.
+
+Named queries live in `${XDG_CONFIG_HOME:-~/.config}/loki-queries/*.logql` and
+are deliberately not tracked here -- templates encode a deployment's own
+namespaces and log schema. `config/loki-queries/example.logql.sample` is the format.
+Override discovery with `LQ_CONTEXT_PATTERN`, and the shipper/service locations
+with `LQ_LOKI_*` / `LQ_SHIPPER_*`.
+
 ## Visual Review
 
 Use `bin/webshot` to capture webpages for visual inspection.
