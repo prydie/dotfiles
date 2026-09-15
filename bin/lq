@@ -248,6 +248,19 @@ cmd_q() {
   case "$q" in *'$'[1-9]*) die "query '$name' still has an unsubstituted placeholder: $q";; esac
 
   [ -n "${LOKI_ADDR:-}" ] || die "LOKI_ADDR unset; run: eval \"\$($PROG up <app>)\""
+
+  # Default to raw output: these are structured logs, so the log line IS the
+  # record, and logcli's own timestamp+label prefix only gets in the way of
+  # anything downstream that parses JSON (hl, jq). Pass --output explicitly to
+  # override. --quiet keeps logcli's own banner off stdout for the same reason.
+  case " ${passthru[*]-} " in
+    *" --output"*|*" -o "*) ;;
+    *) passthru=("--output=raw" ${passthru+"${passthru[@]}"}) ;;
+  esac
+  case " ${passthru[*]-} " in
+    *" --quiet"*) ;;
+    *) passthru=("--quiet" ${passthru+"${passthru[@]}"}) ;;
+  esac
   printf '%s: %s\n' "$PROG" "$q" >&2
   # logcli exits 0 and prints nothing when a query matches nothing, which is
   # indistinguishable from a healthy quiet window. Say so rather than let an

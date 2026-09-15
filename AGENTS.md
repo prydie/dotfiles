@@ -72,6 +72,34 @@ result. `lq datasources` lists them.
 `lq q` reports a line count and, on zero, says what still needs confirming
 before it can be read as an absence.
 
+### Reading the output with hl
+
+`lq q` defaults to `logcli --output=raw`, so each line is the log record itself
+with no timestamp or label prefix. That is what any downstream JSON reader
+needs, `hl` included, and it pipes straight through:
+
+```bash
+lq q errors | hl -P
+```
+
+`hl` picks up the timestamp, level, logger and message from the usual JSON
+keys with no configuration. What spoils it is the fields a structured logger
+repeats on every single line -- build metadata and stack traces -- which crowd
+out the part that differs. Hide them, one `-h` per key (a comma-separated list
+is silently ignored):
+
+```bash
+lq q errors | hl -P -h application -h version -h revision -h stacktrace
+```
+
+There is no `HL_HIDE` environment variable, but `HL_CONFIG` points at a file
+that can carry the list under `fields.hide`, so the set can live in
+`~/.config/hl/` rather than in the shell history. Which keys are noise is a
+property of the logger, so that file is not tracked here.
+
+Pass `--output=default` through to `lq q` to get logcli's own timestamp and
+label prefix back.
+
 Named queries live in `${XDG_CONFIG_HOME:-~/.config}/loki-queries/*.logql` and
 are deliberately not tracked here -- templates encode a deployment's own
 namespaces and log schema. `config/loki-queries/example.logql.sample` is the
