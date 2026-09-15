@@ -28,6 +28,7 @@
 #   lq apps                               list Grafana apps
 #   lq datasources <app-substring>        list that app's Loki datasources
 #   lq queries                            list named queries
+#   lq containers                         container names in the current datasource
 #   lq q <name> [args...] [-- logcli-args...]
 #   lq completion zsh|bash
 #
@@ -206,6 +207,12 @@ BASH
   esac
 }
 
+cmd_containers() {
+  need logcli
+  [ -n "${LOKI_ADDR:-}" ] || die "LOKI_ADDR unset"
+  logcli labels k8s_container_name "$@" 2>/dev/null || die "could not list container names"
+}
+
 cmd_queries() {
   local f
   [ -n "$(query_files)" ] || die "no query packs in $QUERY_DIR (see config/loki-queries/example.logql.sample)"
@@ -279,6 +286,7 @@ case "${1:-}" in
   apps)        shift; cmd_apps "$@";;
   datasources) shift; cmd_datasources "$@";;
   queries)     shift; cmd_queries "$@";;
+  containers)  shift; cmd_containers "$@";;
   q)           shift; cmd_q "$@";;
   completion)  shift; cmd_completion "$@";;
   __query_names) shift; cmd_query_names "$@";;

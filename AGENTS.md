@@ -64,6 +64,21 @@ Going through Grafana rather than a port-forward matters for three reasons:
   indistinguishable from a quiet window.
 - **Nothing runs in the background**, so there is nothing to leak or stop.
 
+### Structured metadata is invisible to `logcli labels`
+
+An OTLP collector's resource attributes do not become Loki labels. Loki 3 keeps
+them as *structured metadata*, which `logcli labels` and `logcli series` never
+show -- so a datasource can look like it carries no correlating identifier when
+it carries several. They filter with a `|` expression after the stream
+selector, and need no `| json`:
+
+```bash
+logcli query '{service_name="..."} | someResourceAttribute="..."'
+```
+
+Check the collector's `resource` processors before concluding a correlation is
+missing and building a join to replace it.
+
 One deployment usually publishes several Loki datasources -- its own, and often
 separate ones for tenant control planes or audit. `lq up` refuses to pick when
 there is more than one, because the wrong datasource is another plausible empty
