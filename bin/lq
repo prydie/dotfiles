@@ -1,117 +1,140 @@
 #!/usr/bin/env bash
-# Point logcli at a Loki that is only reachable inside a Kubernetes cluster.
+# Point logcli at a Loki reached through a Grafana datasource proxy.
 #
 # Why this exists: logcli already does everything worth doing -- query, tail,
-# labels, series, stats -- and needs exactly two facts, both from the
-# environment. Neither is guessable here:
+# labels, series, stats -- and only needs to be told where to talk to and how
+# to authenticate. Where Grafana is published as a Teleport application, both
+# answers are better than a port-forward:
 #
-#   LOKI_ADDR    Loki has no ingress, so it needs a port-forward held open for
-#                the life of the shell, not the life of one command.
-#   LOKI_ORG_ID  the deployment runs with auth_enabled, and its tenant is NOT
-#                Loki's default `fake`. With the wrong tenant `/labels` still
-#                returns a full label list -- so it looks configured -- while
-#                every query and /series comes back empty rather than erroring.
-#                This reads the tenant from the log shipper's own client config
-#                and refuses to run rather than guess.
+#   * it needs no Kubernetes access at all, so a viewer role is enough;
+#   * Grafana's datasource config supplies the Loki tenant, so there is no
+#     X-Scope-OrgID to get wrong -- and a wrong one does not error, it returns
+#     empty results, which is indistinguishable from a quiet window;
+#   * there is no background process to leak, and nothing to stop afterwards.
 #
-# Where the shipper Secret is unreadable, set LQ_TENANT explicitly. The tool
-# still never guesses it.
+# `lq up` prints the three variables logcli reads: LOKI_ADDR pointing at the
+# datasource proxy, and the Teleport app's client certificate and key.
+#
+# A cell usually publishes more than one Loki datasource (its own, and often
+# separate ones for tenant control planes or audit). `lq datasources` lists
+# them; `lq up <app> <uid>` selects one.
 #
 # Named queries live OUTSIDE this repo, because they encode local schema:
 #   ${XDG_CONFIG_HOME:-~/.config}/loki-queries/*.logql
 # See config/loki-queries/example.logql.sample for the format.
 #
 # Usage:
-#   eval "$(lq up <context-substring>)"   start a forward, export both vars
-#   lq down                               stop it
-#   lq env                                re-print the exports
+#   eval "$(lq up <app-substring> [datasource-uid])"
+#   lq apps                               list Grafana apps
+#   lq datasources <app-substring>        list that app's Loki datasources
 #   lq queries                            list named queries
 #   lq q <name> [args...] [-- logcli-args...]
-#                                         run a named query, $1..$9 substituted
-#   lq contexts                           list selectable contexts
-#   lq completion zsh|bash                emit a completion script
+#   lq completion zsh|bash
 #
 # Everything else: use logcli directly once `lq up` has been eval'd.
 set -euo pipefail
 
 PROG=${0##*/}
-CTX_PATTERN="${LQ_CONTEXT_PATTERN:-}"
-NS="${LQ_LOKI_NAMESPACE:-loki}"
-SVC="${LQ_LOKI_SERVICE:-loki-gateway}"
-SVC_PORT="${LQ_LOKI_SERVICE_PORT:-80}"
-SHIPPER_NS="${LQ_SHIPPER_NAMESPACE:-promtail}"
-SHIPPER_SECRET="${LQ_SHIPPER_SECRET:-promtail}"
-SHIPPER_KEY="${LQ_SHIPPER_KEY:-promtail\.yaml}"
+APP_PATTERN="${LQ_APP_PATTERN:-grafana}"
 QUERY_DIR="${LQ_QUERY_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/loki-queries}"
-STATE_DIR="${XDG_RUNTIME_DIR:-/tmp}/lq"
 
 die() { printf '%s: %s\n' "$PROG" "$*" >&2; exit 1; }
 need() { command -v "$1" >/dev/null 2>&1 || die "missing dependency: $1"; }
 
-resolve_ctx() {
+apps() {
+  need tsh
+  tsh apps ls --format=json 2>/dev/null \
+    | python3 -c '
+import json,sys
+try: apps=json.load(sys.stdin)
+except Exception: sys.exit(0)
+for a in sorted({x["metadata"]["name"] for x in apps}): print(a)
+' || true
+}
+
+resolve_app() {
   local want=$1 all matches n
-  all=$(kubectl config get-contexts -o name 2>/dev/null || true)
-  [ -n "$all" ] || die "kubectl returned no contexts (is KUBECONFIG right?)"
-  if [ -n "$CTX_PATTERN" ]; then
-    all=$(printf '%s\n' "$all" | grep -- "$CTX_PATTERN" || true)
-  fi
+  all=$(apps | grep -- "$APP_PATTERN" || true)
+  [ -n "$all" ] || die "no Teleport app matches '$APP_PATTERN' (tsh logged in? set LQ_APP_PATTERN)"
   matches=$(printf '%s\n' "$all" | grep -- "$want" || true)
   n=$(printf '%s\n' "$matches" | grep -c . || true)
   [ "$n" -eq 1 ] && { printf '%s\n' "$matches"; return; }
-  [ "$n" -eq 0 ] && die "no context matches '$want'"
-  die "'$want' matched $n contexts:
+  [ "$n" -eq 0 ] && die "no app matches '$want'. Try: $PROG apps"
+  die "'$want' matched $n apps:
 $matches"
 }
 
+# Log in if needed and echo "uri<TAB>cert<TAB>key".
+app_config() {
+  local app=$1 cfg
+  cfg=$(tsh apps config --format=json "$app" 2>/dev/null || true)
+  if [ -z "$cfg" ]; then
+    tsh apps login "$app" >/dev/null 2>&1 || die "tsh apps login $app failed"
+    cfg=$(tsh apps config --format=json "$app" 2>/dev/null || true)
+  fi
+  [ -n "$cfg" ] || die "could not read tsh app config for $app"
+  printf '%s' "$cfg" | python3 -c '
+import json,sys
+d=json.load(sys.stdin)
+print("\t".join([d.get("uri",""),d.get("cert",""),d.get("key","")]))
+' || die "could not parse tsh app config for $app"
+}
+
+curl_app() { # uri cert key path...
+  local uri=$1 cert=$2 key=$3; shift 3
+  curl -s --max-time 60 --cert "$cert" --key "$key" "$uri$1"
+}
+
+cmd_apps() { apps | grep -- "$APP_PATTERN" || die "no app matches '$APP_PATTERN'"; }
+
+cmd_datasources() {
+  need curl; need python3
+  [ $# -ge 1 ] || die "usage: $PROG datasources <app-substring>"
+  local app uri cert key
+  app=$(resolve_app "$1")
+  IFS=$'\t' read -r uri cert key <<<"$(app_config "$app")"
+  curl_app "$uri" "$cert" "$key" "/api/datasources" | python3 -c '
+import json,sys
+try: d=json.load(sys.stdin)
+except Exception: sys.exit("lq: Grafana returned unparseable output -- NOT an empty list")
+if isinstance(d,dict): sys.exit("lq: Grafana said: %s" % json.dumps(d)[:200])
+loki=[x for x in d if x.get("type")=="loki"]
+if not loki: sys.exit("lq: this Grafana publishes no Loki datasource")
+for x in loki: print("  %-30s %s" % (x["uid"], x["name"]))
+'
+}
+
 cmd_up() {
-  need kubectl; need curl; need python3
-  [ $# -ge 1 ] || die "usage: eval \"\$($PROG up <context-substring>)\""
-  local ctx port tenant i
-  ctx=$(resolve_ctx "$1")
+  need curl; need python3
+  [ $# -ge 1 ] || die "usage: eval \"\$($PROG up <app-substring> [datasource-uid])\""
+  local app uri cert key uid="${2:-}"
+  app=$(resolve_app "$1")
+  IFS=$'\t' read -r uri cert key <<<"$(app_config "$app")"
 
-  # LQ_TENANT is the escape hatch for a cluster whose shipper Secret this
-  # account cannot read. It is still explicit: the tool never guesses a tenant,
-  # because a wrong one returns empty rather than erroring.
-  local tenant="${LQ_TENANT:-}"
-  if [ -z "$tenant" ]; then
-    # `|| true` on the whole pipeline: without it `set -e`/`pipefail` aborts the
-    # script HERE, before die() can say anything, and the caller gets a silent
-    # rc=1 -- which is precisely the failure this tool exists to prevent.
-    tenant=$(kubectl --context "$ctx" -n "$SHIPPER_NS" get secret "$SHIPPER_SECRET" \
-               -o "jsonpath={.data.${SHIPPER_KEY}}" 2>/dev/null | base64 -d 2>/dev/null \
-             | sed -n 's/^[[:space:]-]*tenant_id:[[:space:]]*//p' | tr -d "\"'" | head -1 || true)
+  # Pick the datasource rather than assume one: a cell commonly publishes
+  # several Loki datasources and the wrong one is a plausible empty result.
+  if [ -z "$uid" ]; then
+    local found
+    found=$(curl_app "$uri" "$cert" "$key" "/api/datasources" | python3 -c '
+import json,sys
+try: d=json.load(sys.stdin)
+except Exception: sys.exit(1)
+if isinstance(d,dict): sys.exit(1)
+loki=[x for x in d if x.get("type")=="loki"]
+if len(loki)==1: print(loki[0]["uid"])
+' || true)
+    [ -n "$found" ] || die "more than one (or no) Loki datasource on $app -- name one explicitly.
+  See: $PROG datasources $1"
+    uid=$found
   fi
-  [ -n "$tenant" ] || die "cannot read tenant_id from ${SHIPPER_NS}/${SHIPPER_SECRET} on ${ctx}.
-  Common causes: no read access to that Secret, or a different shipper.
-  Either point at the right one with LQ_SHIPPER_NAMESPACE / LQ_SHIPPER_SECRET / LQ_SHIPPER_KEY,
-  or state the tenant yourself with LQ_TENANT=<tenant>.
-  Refusing to guess: a wrong tenant returns empty results rather than an error."
 
-  mkdir -p "$STATE_DIR"
-  cmd_down >/dev/null 2>&1 || true
-  port=$(python3 -c 'import socket;s=socket.socket();s.bind(("127.0.0.1",0));print(s.getsockname()[1]);s.close()' || true)
-  [ -n "$port" ] || die "could not find a free local port"
-  kubectl --context "$ctx" -n "$NS" port-forward "svc/$SVC" "${port}:${SVC_PORT}" >/dev/null 2>&1 &
-  local pid=$!
-  for i in $(seq 1 40); do
-    kill -0 "$pid" 2>/dev/null || die "port-forward to $SVC died -- any result would NOT be evidence"
-    curl -s --max-time 2 "http://127.0.0.1:${port}/ready" >/dev/null 2>&1 && break
-    [ "$i" -eq 40 ] && { kill "$pid" 2>/dev/null; die "port-forward to $SVC never became ready -- any result would NOT be evidence"; }
-    sleep 1
-  done
-  printf '%s\n%s\n%s\n%s\n' "$pid" "$port" "$tenant" "$ctx" > "$STATE_DIR/current"
-  cmd_env
+  printf 'export LOKI_ADDR=%s/api/datasources/proxy/uid/%s\n' "$uri" "$uid"
+  printf 'export LOKI_CLIENT_CERT_PATH=%s\n' "$cert"
+  printf 'export LOKI_CLIENT_KEY_PATH=%s\n' "$key"
+  printf '# %s -> datasource %s\n' "$app" "$uid"
 }
 
-cmd_contexts() {
-  local all
-  all=$(kubectl config get-contexts -o name 2>/dev/null || true)
-  if [ -n "$CTX_PATTERN" ]; then
-    all=$(printf '%s\n' "$all" | grep -- "$CTX_PATTERN" || true)
-  fi
-  printf '%s\n' "$all" | grep -c . >/dev/null 2>&1 || true
-  printf '%s\n' "$all"
-}
+query_files() { ls "$QUERY_DIR"/*.logql 2>/dev/null || true; }
 
 cmd_query_names() {
   local f
@@ -124,17 +147,16 @@ cmd_completion() {
   case "${1:-}" in
     zsh) cat <<'ZSH'
 #compdef lq
-# Generated by `lq completion zsh`. Context and query names are asked of lq
-# itself, so they follow whatever kubeconfig and query packs are in play.
+# Generated by `lq completion zsh`. App and query names are asked of lq itself,
+# so they follow whatever Teleport apps and query packs are in play.
 _lq() {
   local -a subcmds
   subcmds=(
-    'up:start a port-forward and export LOKI_ADDR/LOKI_ORG_ID'
-    'down:stop the port-forward'
-    'env:re-print the exports'
+    'up:select a Grafana app and export the logcli variables'
+    'apps:list Grafana apps'
+    'datasources:list an app'"'"'s Loki datasources'
     'queries:list named queries with their templates'
     'q:run a named query'
-    'contexts:list selectable contexts'
     'completion:emit a completion script'
   )
   _arguments -C '1:command:->cmd' '*::arg:->args'
@@ -142,10 +164,16 @@ _lq() {
     cmd) _describe -t commands 'lq command' subcmds ;;
     args)
       case $words[1] in
-        up)  local -a c; c=(${(f)"$(lq contexts 2>/dev/null)"}); _describe -t contexts 'context' c ;;
-        q)   if (( CURRENT == 2 )); then
-               local -a n; n=(${(f)"$(lq __query_names 2>/dev/null)"}); _describe -t queries 'query' n
-             else _message 'query argument' ; fi ;;
+        up|datasources)
+          if (( CURRENT == 2 )); then
+            local -a a; a=(${(f)"$(lq __apps 2>/dev/null)"}); _describe -t apps 'app' a
+          elif [[ $words[1] == up ]]; then
+            local -a d; d=(${(f)"$(lq datasources $words[2] 2>/dev/null | awk '{print $1}')"})
+            _describe -t datasources 'datasource' d
+          fi ;;
+        q)  if (( CURRENT == 2 )); then
+              local -a n; n=(${(f)"$(lq __query_names 2>/dev/null)"}); _describe -t queries 'query' n
+            else _message 'query argument' ; fi ;;
         completion) _values 'shell' zsh bash ;;
       esac ;;
   esac
@@ -156,14 +184,18 @@ ZSH
     bash) cat <<'BASH'
 # Generated by `lq completion bash`. Source it, or drop it in bash_completion.d.
 _lq() {
-  local cur prev
-  cur=${COMP_WORDS[COMP_CWORD]}; prev=${COMP_WORDS[COMP_CWORD-1]}
+  local cur; cur=${COMP_WORDS[COMP_CWORD]}
   if [ "$COMP_CWORD" -eq 1 ]; then
-    COMPREPLY=($(compgen -W "up down env queries q contexts completion" -- "$cur")); return
+    COMPREPLY=($(compgen -W "up apps datasources queries q completion" -- "$cur")); return
   fi
   case "${COMP_WORDS[1]}" in
-    up)  COMPREPLY=($(compgen -W "$(lq contexts 2>/dev/null)" -- "$cur")) ;;
-    q)   [ "$COMP_CWORD" -eq 2 ] && COMPREPLY=($(compgen -W "$(lq __query_names 2>/dev/null)" -- "$cur")) ;;
+    up|datasources)
+      if [ "$COMP_CWORD" -eq 2 ]; then
+        COMPREPLY=($(compgen -W "$(lq __apps 2>/dev/null)" -- "$cur"))
+      elif [ "${COMP_WORDS[1]}" = up ]; then
+        COMPREPLY=($(compgen -W "$(lq datasources "${COMP_WORDS[2]}" 2>/dev/null | awk '{print $1}')" -- "$cur"))
+      fi ;;
+    q) [ "$COMP_CWORD" -eq 2 ] && COMPREPLY=($(compgen -W "$(lq __query_names 2>/dev/null)" -- "$cur")) ;;
     completion) COMPREPLY=($(compgen -W "zsh bash" -- "$cur")) ;;
   esac
 }
@@ -173,26 +205,6 @@ BASH
     *) die "usage: $PROG completion zsh|bash";;
   esac
 }
-
-cmd_env() {
-  [ -f "$STATE_DIR/current" ] || die "nothing forwarded; run: eval \"\$($PROG up <context>)\""
-  local pid port tenant ctx
-  { read -r pid; read -r port; read -r tenant; read -r ctx; } < "$STATE_DIR/current"
-  kill -0 "$pid" 2>/dev/null || die "the forward for ${ctx##*/} is dead; run $PROG up again"
-  printf 'export LOKI_ADDR=http://127.0.0.1:%s\n' "$port"
-  printf 'export LOKI_ORG_ID=%s\n' "$tenant"
-  printf '# %s -> %s (pid %s)\n' "$ctx" "$tenant" "$pid"
-}
-
-cmd_down() {
-  [ -f "$STATE_DIR/current" ] || return 0
-  local pid; read -r pid < "$STATE_DIR/current"
-  kill "$pid" 2>/dev/null || true
-  rm -f "$STATE_DIR/current"
-  printf '%s: forward stopped; unset LOKI_ADDR LOKI_ORG_ID\n' "$PROG" >&2
-}
-
-query_files() { ls "$QUERY_DIR"/*.logql 2>/dev/null || true; }
 
 cmd_queries() {
   local f
@@ -235,7 +247,7 @@ cmd_q() {
   done
   case "$q" in *'$'[1-9]*) die "query '$name' still has an unsubstituted placeholder: $q";; esac
 
-  [ -n "${LOKI_ADDR:-}" ] || die "LOKI_ADDR unset; run: eval \"\$($PROG up <context>)\""
+  [ -n "${LOKI_ADDR:-}" ] || die "LOKI_ADDR unset; run: eval \"\$($PROG up <app>)\""
   printf '%s: %s\n' "$PROG" "$q" >&2
   # logcli exits 0 and prints nothing when a query matches nothing, which is
   # indistinguishable from a healthy quiet window. Say so rather than let an
@@ -250,14 +262,14 @@ cmd_q() {
 }
 
 case "${1:-}" in
-  up)      shift; cmd_up "$@";;
-  down)    shift; cmd_down "$@";;
-  env)     shift; cmd_env "$@";;
-  queries) shift; cmd_queries "$@";;
-  contexts) shift; cmd_contexts "$@";;
+  up)          shift; cmd_up "$@";;
+  apps)        shift; cmd_apps "$@";;
+  datasources) shift; cmd_datasources "$@";;
+  queries)     shift; cmd_queries "$@";;
+  q)           shift; cmd_q "$@";;
+  completion)  shift; cmd_completion "$@";;
   __query_names) shift; cmd_query_names "$@";;
-  completion) shift; cmd_completion "$@";;
-  q)       shift; cmd_q "$@";;
-  -h|--help|"") sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//';;
+  __apps)      shift; cmd_apps "$@" 2>/dev/null || true;;
+  -h|--help|"") sed -n '2,37p' "$0" | sed 's/^# \{0,1\}//';;
   *) die "unknown subcommand: $1 (try --help)";;
 esac

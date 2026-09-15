@@ -38,49 +38,51 @@ Notes:
 - Shared boxes may already be running someone else's work. Check the load
   before launching a full pipeline, and leave the host's `nice` prefix alone.
 
-## Loki behind a port-forward
+## Loki via Grafana
 
-`bin/lq` points `logcli` at a Loki that has no ingress. `logcli` does the real
-work -- query, tail, labels, series, stats -- and needs two environment facts,
-neither of which is guessable:
+`bin/lq` points `logcli` at a Loki reached through a Grafana datasource proxy,
+where Grafana is published as a Teleport application. `logcli` does the real
+work -- query, tail, labels, series, stats.
 
 ```bash
-eval "$(lq up <context-substring>)"   # forward + export LOKI_ADDR/LOKI_ORG_ID
+lq apps                               # Grafana apps
+lq datasources <app>                  # that app's Loki datasources
+eval "$(lq up <app> [datasource-uid])" # exports LOKI_ADDR + client cert/key
 logcli query --tail '{namespace="..."}'
 lq queries                            # named queries
 lq q <name> [args...] [-- logcli-args...]
-lq down
 ```
 
-The forward outlives the `lq up` process, so `eval` works across commands;
-`lq env` re-prints the exports in a new shell.
+Going through Grafana rather than a port-forward matters for three reasons:
 
-Two failure modes it refuses to paper over:
-- **The tenant is read, never guessed.** Where a deployment runs Loki with
-  `auth_enabled`, the wrong `LOKI_ORG_ID` makes `/labels` return a full label
-  list -- so it looks configured -- while every query and `/series` returns
-  empty instead of erroring. `lq` reads `tenant_id` from the log shipper's own
-  client config and refuses to start if it cannot.
-- **An empty result is not an absence.** A dead port-forward, and a query that
-  matches nothing, both look like a quiet window. `lq up` fails loudly, and
-  `lq q` reports the line count, saying what still needs confirming on zero.
+- **It needs no Kubernetes access**, so a viewer role is enough. A port-forward
+  needs more, and reading a tenant out of the log shipper's Secret needs more
+  still -- which is not granted uniformly across clusters.
+- **Grafana's datasource config supplies the Loki tenant**, so there is no
+  `X-Scope-OrgID` to get wrong. A wrong tenant does not error: `/labels` still
+  returns a full label list, while queries return empty. That is
+  indistinguishable from a quiet window.
+- **Nothing runs in the background**, so there is nothing to leak or stop.
 
-Shell completion offers contexts for `lq up` and query names for `lq q`, asked
-of `lq` at completion time so they track the live kubeconfig and query packs:
+One deployment usually publishes several Loki datasources -- its own, and often
+separate ones for tenant control planes or audit. `lq up` refuses to pick when
+there is more than one, because the wrong datasource is another plausible empty
+result. `lq datasources` lists them.
 
-```bash
-lq completion zsh > "${XDG_DATA_HOME:-$HOME/.local/share}/zsh/site-functions/_lq"
-lq completion bash > ~/.local/share/bash-completion/completions/lq
-```
-
-That directory is already on `fpath` (see `zshrc`). Re-run after adding a pack
-only if you want the file refreshed -- the lists themselves are dynamic.
+`lq q` reports a line count and, on zero, says what still needs confirming
+before it can be read as an absence.
 
 Named queries live in `${XDG_CONFIG_HOME:-~/.config}/loki-queries/*.logql` and
 are deliberately not tracked here -- templates encode a deployment's own
-namespaces and log schema. `config/loki-queries/example.logql.sample` is the format.
-Override discovery with `LQ_CONTEXT_PATTERN`, and the shipper/service locations
-with `LQ_LOKI_*` / `LQ_SHIPPER_*`.
+namespaces and log schema. `config/loki-queries/example.logql.sample` is the
+format. Completion offers apps and query names, asked of `lq` at completion
+time:
+
+```bash
+lq completion zsh > "${XDG_DATA_HOME:-$HOME/.local/share}/zsh/site-functions/_lq"
+```
+
+Override app discovery with `LQ_APP_PATTERN` (default `grafana`).
 
 ## Visual Review
 
