@@ -1,6 +1,11 @@
 # Named LogQL queries for `lq q <name> [args...]`.
 #
-# Format, one per line:   <name> | <LogQL, with $1..$9 as placeholders>
+# Format, one per line:   <name> [@datasource-uid] | <LogQL, $1..$9 as args>
+#
+# The optional @datasource binds a query to one Loki datasource. Without it a
+# query runs against whatever `lq up` selected -- and against the wrong one it
+# returns an empty result rather than an error, which reads as "nothing
+# happened". Bind anything whose stream selector only exists in one place.
 # Blank lines and #-comments are ignored. Arguments substitute literally --
 # they are never passed through a shell.
 #

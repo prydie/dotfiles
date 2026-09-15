@@ -140,7 +140,7 @@ query_files() { ls "$QUERY_DIR"/*.logql 2>/dev/null || true; }
 cmd_query_names() {
   local f
   for f in $(query_files); do
-    sed -n 's/^\([a-zA-Z0-9_-]\+\)[[:space:]]*|.*/\1/p' "$f"
+    sed -n 's/^\([a-zA-Z0-9_-]\+\)[[:space:]].*|.*/\1/p' "$f"
   done | sort -u
 }
 
@@ -218,7 +218,7 @@ cmd_queries() {
   [ -n "$(query_files)" ] || die "no query packs in $QUERY_DIR (see config/loki-queries/example.logql.sample)"
   for f in $(query_files); do
     printf '# %s\n' "${f##*/}"
-    sed -n 's/^\([a-zA-Z0-9_-]\+\)[[:space:]]*|[[:space:]]*\(.*\)$/  \1\t\2/p' "$f"
+    sed -n 's/^\([a-zA-Z0-9_-]\+\)[[:space:]]\+\(@[A-Za-z0-9_-]\+\)\?[[:space:]]*|[[:space:]]*\(.*\)$/  \1\t\2\t\3/p' "$f"
   done
 }
 
@@ -226,16 +226,34 @@ cmd_q() {
   need logcli
   [ $# -ge 1 ] || die "usage: $PROG q <name> [args...] [-- logcli-args...]"
   local name=$1; shift
-  local tmpl="" f
+  local tmpl="" want_ds="" f raw
   local -a hits=()
   for f in $(query_files); do
-    if sed -n "s/^${name}[[:space:]]*|[[:space:]]*//p" "$f" | grep -q .; then
+    raw=$(sed -n "s/^${name}[[:space:]]\+\(@[A-Za-z0-9_-]\+[[:space:]]*\)\?|[[:space:]]*/\1\x01/p" "$f" | head -1)
+    if [ -n "$raw" ]; then
       hits+=("$f")
-      [ -z "$tmpl" ] && tmpl=$(sed -n "s/^${name}[[:space:]]*|[[:space:]]*//p" "$f" | head -1)
+      if [ -z "$tmpl" ]; then
+        want_ds=${raw%%$'\x01'*}
+        want_ds=${want_ds#@}
+        want_ds=${want_ds%% *}
+        tmpl=${raw#*$'\x01'}
+      fi
     fi
   done
   [ -n "$tmpl" ] || die "no query named '$name' (try: $PROG queries)"
   [ "${#hits[@]}" -le 1 ] || die "'$name' is defined in ${#hits[@]} packs, so which wins depends on filename order: ${hits[*]}"
+
+  # A query bound to a datasource must not run against a different one: it would
+  # return an empty result, which is indistinguishable from a quiet window.
+  if [ -n "$want_ds" ]; then
+    case "${LOKI_ADDR:-}" in
+      */uid/"$want_ds") ;;
+      "") ;;
+      *) die "query '$name' needs the '$want_ds' datasource, but LOKI_ADDR points at '${LOKI_ADDR##*/uid/}'.
+  Running it here would return an empty result rather than an error.
+  Switch with: eval \"\$($PROG up <app> $want_ds)\"";;
+    esac
+  fi
 
   local -a passthru=()
   local -a args=()

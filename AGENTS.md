@@ -85,7 +85,10 @@ there is more than one, because the wrong datasource is another plausible empty
 result. `lq datasources` lists them.
 
 `lq q` reports a line count and, on zero, says what still needs confirming
-before it can be read as an absence.
+before it can be read as an absence. A query can also be bound to one
+datasource with `<name> @<uid> | <logql>`; running it against a different one
+is refused, because a stream selector that exists in only one datasource
+returns empty elsewhere rather than erroring.
 
 ### Reading the output with hl
 
