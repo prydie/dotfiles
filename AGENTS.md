@@ -65,6 +65,17 @@ Two failure modes it refuses to paper over:
   matches nothing, both look like a quiet window. `lq up` fails loudly, and
   `lq q` reports the line count, saying what still needs confirming on zero.
 
+Shell completion offers contexts for `lq up` and query names for `lq q`, asked
+of `lq` at completion time so they track the live kubeconfig and query packs:
+
+```bash
+lq completion zsh > "${XDG_DATA_HOME:-$HOME/.local/share}/zsh/site-functions/_lq"
+lq completion bash > ~/.local/share/bash-completion/completions/lq
+```
+
+That directory is already on `fpath` (see `zshrc`). Re-run after adding a pack
+only if you want the file refreshed -- the lists themselves are dynamic.
+
 Named queries live in `${XDG_CONFIG_HOME:-~/.config}/loki-queries/*.logql` and
 are deliberately not tracked here -- templates encode a deployment's own
 namespaces and log schema. `config/loki-queries/example.logql.sample` is the format.
