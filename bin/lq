@@ -14,6 +14,9 @@
 #                This reads the tenant from the log shipper's own client config
 #                and refuses to run rather than guess.
 #
+# Where the shipper Secret is unreadable, set LQ_TENANT explicitly. The tool
+# still never guesses it.
+#
 # Named queries live OUTSIDE this repo, because they encode local schema:
 #   ${XDG_CONFIG_HOME:-~/.config}/loki-queries/*.logql
 # See config/loki-queries/example.logql.sample for the format.
@@ -47,7 +50,8 @@ need() { command -v "$1" >/dev/null 2>&1 || die "missing dependency: $1"; }
 
 resolve_ctx() {
   local want=$1 all matches n
-  all=$(kubectl config get-contexts -o name 2>/dev/null)
+  all=$(kubectl config get-contexts -o name 2>/dev/null || true)
+  [ -n "$all" ] || die "kubectl returned no contexts (is KUBECONFIG right?)"
   if [ -n "$CTX_PATTERN" ]; then
     all=$(printf '%s\n' "$all" | grep -- "$CTX_PATTERN" || true)
   fi
@@ -65,14 +69,28 @@ cmd_up() {
   local ctx port tenant i
   ctx=$(resolve_ctx "$1")
 
-  tenant=$(kubectl --context "$ctx" -n "$SHIPPER_NS" get secret "$SHIPPER_SECRET" \
-             -o "jsonpath={.data.${SHIPPER_KEY}}" 2>/dev/null | base64 -d 2>/dev/null \
-           | sed -n 's/^[[:space:]-]*tenant_id:[[:space:]]*//p' | tr -d "\"'" | head -1)
-  [ -n "$tenant" ] || die "could not read the shipper's tenant_id from ${SHIPPER_NS}/${SHIPPER_SECRET} -- refusing to guess, because a wrong tenant returns empty rather than an error"
+  # LQ_TENANT is the escape hatch for a cluster whose shipper Secret this
+  # account cannot read. It is still explicit: the tool never guesses a tenant,
+  # because a wrong one returns empty rather than erroring.
+  local tenant="${LQ_TENANT:-}"
+  if [ -z "$tenant" ]; then
+    # `|| true` on the whole pipeline: without it `set -e`/`pipefail` aborts the
+    # script HERE, before die() can say anything, and the caller gets a silent
+    # rc=1 -- which is precisely the failure this tool exists to prevent.
+    tenant=$(kubectl --context "$ctx" -n "$SHIPPER_NS" get secret "$SHIPPER_SECRET" \
+               -o "jsonpath={.data.${SHIPPER_KEY}}" 2>/dev/null | base64 -d 2>/dev/null \
+             | sed -n 's/^[[:space:]-]*tenant_id:[[:space:]]*//p' | tr -d "\"'" | head -1 || true)
+  fi
+  [ -n "$tenant" ] || die "cannot read tenant_id from ${SHIPPER_NS}/${SHIPPER_SECRET} on ${ctx}.
+  Common causes: no read access to that Secret, or a different shipper.
+  Either point at the right one with LQ_SHIPPER_NAMESPACE / LQ_SHIPPER_SECRET / LQ_SHIPPER_KEY,
+  or state the tenant yourself with LQ_TENANT=<tenant>.
+  Refusing to guess: a wrong tenant returns empty results rather than an error."
 
   mkdir -p "$STATE_DIR"
   cmd_down >/dev/null 2>&1 || true
-  port=$(python3 -c 'import socket;s=socket.socket();s.bind(("127.0.0.1",0));print(s.getsockname()[1]);s.close()')
+  port=$(python3 -c 'import socket;s=socket.socket();s.bind(("127.0.0.1",0));print(s.getsockname()[1]);s.close()' || true)
+  [ -n "$port" ] || die "could not find a free local port"
   kubectl --context "$ctx" -n "$NS" port-forward "svc/$SVC" "${port}:${SVC_PORT}" >/dev/null 2>&1 &
   local pid=$!
   for i in $(seq 1 40); do
@@ -87,7 +105,7 @@ cmd_up() {
 
 cmd_contexts() {
   local all
-  all=$(kubectl config get-contexts -o name 2>/dev/null)
+  all=$(kubectl config get-contexts -o name 2>/dev/null || true)
   if [ -n "$CTX_PATTERN" ]; then
     all=$(printf '%s\n' "$all" | grep -- "$CTX_PATTERN" || true)
   fi
