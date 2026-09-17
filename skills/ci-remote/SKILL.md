@@ -38,7 +38,7 @@ ordering is honoured.
 |---|---|
 | 0 | Every blocking job passed |
 | 1 | At least one blocking job failed |
-| 2 | Usage or config error (bad job name, unknown run id, host low on disk) |
+| 2 | Tool or config error (bad job name, lost transport, host low on disk) |
 | 3 | Run has not finished — **no verdict yet** |
 
 Job states in `status`: `PEND` (not launched), `QUEUE` (launched, waiting on a
@@ -49,9 +49,17 @@ A job is cancelled at its workflow's `timeout-minutes` (the host sets a default
 where the workflow gives none), so an abandoned job cannot hold a slot and a
 workspace forever.
 
-Code 2 means *you* got something wrong and can retry differently; code 1 is a
-genuine CI signal. Code 3 comes from polling `status` mid-run: treat it as "ask
-again later", never as success.
+The remote account needs a systemd user manager with lingering enabled.
+`ci-remote` checks this before it claims or syncs a workspace. It reports the
+required `loginctl enable-linger` command but does not use `sudo` itself.
+
+Each run executes in a transient service. Systemd removes all processes in the
+service after normal completion, timeout, or cancellation, including processes
+that call `setsid`.
+
+Code 2 means that the tool did not get a CI verdict. Retry or correct the
+configuration. Code 1 is a genuine CI signal. Code 3 comes from polling
+`status` mid-run: treat it as "ask again later", never as success.
 
 ## Watching a long run without blocking
 

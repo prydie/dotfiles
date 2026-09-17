@@ -325,6 +325,16 @@ fast. Because the override is untracked it does not sync between machines.
 
 Runs refuse to start when the target host is low on disk, before the rsync.
 
+The remote account must have a systemd user manager with lingering enabled.
+`ci-remote` checks this requirement before it claims or syncs a workspace. It
+does not enable lingering or use `sudo`.
+
+Each run uses a transient service with `KillMode=control-group`. When a run
+ends, systemd sends `SIGTERM` to its processes and sends `SIGKILL` after one
+second. This cleanup also reaches processes that changed their session or
+process group. The service writes the completion marker after cleanup finishes.
+Run-level status cannot report success before this marker exists.
+
 ## Neovim Go workflow
 
 Go formatting is handled by Conform (`goimports`, then `gofumpt`). Live Go

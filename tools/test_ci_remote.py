@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -10,7 +12,7 @@ import time
 import unittest
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
-
+from unittest import mock
 
 SCRIPT = Path(__file__).parents[1] / "bin" / "ci-remote"
 
@@ -498,6 +500,12 @@ class StatusParsingTest(unittest.TestCase):
         self.assertEqual(ci.job_state(strict, state, "Fmt"), ("FAIL", "1m00s"))
         self.assertEqual(ci.job_state(soft, state, "Fmt")[0], "FAIL(advisory)")
 
+    def test_rejects_a_malformed_completion_marker(self) -> None:
+        self.stub_ssh("N 100\nF %s")
+
+        with self.assertRaisesRegex(ci.Error, "invalid finished marker.*%s"):
+            ci.fetch_status(ci.Host(name="h", ssh="h"), "/r")
+
 
 class GitIgnoreTest(unittest.TestCase):
     """The exclude list must match git's view, negations included."""
@@ -551,20 +559,36 @@ class GitIgnoreTest(unittest.TestCase):
 
 
 class LaunchTest(unittest.TestCase):
-    def test_orphans_the_dispatcher_and_exits(self) -> None:
+    def require_systemd_user(self) -> None:
+        if not shutil.which("systemctl") or not shutil.which("systemd-run"):
+            self.skipTest("systemd user tools are unavailable")
+        result = subprocess.run(
+            ["systemctl", "--user", "show", "--property=Version", "--value"],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            self.skipTest("systemd user manager is unavailable")
+
+    def test_launches_the_dispatcher_in_a_transient_service(self) -> None:
         launch = ci.render_launch("/r/runs/1")
-        # The subshell is what lets ssh return; without it --detach blocks for
-        # the whole run.
-        self.assertIn("( setsid bash /r/runs/1/dispatch.sh", launch)
-        self.assertIn("& )", launch)
+        self.assertIn("systemd-run --user --quiet --collect", launch)
+        self.assertIn("--property=KillMode=control-group", launch)
+        self.assertIn("--property=TimeoutStopSec=1s", launch)
+        self.assertIn("--property=ExecStopPost=", launch)
+        self.assertNotIn("--wait", launch)
+        self.assertIn("/r/runs/1/dispatch.sh", launch)
         self.assertIn("< /dev/null", launch)
-        self.assertTrue(launch.rstrip().endswith("exit 0"))
+        self.assertIn(": > launching", launch)
+        self.assertLess(launch.index("dispatch.unit"), launch.index("systemd-run"))
         self.assertEqual(
             subprocess.run(["bash", "-n"], input=launch, text=True).returncode, 0
         )
 
     def test_detaches_for_real(self) -> None:
         """Run the launch shape locally: the shell must exit while work runs."""
+        self.require_systemd_user()
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         root = Path(temporary.name)
@@ -581,6 +605,778 @@ class LaunchTest(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0)
         self.assertFalse((root / "done").exists(), "dispatcher should still run")
+
+    def test_detached_systemd_failure_propagates(self) -> None:
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        root = Path(temporary.name)
+        fake_bin = root / "bin"
+        fake_bin.mkdir()
+        (root / "dispatch.sh").write_text("true\n", encoding="utf-8")
+        (root / "lifecycle.v2").write_text("", encoding="utf-8")
+        (root / "prepared").write_text("", encoding="utf-8")
+        systemd_run = fake_bin / "systemd-run"
+        systemd_run.write_text("#!/bin/sh\nexit 12\n", encoding="utf-8")
+        systemd_run.chmod(0o755)
+
+        result = subprocess.run(
+            ["bash", "-s"],
+            input=ci.render_launch(str(root)),
+            text=True,
+            capture_output=True,
+            check=False,
+            env={**os.environ, "PATH": f"{fake_bin}:{os.environ['PATH']}"},
+        )
+
+        self.assertEqual(result.returncode, 12)
+        self.assertTrue((root / "dispatch.unit").exists())
+        self.assertTrue((root / "finished").exists())
+
+    def test_replayed_launch_cannot_finish_an_active_service(self) -> None:
+        self.require_systemd_user()
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        root = Path(temporary.name)
+        started = root / "started"
+        (root / "dispatch.sh").write_text(
+            f"date +%s > {started}\nsleep 60\n", encoding="utf-8"
+        )
+        (root / "lifecycle.v2").write_text("", encoding="utf-8")
+        (root / "prepared").write_text("", encoding="utf-8")
+        self.addCleanup(
+            subprocess.run,
+            ["systemctl", "--user", "stop", ci.dispatch_unit(str(root))],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+        first = subprocess.run(
+            ["bash", "-s"],
+            input=ci.render_launch(str(root)),
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=3,
+        )
+        self.assertEqual(first.returncode, 0, first.stderr)
+        for _ in range(40):
+            if started.exists():
+                break
+            time.sleep(0.05)
+        self.assertTrue(started.exists())
+
+        replay = subprocess.run(
+            ["bash", "-s"],
+            input=ci.render_launch(str(root)),
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=3,
+        )
+
+        self.assertNotEqual(replay.returncode, 0)
+        self.assertFalse((root / "finished").exists())
+        self.assertEqual(
+            subprocess.run(
+                [
+                    "systemctl",
+                    "--user",
+                    "is-active",
+                    ci.dispatch_unit(str(root)),
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+            ).returncode,
+            0,
+        )
+        cancelled = subprocess.run(
+            ["bash", "-s"],
+            input=ci.render_cancel(str(root)),
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=3,
+        )
+        self.assertEqual(cancelled.returncode, 0, cancelled.stderr)
+        self.assertTrue((root / "finished").exists())
+
+    def test_failed_registration_preserves_claim_when_unit_may_exist(self) -> None:
+        for name, show_body in (
+            ("loaded", "printf 'loaded\\n'"),
+            ("unproven", "exit 1"),
+        ):
+            with self.subTest(name=name):
+                temporary = tempfile.TemporaryDirectory()
+                self.addCleanup(temporary.cleanup)
+                root = Path(temporary.name)
+                fake_bin = root / "bin"
+                fake_bin.mkdir()
+                (root / "dispatch.sh").write_text("true\n", encoding="utf-8")
+                (root / "lifecycle.v2").write_text("", encoding="utf-8")
+                (root / "prepared").write_text("", encoding="utf-8")
+                systemd_run = fake_bin / "systemd-run"
+                systemd_run.write_text("#!/bin/sh\nexit 12\n", encoding="utf-8")
+                systemd_run.chmod(0o755)
+                systemctl = fake_bin / "systemctl"
+                systemctl.write_text(
+                    f"#!/bin/sh\n{show_body}\n", encoding="utf-8"
+                )
+                systemctl.chmod(0o755)
+
+                result = subprocess.run(
+                    ["bash", "-s"],
+                    input=ci.render_launch(str(root)),
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                    env={**os.environ, "PATH": f"{fake_bin}:{os.environ['PATH']}"},
+                )
+
+                self.assertNotEqual(result.returncode, 0)
+                self.assertFalse((root / "finished").exists())
+
+    def test_attached_job_uses_the_same_transient_service_boundary(self) -> None:
+        launch = ci.render_attached_launch("/r/runs/1", "Unit")
+        self.assertIn("systemd-run --user --quiet --collect", launch)
+        self.assertIn("--property=KillMode=control-group", launch)
+        self.assertIn('tail --pid="$main_pid"', launch)
+        self.assertIn("/r/runs/1/Unit/run.sh", launch)
+        self.assertIn("> /r/runs/1/Unit.log 2>&1", launch)
+        self.assertLess(launch.index("dispatch.unit"), launch.index("systemd-run"))
+        self.assertEqual(
+            subprocess.run(
+                ["bash", "-n"], input=launch, text=True, check=False
+            ).returncode,
+            0,
+        )
+
+    def test_completed_run_reaps_daemonized_descendants(self) -> None:
+        """A process cannot escape run cleanup by starting a new session."""
+        self.require_systemd_user()
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        root = Path(temporary.name)
+        child_pid = root / "child.pid"
+        (root / "dispatch.sh").write_text(
+            "setsid bash -c 'trap \"\" TERM; sleep 60' &\n"
+            f"echo $! > {child_pid}\n",
+            encoding="utf-8",
+        )
+
+        pid = None
+        try:
+            result = subprocess.run(
+                ["bash", "-s"],
+                input=ci.render_launch(str(root)),
+                text=True,
+                capture_output=True,
+                check=False,
+                timeout=3,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            for _ in range(40):
+                if child_pid.exists():
+                    pid = int(child_pid.read_text(encoding="utf-8"))
+                    break
+                time.sleep(0.05)
+            self.assertIsNotNone(pid, "dispatcher did not publish its child pid")
+
+            for _ in range(40):
+                if not Path(f"/proc/{pid}").exists():
+                    break
+                time.sleep(0.05)
+            self.assertFalse(
+                Path(f"/proc/{pid}").exists(),
+                "daemonized descendant survived the completed run",
+            )
+            for _ in range(40):
+                if (root / "finished").exists():
+                    break
+                time.sleep(0.05)
+            self.assertTrue((root / "finished").exists())
+            finished = (root / "finished").read_text(encoding="utf-8").strip()
+            self.assertTrue(finished.isdecimal(), finished)
+            self.assertGreater(int(finished), 0)
+        finally:
+            if pid is not None and Path(f"/proc/{pid}").exists():
+                os.kill(pid, signal.SIGKILL)
+
+    def test_cancel_reaps_daemonized_descendants(self) -> None:
+        self.require_systemd_user()
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        root = Path(temporary.name)
+        child_pid = root / "child.pid"
+        (root / "dispatch.sh").write_text(
+            "setsid bash -c 'trap \"\" TERM; sleep 60' &\n"
+            f"echo $! > {child_pid}\n"
+            "sleep 60\n",
+            encoding="utf-8",
+        )
+
+        pid = None
+        try:
+            subprocess.run(
+                ["bash", "-s"],
+                input=ci.render_launch(str(root)),
+                text=True,
+                capture_output=True,
+                check=True,
+                timeout=3,
+            )
+            for _ in range(40):
+                if child_pid.exists():
+                    pid = int(child_pid.read_text(encoding="utf-8"))
+                    break
+                time.sleep(0.05)
+            self.assertIsNotNone(pid, "dispatcher did not publish its child pid")
+
+            result = subprocess.run(
+                ["bash", "-s"],
+                input=ci.render_cancel(str(root)),
+                text=True,
+                capture_output=True,
+                check=False,
+                timeout=3,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertFalse(Path(f"/proc/{pid}").exists())
+            self.assertTrue((root / "finished").exists())
+        finally:
+            if pid is not None and Path(f"/proc/{pid}").exists():
+                os.kill(pid, signal.SIGKILL)
+
+    def test_timed_out_job_reaps_daemonized_descendants(self) -> None:
+        self.require_systemd_user()
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        root = Path(temporary.name)
+        run_dir = root / "run"
+        workspace = root / "workspace"
+        job_dir = run_dir / "J"
+        job_dir.mkdir(parents=True)
+        workspace.mkdir()
+        child_pid = run_dir / "child.pid"
+        step = ci.Step(
+            index=1,
+            name="leaky envtest analogue",
+            run=(
+                "setsid bash -c 'trap \"\" TERM; sleep 60' &\n"
+                f"echo $! > {child_pid}\n"
+                "wait\n"
+            ),
+            shell="bash",
+            env={},
+            working_directory=None,
+            continue_on_error=False,
+        )
+        job = ci.Job(
+            key="J",
+            name="J",
+            timeout_minutes=1,
+            needs=[],
+            steps=[step],
+            env={},
+            working_directory=None,
+            continue_on_error=False,
+            skipped_uses=[],
+            notes=[],
+        )
+        driver = ci.render_job_driver(
+            ci.Host(name="local", ssh="local", isolate_jobs=False),
+            job,
+            str(run_dir),
+            str(workspace),
+        ).replace("JOB_TIMEOUT=60", "JOB_TIMEOUT=1")
+        (job_dir / "run.sh").write_text(driver, encoding="utf-8")
+        (job_dir / "step-01.sh").write_text(step.run, encoding="utf-8")
+
+        pid = None
+        try:
+            result = subprocess.run(
+                ["bash", "-s"],
+                input=ci.render_attached_launch(str(run_dir), "J"),
+                text=True,
+                capture_output=True,
+                check=False,
+                timeout=5,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            pid = int(child_pid.read_text(encoding="utf-8"))
+            self.assertFalse(
+                Path(f"/proc/{pid}").exists(),
+                "daemonized descendant survived the job timeout",
+            )
+            self.assertTrue((run_dir / "finished").exists())
+        finally:
+            if pid is not None and Path(f"/proc/{pid}").exists():
+                os.kill(pid, signal.SIGKILL)
+
+    def test_attached_client_loss_does_not_finish_a_live_job(self) -> None:
+        self.require_systemd_user()
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        root = Path(temporary.name)
+        job_dir = root / "J"
+        job_dir.mkdir()
+        started = root / "started"
+        (job_dir / "run.sh").write_text(
+            f"date +%s > {started}\n"
+            "sleep 1\n"
+            f"printf '0 1 2\\n' > {root}/J.rc\n",
+            encoding="utf-8",
+        )
+        script = root / "attached.sh"
+        script.write_text(ci.render_attached_launch(str(root), "J"), encoding="utf-8")
+        process = subprocess.Popen(
+            ["bash", str(script)],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+        try:
+            for _ in range(40):
+                if started.exists():
+                    break
+                time.sleep(0.05)
+            self.assertTrue(started.exists())
+            self.assertTrue((root / "dispatch.unit").exists())
+            os.killpg(process.pid, signal.SIGTERM)
+            process.wait(timeout=2)
+            self.assertFalse(
+                (root / "finished").exists(),
+                "client loss must not release a workspace while its job runs",
+            )
+            for _ in range(60):
+                if (root / "finished").exists():
+                    break
+                time.sleep(0.05)
+            self.assertTrue((root / "finished").exists())
+        finally:
+            subprocess.run(
+                ["systemctl", "--user", "stop", ci.dispatch_unit(str(root))],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+            )
+
+    def test_cancel_during_unit_registration_does_not_mark_finished(self) -> None:
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        root = Path(temporary.name)
+        (root / "launching").write_text("", encoding="utf-8")
+
+        result = subprocess.run(
+            ["bash", "-s"],
+            input=ci.render_cancel(str(root)),
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse((root / "finished").exists())
+
+    def test_cancel_releases_claim_after_pre_execution_transport_failure(self) -> None:
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        root = Path(temporary.name)
+        fake_bin = root / "bin"
+        fake_bin.mkdir()
+        (root / "dispatch.unit").write_text(
+            ci.dispatch_unit(str(root)), encoding="utf-8"
+        )
+        systemctl = fake_bin / "systemctl"
+        systemctl.write_text(
+            "#!/bin/sh\n"
+            "case \"$*\" in\n"
+            "  *' stop '*) exit 5 ;;\n"
+            "  *'--property=LoadState'*) printf 'not-found\\n'; exit 0 ;;\n"
+            "esac\n"
+            "exit 1\n",
+            encoding="utf-8",
+        )
+        systemctl.chmod(0o755)
+
+        result = subprocess.run(
+            ["bash", "-s"],
+            input=ci.render_cancel(str(root)),
+            text=True,
+            capture_output=True,
+            check=False,
+            env={**os.environ, "PATH": f"{fake_bin}:{os.environ['PATH']}"},
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue((root / "finished").exists())
+
+    def test_cancel_before_delayed_launch_prevents_service_registration(self) -> None:
+        self.require_systemd_user()
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        root = Path(temporary.name)
+        started = root / "started"
+        (root / "dispatch.sh").write_text(
+            f"date +%s > {started}\nsleep 60\n", encoding="utf-8"
+        )
+        (root / "dispatch.unit").write_text(
+            ci.dispatch_unit(str(root)), encoding="utf-8"
+        )
+        (root / "prepared").write_text("", encoding="utf-8")
+        launch = root / "launch.sh"
+        launch.write_text(
+            "sleep 0.3\n" + ci.render_launch(str(root)), encoding="utf-8"
+        )
+        launcher = subprocess.Popen(
+            ["bash", str(launch)],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+        try:
+            cancelled = subprocess.run(
+                ["bash", "-s"],
+                input=ci.render_cancel(str(root)),
+                text=True,
+                capture_output=True,
+                check=False,
+                timeout=3,
+            )
+            self.assertEqual(cancelled.returncode, 0, cancelled.stderr)
+            self.assertNotEqual(launcher.wait(timeout=3), 0)
+            self.assertTrue((root / "cancelled").exists())
+            self.assertTrue((root / "finished").exists())
+            self.assertFalse(started.exists())
+            load_state = subprocess.run(
+                [
+                    "systemctl",
+                    "--user",
+                    "show",
+                    ci.dispatch_unit(str(root)),
+                    "--property=LoadState",
+                    "--value",
+                ],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(load_state.stdout.strip(), "not-found")
+        finally:
+            if launcher.poll() is None:
+                os.killpg(launcher.pid, signal.SIGKILL)
+                launcher.wait(timeout=2)
+            subprocess.run(
+                ["systemctl", "--user", "stop", ci.dispatch_unit(str(root))],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+            )
+
+    def test_cancel_does_not_release_claim_when_unit_absence_is_unproven(self) -> None:
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        root = Path(temporary.name)
+        fake_bin = root / "bin"
+        fake_bin.mkdir()
+        (root / "dispatch.unit").write_text(
+            ci.dispatch_unit(str(root)), encoding="utf-8"
+        )
+        systemctl = fake_bin / "systemctl"
+        systemctl.write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
+        systemctl.chmod(0o755)
+
+        result = subprocess.run(
+            ["bash", "-s"],
+            input=ci.render_cancel(str(root)),
+            text=True,
+            capture_output=True,
+            check=False,
+            env={**os.environ, "PATH": f"{fake_bin}:{os.environ['PATH']}"},
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse((root / "finished").exists())
+
+    def test_cancel_does_not_release_claim_when_unit_exists(self) -> None:
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        root = Path(temporary.name)
+        fake_bin = root / "bin"
+        fake_bin.mkdir()
+        (root / "dispatch.unit").write_text(
+            ci.dispatch_unit(str(root)), encoding="utf-8"
+        )
+        systemctl = fake_bin / "systemctl"
+        systemctl.write_text(
+            "#!/bin/sh\n"
+            "case \"$*\" in\n"
+            "  *' stop '*) exit 5 ;;\n"
+            "  *'--property=LoadState'*) printf 'loaded\\n'; exit 0 ;;\n"
+            "esac\n"
+            "exit 1\n",
+            encoding="utf-8",
+        )
+        systemctl.chmod(0o755)
+
+        result = subprocess.run(
+            ["bash", "-s"],
+            input=ci.render_cancel(str(root)),
+            text=True,
+            capture_output=True,
+            check=False,
+            env={**os.environ, "PATH": f"{fake_bin}:{os.environ['PATH']}"},
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse((root / "finished").exists())
+
+    def test_cancel_recovers_after_launcher_dies_during_registration(self) -> None:
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        root = Path(temporary.name)
+        fake_bin = root / "bin"
+        fake_bin.mkdir()
+        (root / "dispatch.sh").write_text("true\n", encoding="utf-8")
+        (root / "dispatch.unit").write_text(
+            ci.dispatch_unit(str(root)), encoding="utf-8"
+        )
+        (root / "lifecycle.v2").write_text("", encoding="utf-8")
+        (root / "prepared").write_text("", encoding="utf-8")
+        systemd_run = fake_bin / "systemd-run"
+        systemd_run.write_text("#!/bin/sh\nsleep 60\n", encoding="utf-8")
+        systemd_run.chmod(0o755)
+        systemctl = fake_bin / "systemctl"
+        systemctl.write_text(
+            "#!/bin/sh\n"
+            "case \"$*\" in\n"
+            "  *' stop '*) exit 5 ;;\n"
+            "  *'--property=LoadState'*) printf 'not-found\\n'; exit 0 ;;\n"
+            "esac\n"
+            "exit 1\n",
+            encoding="utf-8",
+        )
+        systemctl.chmod(0o755)
+        environment = {**os.environ, "PATH": f"{fake_bin}:{os.environ['PATH']}"}
+        launcher = subprocess.Popen(
+            ["bash", "-s"],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            env=environment,
+            start_new_session=True,
+        )
+        assert launcher.stdin is not None
+        launcher.stdin.write(ci.render_launch(str(root)))
+        launcher.stdin.close()
+        for _ in range(40):
+            if (root / "launching").exists():
+                break
+            time.sleep(0.05)
+        self.assertTrue((root / "launching").exists())
+        os.killpg(launcher.pid, signal.SIGKILL)
+        launcher.wait(timeout=2)
+
+        cancelled = subprocess.run(
+            ["bash", "-s"],
+            input=ci.render_cancel(str(root)),
+            text=True,
+            capture_output=True,
+            check=False,
+            env=environment,
+        )
+
+        self.assertEqual(cancelled.returncode, 0, cancelled.stderr)
+        self.assertFalse((root / "launching").exists())
+        self.assertTrue((root / "cancelled").exists())
+        self.assertTrue((root / "finished").exists())
+
+    def test_detached_launcher_loss_after_registration_remains_cancellable(self) -> None:
+        self.require_systemd_user()
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        root = Path(temporary.name)
+        started = root / "started"
+        (root / "dispatch.sh").write_text(
+            f"date +%s > {started}\nsleep 60\n", encoding="utf-8"
+        )
+        launch = ci.render_launch(str(root)).replace(
+            "rc=$?\n", "kill -STOP $$\nrc=$?\n", 1
+        )
+        script = root / "launch.sh"
+        script.write_text(launch, encoding="utf-8")
+        process = subprocess.Popen(
+            ["bash", str(script)],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+        try:
+            for _ in range(60):
+                status = Path(f"/proc/{process.pid}/status")
+                if (
+                    started.exists()
+                    and status.exists()
+                    and "State:\tT" in status.read_text(encoding="utf-8")
+                ):
+                    break
+                time.sleep(0.05)
+            self.assertTrue(started.exists())
+            self.assertTrue((root / "dispatch.unit").exists())
+            os.killpg(process.pid, signal.SIGKILL)
+            process.wait(timeout=2)
+
+            result = subprocess.run(
+                ["bash", "-s"],
+                input=ci.render_cancel(str(root)),
+                text=True,
+                capture_output=True,
+                check=False,
+                timeout=3,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertTrue((root / "finished").exists())
+        finally:
+            subprocess.run(
+                ["systemctl", "--user", "stop", ci.dispatch_unit(str(root))],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+            )
+
+
+class RemoteServiceManagerTest(unittest.TestCase):
+    def test_rejects_a_remote_account_without_linger(self) -> None:
+        host = ci.Host(name="box", ssh="box")
+        probe = subprocess.CompletedProcess([], 0, stdout="remote-user\nno\n259\n")
+        with mock.patch.object(ci, "ssh_run", return_value=probe):
+            with self.assertRaises(ci.Error) as caught:
+                ci.check_remote_service_manager(host)
+
+        message = str(caught.exception)
+        self.assertIn("loginctl enable-linger remote-user", message)
+        self.assertIn("did not claim or sync", message)
+
+    def test_accepts_a_persistent_remote_user_manager(self) -> None:
+        host = ci.Host(name="box", ssh="box")
+        probe = subprocess.CompletedProcess([], 0, stdout="remote-user\nyes\n259\n")
+        with mock.patch.object(ci, "ssh_run", return_value=probe):
+            ci.check_remote_service_manager(host)
+
+    def test_run_rejects_linger_before_claim_or_sync(self) -> None:
+        host = ci.Host(name="box", ssh="box")
+        job = ci.Job(
+            key="Unit",
+            name="Unit",
+            timeout_minutes=None,
+            needs=[],
+            steps=[],
+            env={},
+            working_directory=None,
+            continue_on_error=False,
+            skipped_uses=[],
+            notes=[],
+        )
+        job.steps.append(
+            ci.Step(1, "test", "true", "bash", {}, None, False)
+        )
+        args = mock.Mock(
+            host=None,
+            workflow=None,
+            job=[],
+            force=False,
+            take_workspace=False,
+            verbose=False,
+            parallel=None,
+            detach=False,
+        )
+        with (
+            mock.patch.object(ci, "resolve_host", return_value=host),
+            mock.patch.object(ci, "repo_root_of", return_value=Path("/repo")),
+            mock.patch.object(ci, "discover_workflow", return_value=Path("/repo/ci.yml")),
+            mock.patch.object(ci, "parse_workflow", return_value=[job]),
+            mock.patch.object(ci, "remote_root", return_value="/srv/ci"),
+            mock.patch.object(ci, "head_description", return_value="abc"),
+            mock.patch.object(
+                ci,
+                "check_remote_service_manager",
+                side_effect=ci.Error("linger is disabled"),
+            ),
+            mock.patch.object(ci, "claim_workspace") as claim,
+            mock.patch.object(ci, "sync_workspace") as sync,
+        ):
+            with self.assertRaises(ci.Error):
+                ci.cmd_run(args)
+
+        claim.assert_not_called()
+        sync.assert_not_called()
+
+
+class AttachedCommandOutcomeTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.host = ci.Host(name="box", ssh="box")
+        self.job = ci.Job(
+            key="Unit",
+            name="Unit",
+            timeout_minutes=None,
+            needs=[],
+            steps=[],
+            env={},
+            working_directory=None,
+            continue_on_error=False,
+            skipped_uses=[],
+            notes=[],
+        )
+        self.manifest = {
+            "run_id": "r1",
+            "run_dir": "/srv/ci/runs/r1",
+            "jobs": ["Unit"],
+            "advisory": [],
+        }
+
+    def run_with(self, transport_code: int, state: dict) -> int:
+        with (
+            mock.patch.object(
+                ci.subprocess,
+                "run",
+                return_value=subprocess.CompletedProcess([], transport_code),
+            ),
+            mock.patch.object(ci, "fetch_status", return_value=state),
+        ):
+            return ci.run_attached(self.host, self.manifest, self.job)
+
+    def test_systemd_launch_failure_is_a_tool_error(self) -> None:
+        state = {
+            "now": 10,
+            "queued": {},
+            "started": {},
+            "results": {},
+            "finished": 10,
+        }
+        self.assertEqual(self.run_with(12, state), 2)
+
+    def test_client_loss_while_service_runs_is_a_tool_error(self) -> None:
+        state = {
+            "now": 10,
+            "queued": {"Unit": 1},
+            "started": {"Unit": 2},
+            "results": {},
+            "finished": None,
+        }
+        with mock.patch.object(ci, "release_claim") as release:
+            self.assertEqual(self.run_with(255, state), 2)
+        release.assert_not_called()
+
+    def test_terminal_failure_is_a_ci_failure(self) -> None:
+        state = {
+            "now": 10,
+            "queued": {"Unit": 1},
+            "started": {"Unit": 2},
+            "results": {"Unit": {"rc": 1, "start": 2, "end": 9}},
+            "finished": 10,
+        }
+        self.assertEqual(self.run_with(255, state), 1)
 
 
 class PruneTest(unittest.TestCase):
@@ -819,6 +1615,15 @@ class StatusJsonTest(unittest.TestCase):
         self.assertEqual(code, 3)
         self.assertFalse(payload["finished"])
 
+    def test_all_job_results_wait_for_service_cleanup(self) -> None:
+        payload, code = self.payload(
+            "N 100\nQ Unit 0\nS Unit 0\nR Unit 0 0 30\n"
+            "Q Race 0\nS Race 0\nR Race 0 0 30"
+        )
+        self.assertEqual(payload["verdict"], "unfinished")
+        self.assertEqual(code, 3)
+        self.assertFalse(payload["finished"])
+
     def test_separates_queue_time_from_work_time(self) -> None:
         payload, _ = self.payload(
             "N 100\nQ Unit 10\nS Unit 40\nR Unit 0 40 70\nQ Race 10\nS Race 40"
@@ -922,8 +1727,8 @@ class VerdictTest(unittest.TestCase):
             "jobs": ["Unit", "Race"],
             "advisory": [],
         }
-        import io
         import contextlib
+        import io
 
         buffer = io.StringIO()
         with contextlib.redirect_stdout(buffer):
@@ -963,6 +1768,46 @@ class VerdictTest(unittest.TestCase):
         )
         self.assertEqual(code, 0)
         self.assertIn("all jobs passed", output)
+
+    def test_all_job_results_wait_for_service_cleanup(self) -> None:
+        code, output = self.summarise(
+            "N 100\nS Unit 10\nR Unit 0 10 40\nS Race 10\nR Race 0 10 50"
+        )
+        self.assertEqual(code, 3)
+        self.assertIn("service cleanup is still running", output)
+        self.assertNotIn("all jobs passed", output)
+
+    def test_wait_does_not_return_before_service_cleanup(self) -> None:
+        manifest = {
+            "run_id": "r1",
+            "host": "h",
+            "repo": "/repo",
+            "revision": "abc",
+            "run_dir": "/r",
+            "jobs": ["Unit"],
+            "advisory": [],
+        }
+        before_cleanup = {
+            "now": 50,
+            "queued": {"Unit": 10},
+            "started": {"Unit": 10},
+            "results": {"Unit": {"rc": 0, "start": 10, "end": 40}},
+            "finished": None,
+        }
+        after_cleanup = {**before_cleanup, "finished": 50}
+        args = mock.Mock(fail_fast=False, interval=0, tail=0)
+        with (
+            mock.patch.object(
+                ci,
+                "fetch_status",
+                side_effect=[before_cleanup, after_cleanup, after_cleanup],
+            ) as fetch,
+            mock.patch.object(ci.time, "sleep"),
+        ):
+            code = ci.follow_run(ci.Host(name="h", ssh="h"), manifest, args)
+
+        self.assertEqual(code, 0)
+        self.assertEqual(fetch.call_count, 3)
 
     def test_a_failure_outranks_an_unfinished_job(self) -> None:
         code, output = self.summarise("N 100\nS Unit 10\nR Unit 1 10 40\nS Race 20")
@@ -1029,6 +1874,25 @@ class UploadTest(unittest.TestCase):
             self.assertTrue(written.exists(), path)
             self.assertEqual(written.read_text(encoding="utf-8"), content)
             self.assertTrue(os.access(written, os.X_OK), path)
+
+    def test_records_unit_identity_as_data_before_launch(self) -> None:
+        target = self.root / "remote" / "runs" / "1"
+        unit_path = target / "dispatch.unit"
+        unit = ci.dispatch_unit(str(target))
+        ci.upload_tree(
+            ci.Host(name="h", ssh="h"),
+            {f"{target}/dispatch.sh": "#!/bin/sh\ntrue\n"},
+            {
+                str(unit_path): unit + "\n",
+                f"{target}/lifecycle.v2": "",
+                f"{target}/prepared": "",
+            },
+        )
+
+        self.assertEqual(unit_path.read_text(encoding="utf-8"), unit + "\n")
+        self.assertFalse(os.access(unit_path, os.X_OK))
+        self.assertTrue((target / "lifecycle.v2").exists())
+        self.assertTrue((target / "prepared").exists())
 
     def test_preserves_shell_metacharacters_in_step_bodies(self) -> None:
         target = self.root / "remote"

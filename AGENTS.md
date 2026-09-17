@@ -27,7 +27,7 @@ Notes:
 - `strategy: matrix` jobs cannot be expanded; send those to GitHub.
 - Size the host to the work — `ci-remote hosts` shows each box's job
   concurrency. Run a whole pipeline only on a box provisioned for it.
-- Exit codes: 0 passed, 1 a job failed, 2 usage/config error, 3 not finished.
+- Exit codes: 0 passed, 1 a job failed, 2 tool/config error, 3 not finished.
   A mid-run `status` returns 3 — report progress and poll again, don't block.
 - All jobs share one host, unlike GitHub's per-job VMs, so `bind: address
   already in use` is a concurrency artifact: re-run that job alone before
