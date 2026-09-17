@@ -951,8 +951,8 @@ def render_dispatch(run_dir: str, waves: list[list[Job]], parallel: int) -> str:
         "set -u",
         f"export RD={shlex.quote(run_dir)}",
         'date +%s > "$RD/started"',
-        # setsid makes this the session and process-group leader, so its pid
-        # doubles as the pgid `cancel` signals to take down every job at once.
+        # Keep the PID for diagnostics and compatibility with old clients.
+        # New clients stop the transient service recorded by the launcher.
         'printf %s "$$" > "$RD/dispatch.pid"',
         "",
     ]
@@ -1026,22 +1026,110 @@ def prune_remote(host: Host, root: str) -> None:
     sys.stdout.write(result.stdout or "")
 
 
-def render_launch(run_dir: str) -> str:
-    """Start the dispatcher so that ssh can return immediately.
+def dispatch_unit(run_dir: str) -> str:
+    """Return the host-wide systemd unit name for a run directory."""
+    digest = hashlib.sha256(run_dir.encode()).hexdigest()[:20]
+    return f"ci-remote-{digest}.service"
 
-    The dispatcher must be orphaned inside a subshell. Backgrounding it
-    directly leaves the remote shell alive as its parent, holding the ssh
-    channel open until the whole run finishes -- which makes `--detach` block
-    for the entire pipeline, the one thing the flag exists to prevent. The
-    trailing `exit 0` keeps that shell from lingering on the last background
-    job.
-    """
+
+def systemd_run_command(run_dir: str, command: list[str]) -> str:
+    """Run a command in a cgroup that cannot retain escaped descendants."""
+    unit = dispatch_unit(run_dir)
+    options = [
+        "systemd-run",
+        "--user",
+        "--quiet",
+        "--collect",
+        f"--unit={unit}",
+        "--service-type=exec",
+        "--property=KillMode=control-group",
+        "--property=TimeoutStopSec=1s",
+    ]
+    return " ".join(shlex.quote(part) for part in [*options, "--", *command])
+
+
+def render_launch(run_dir: str) -> str:
+    """Start the dispatcher in a transient service and return immediately."""
     quoted = shlex.quote(run_dir)
+    unit = dispatch_unit(run_dir)
+    run_to_log = (
+        f"exec bash {shlex.quote(f'{run_dir}/dispatch.sh')} "
+        f"> {shlex.quote(f'{run_dir}/dispatch.log')} 2>&1"
+    )
+    command = systemd_run_command(
+        run_dir,
+        ["bash", "--noprofile", "--norc", "-c", run_to_log],
+    )
     return (
         f"cd {quoted} || exit 1\n"
-        f"( setsid bash {quoted}/dispatch.sh "
-        f"> {quoted}/dispatch.log 2>&1 < /dev/null & )\n"
+        f"printf %s {shlex.quote(unit)} > {quoted}/dispatch.unit\n"
+        f"{command} < /dev/null\n"
         "exit 0\n"
+    )
+
+
+def render_attached_launch(run_dir: str, job_key: str) -> str:
+    """Stream one job while systemd owns and cleans its complete process tree."""
+    unit = dispatch_unit(run_dir)
+    log = f"{run_dir}/{job_key}.log"
+    driver = f"{run_dir}/{job_key}/run.sh"
+    run_to_log = f"exec bash {shlex.quote(driver)} > {shlex.quote(log)} 2>&1"
+    command = systemd_run_command(
+        run_dir,
+        ["bash", "--noprofile", "--norc", "-c", run_to_log],
+    )
+    return (
+        f"printf %s {shlex.quote(unit)} > {shlex.quote(run_dir)}/dispatch.unit\n"
+        f": > {shlex.quote(log)}\n"
+        f"{command}\n"
+        "main_pid=0\n"
+        "for _ in $(seq 1 100); do\n"
+        f"  main_pid=$(systemctl --user show {shlex.quote(unit)} "
+        "--property=MainPID --value 2>/dev/null || printf 0)\n"
+        '  [ "${main_pid:-0}" -gt 0 ] && break\n'
+        f"  systemctl --user is-active --quiet {shlex.quote(unit)} || break\n"
+        "  sleep 0.05\n"
+        "done\n"
+        'if [ "${main_pid:-0}" -gt 0 ]; then\n'
+        f'  tail --pid="$main_pid" -n +1 -f {shlex.quote(log)}\n'
+        "else\n"
+        f"  cat {shlex.quote(log)}\n"
+        "fi\n"
+        f"while state=$(systemctl --user show {shlex.quote(unit)} "
+        "--property=ActiveState --value 2>/dev/null); do\n"
+        '  case "$state" in active|activating|deactivating) sleep 0.05 ;; *) break ;; esac\n'
+        "done\n"
+        f"rc=$(awk 'NR == 1 {{ print $1 }}' {shlex.quote(run_dir)}/{shlex.quote(job_key)}.rc)\n"
+        'exit "${rc:-1}"\n'
+    )
+
+
+def render_cancel(run_dir: str) -> str:
+    """Stop a run, including descendants that changed session or process group."""
+    return (
+        f"cd {shlex.quote(run_dir)} 2>/dev/null || exit 3\n"
+        'if [ -e dispatch.unit ]; then\n'
+        '  unit=$(cat dispatch.unit)\n'
+        '  case "$unit" in\n'
+        '    ci-remote-[0-9a-f]*.service)\n'
+        '      systemctl --user stop "$unit" 2>/dev/null || true\n'
+        '      printf "stopped %s\\n" "$unit"\n'
+        '      ;;\n'
+        '    *) printf "invalid dispatcher unit\\n" >&2; exit 2 ;;\n'
+        '  esac\n'
+        'elif [ -e dispatch.pid ]; then\n'
+        '  pid=$(cat dispatch.pid)\n'
+        '  if grep -qa dispatch.sh "/proc/$pid/cmdline" 2>/dev/null; then\n'
+        '    kill -TERM -"$pid" 2>/dev/null && printf "signalled %s\\n" "$pid"\n'
+        '    sleep 2\n'
+        '    kill -KILL -"$pid" 2>/dev/null\n'
+        '  else\n'
+        '    printf "dispatcher already gone\\n"\n'
+        '  fi\n'
+        'else\n'
+        '  printf "no dispatcher recorded\\n"\n'
+        'fi\n'
+        '[ -e finished ] || date +%s > finished\n'
     )
 
 
@@ -1357,15 +1445,12 @@ def cmd_run(args: argparse.Namespace) -> int:
     # Single job, attached: stream it live and mirror to the remote log.
     job = jobs[0]
     print(f"ci-remote: running {job.key} …\n", flush=True)
-    command = (
-        f"bash {shlex.quote(run_dir)}/{job.key}/run.sh 2>&1 | "
-        f"tee {shlex.quote(run_dir)}/{job.key}.log"
-    )
     # stdout is inherited so the job streams live; the script goes in on stdin.
     result = subprocess.run(
         ["ssh", "-o", "BatchMode=yes", host.ssh_target, "bash -s"],
-        input=command,
+        input=render_attached_launch(run_dir, job.key),
         text=True,
+        check=False,
     )
     # The dispatcher writes this for detached runs; an attached one must too,
     # or the workspace stays claimed and retention never reclaims the run.
@@ -1618,28 +1703,7 @@ def cmd_cancel(args: argparse.Namespace) -> int:
         host = resolve_host(manifest["host"])
         run_dir = manifest["run_dir"]
 
-    # Signal the whole process group, so in-flight `go test` children die with
-    # the dispatcher rather than being orphaned. The cmdline check guards
-    # against a recycled pid belonging to something else entirely.
-    script = (
-        f"cd {shlex.quote(run_dir)} 2>/dev/null || exit 3\n"
-        'if [ -e dispatch.pid ]; then\n'
-        '  pid=$(cat dispatch.pid)\n'
-        '  if grep -qa dispatch.sh "/proc/$pid/cmdline" 2>/dev/null; then\n'
-        '    kill -TERM -"$pid" 2>/dev/null && printf "signalled %s\\n" "$pid"\n'
-        "    sleep 2\n"
-        '    kill -KILL -"$pid" 2>/dev/null\n'
-        "  else\n"
-        '    printf "dispatcher already gone\\n"\n'
-        "  fi\n"
-        "else\n"
-        '  printf "no dispatcher recorded\\n"\n'
-        "fi\n"
-        # Mark it terminal so the workspace claim releases and retention can
-        # reclaim the directory.
-        '[ -e finished ] || date +%s > finished\n'
-    )
-    result = ssh_run(host, script, check=False)
+    result = ssh_run(host, render_cancel(run_dir), check=False)
     if result.returncode == 3:
         raise Error(f"run directory is gone on {host.name}: {run_dir}")
     sys.stdout.write(result.stdout or "")

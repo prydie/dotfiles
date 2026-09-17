@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -10,7 +12,6 @@ import time
 import unittest
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
-
 
 SCRIPT = Path(__file__).parents[1] / "bin" / "ci-remote"
 
@@ -551,12 +552,25 @@ class GitIgnoreTest(unittest.TestCase):
 
 
 class LaunchTest(unittest.TestCase):
-    def test_orphans_the_dispatcher_and_exits(self) -> None:
+    def require_systemd_user(self) -> None:
+        if not shutil.which("systemctl") or not shutil.which("systemd-run"):
+            self.skipTest("systemd user tools are unavailable")
+        result = subprocess.run(
+            ["systemctl", "--user", "show", "--property=Version", "--value"],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            self.skipTest("systemd user manager is unavailable")
+
+    def test_launches_the_dispatcher_in_a_transient_service(self) -> None:
         launch = ci.render_launch("/r/runs/1")
-        # The subshell is what lets ssh return; without it --detach blocks for
-        # the whole run.
-        self.assertIn("( setsid bash /r/runs/1/dispatch.sh", launch)
-        self.assertIn("& )", launch)
+        self.assertIn("systemd-run --user --quiet --collect", launch)
+        self.assertIn("--property=KillMode=control-group", launch)
+        self.assertIn("--property=TimeoutStopSec=1s", launch)
+        self.assertNotIn("--wait", launch)
+        self.assertIn("/r/runs/1/dispatch.sh", launch)
         self.assertIn("< /dev/null", launch)
         self.assertTrue(launch.rstrip().endswith("exit 0"))
         self.assertEqual(
@@ -565,6 +579,7 @@ class LaunchTest(unittest.TestCase):
 
     def test_detaches_for_real(self) -> None:
         """Run the launch shape locally: the shell must exit while work runs."""
+        self.require_systemd_user()
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         root = Path(temporary.name)
@@ -581,6 +596,173 @@ class LaunchTest(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0)
         self.assertFalse((root / "done").exists(), "dispatcher should still run")
+
+    def test_attached_job_uses_the_same_transient_service_boundary(self) -> None:
+        launch = ci.render_attached_launch("/r/runs/1", "Unit")
+        self.assertIn("systemd-run --user --quiet --collect", launch)
+        self.assertIn("--property=KillMode=control-group", launch)
+        self.assertIn('tail --pid="$main_pid"', launch)
+        self.assertIn("/r/runs/1/Unit/run.sh", launch)
+        self.assertIn("> /r/runs/1/Unit.log 2>&1", launch)
+        self.assertEqual(
+            subprocess.run(
+                ["bash", "-n"], input=launch, text=True, check=False
+            ).returncode,
+            0,
+        )
+
+    def test_completed_run_reaps_daemonized_descendants(self) -> None:
+        """A process cannot escape run cleanup by starting a new session."""
+        self.require_systemd_user()
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        root = Path(temporary.name)
+        child_pid = root / "child.pid"
+        (root / "dispatch.sh").write_text(
+            "setsid bash -c 'trap \"\" TERM; sleep 60' &\n"
+            f"echo $! > {child_pid}\n",
+            encoding="utf-8",
+        )
+
+        pid = None
+        try:
+            result = subprocess.run(
+                ["bash", "-s"],
+                input=ci.render_launch(str(root)),
+                text=True,
+                capture_output=True,
+                check=False,
+                timeout=3,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            for _ in range(40):
+                if child_pid.exists():
+                    pid = int(child_pid.read_text(encoding="utf-8"))
+                    break
+                time.sleep(0.05)
+            self.assertIsNotNone(pid, "dispatcher did not publish its child pid")
+
+            for _ in range(40):
+                if not Path(f"/proc/{pid}").exists():
+                    break
+                time.sleep(0.05)
+            self.assertFalse(
+                Path(f"/proc/{pid}").exists(),
+                "daemonized descendant survived the completed run",
+            )
+        finally:
+            if pid is not None and Path(f"/proc/{pid}").exists():
+                os.kill(pid, signal.SIGKILL)
+
+    def test_cancel_reaps_daemonized_descendants(self) -> None:
+        self.require_systemd_user()
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        root = Path(temporary.name)
+        child_pid = root / "child.pid"
+        (root / "dispatch.sh").write_text(
+            "setsid bash -c 'trap \"\" TERM; sleep 60' &\n"
+            f"echo $! > {child_pid}\n"
+            "sleep 60\n",
+            encoding="utf-8",
+        )
+
+        pid = None
+        try:
+            subprocess.run(
+                ["bash", "-s"],
+                input=ci.render_launch(str(root)),
+                text=True,
+                capture_output=True,
+                check=True,
+                timeout=3,
+            )
+            for _ in range(40):
+                if child_pid.exists():
+                    pid = int(child_pid.read_text(encoding="utf-8"))
+                    break
+                time.sleep(0.05)
+            self.assertIsNotNone(pid, "dispatcher did not publish its child pid")
+
+            result = subprocess.run(
+                ["bash", "-s"],
+                input=ci.render_cancel(str(root)),
+                text=True,
+                capture_output=True,
+                check=False,
+                timeout=3,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertFalse(Path(f"/proc/{pid}").exists())
+            self.assertTrue((root / "finished").exists())
+        finally:
+            if pid is not None and Path(f"/proc/{pid}").exists():
+                os.kill(pid, signal.SIGKILL)
+
+    def test_timed_out_job_reaps_daemonized_descendants(self) -> None:
+        self.require_systemd_user()
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        root = Path(temporary.name)
+        run_dir = root / "run"
+        workspace = root / "workspace"
+        job_dir = run_dir / "J"
+        job_dir.mkdir(parents=True)
+        workspace.mkdir()
+        child_pid = run_dir / "child.pid"
+        step = ci.Step(
+            index=1,
+            name="leaky envtest analogue",
+            run=(
+                "setsid bash -c 'trap \"\" TERM; sleep 60' &\n"
+                f"echo $! > {child_pid}\n"
+                "wait\n"
+            ),
+            shell="bash",
+            env={},
+            working_directory=None,
+            continue_on_error=False,
+        )
+        job = ci.Job(
+            key="J",
+            name="J",
+            timeout_minutes=1,
+            needs=[],
+            steps=[step],
+            env={},
+            working_directory=None,
+            continue_on_error=False,
+            skipped_uses=[],
+            notes=[],
+        )
+        driver = ci.render_job_driver(
+            ci.Host(name="local", ssh="local", isolate_jobs=False),
+            job,
+            str(run_dir),
+            str(workspace),
+        ).replace("JOB_TIMEOUT=60", "JOB_TIMEOUT=1")
+        (job_dir / "run.sh").write_text(driver, encoding="utf-8")
+        (job_dir / "step-01.sh").write_text(step.run, encoding="utf-8")
+
+        pid = None
+        try:
+            result = subprocess.run(
+                ["bash", "-s"],
+                input=ci.render_attached_launch(str(run_dir), "J"),
+                text=True,
+                capture_output=True,
+                check=False,
+                timeout=5,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            pid = int(child_pid.read_text(encoding="utf-8"))
+            self.assertFalse(
+                Path(f"/proc/{pid}").exists(),
+                "daemonized descendant survived the job timeout",
+            )
+        finally:
+            if pid is not None and Path(f"/proc/{pid}").exists():
+                os.kill(pid, signal.SIGKILL)
 
 
 class PruneTest(unittest.TestCase):
@@ -922,8 +1104,8 @@ class VerdictTest(unittest.TestCase):
             "jobs": ["Unit", "Race"],
             "advisory": [],
         }
-        import io
         import contextlib
+        import io
 
         buffer = io.StringIO()
         with contextlib.redirect_stdout(buffer):

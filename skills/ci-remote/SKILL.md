@@ -49,6 +49,10 @@ A job is cancelled at its workflow's `timeout-minutes` (the host sets a default
 where the workflow gives none), so an abandoned job cannot hold a slot and a
 workspace forever.
 
+The remote account needs a running systemd user manager. Each run executes in a
+transient service. Systemd removes all processes in the service after normal
+completion, timeout, or cancellation, including processes that call `setsid`.
+
 Code 2 means *you* got something wrong and can retry differently; code 1 is a
 genuine CI signal. Code 3 comes from polling `status` mid-run: treat it as "ask
 again later", never as success.
