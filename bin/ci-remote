@@ -517,6 +517,32 @@ def check_free_space(host: Host, root: str, force: bool) -> None:
     sys.stderr.write(f"ci-remote: warning: {message}\n")
 
 
+def check_remote_service_manager(host: Host) -> None:
+    """Require a user manager that survives the SSH session."""
+    probe = ssh_run(
+        host,
+        "user=$(id -un)\n"
+        'linger=$(loginctl show-user "$user" --property=Linger --value '
+        "2>/dev/null || true)\n"
+        "version=$(systemctl --user show --property=Version --value "
+        "2>/dev/null || true)\n"
+        'printf "%s\\n%s\\n%s\\n" "$user" "$linger" "$version"\n',
+        check=False,
+    )
+    lines = (probe.stdout or "").splitlines()
+    user = lines[0] if lines else "<remote-user>"
+    linger = lines[1] if len(lines) > 1 else ""
+    version = lines[2] if len(lines) > 2 else ""
+    if probe.returncode == 0 and linger == "yes" and version:
+        return
+    raise Error(
+        f"{host.name}: the remote account cannot keep ci-remote services alive "
+        f"after SSH exits (user={user}, linger={linger or 'unknown'}). Ask an "
+        f"administrator to run `sudo loginctl enable-linger {user}`, then retry. "
+        "ci-remote did not claim or sync the workspace."
+    )
+
+
 def git_dirs(repo_root: Path) -> tuple[str, str]:
     """This checkout's git dir and its common dir, both absolute."""
 
@@ -951,8 +977,8 @@ def render_dispatch(run_dir: str, waves: list[list[Job]], parallel: int) -> str:
         "set -u",
         f"export RD={shlex.quote(run_dir)}",
         'date +%s > "$RD/started"',
-        # setsid makes this the session and process-group leader, so its pid
-        # doubles as the pgid `cancel` signals to take down every job at once.
+        # Keep the PID for diagnostics and compatibility with old clients.
+        # New clients stop the transient service recorded by the launcher.
         'printf %s "$$" > "$RD/dispatch.pid"',
         "",
     ]
@@ -964,7 +990,6 @@ def render_dispatch(run_dir: str, waves: list[list[Job]], parallel: int) -> str:
             "bash -c 'bash \"$RD/JOBKEY/run.sh\" > \"$RD/JOBKEY.log\" 2>&1'",
             "",
         ]
-    lines += ['date +%s > "$RD/finished"', ""]
     return "\n".join(lines)
 
 
@@ -1026,34 +1051,225 @@ def prune_remote(host: Host, root: str) -> None:
     sys.stdout.write(result.stdout or "")
 
 
-def render_launch(run_dir: str) -> str:
-    """Start the dispatcher so that ssh can return immediately.
+def dispatch_unit(run_dir: str) -> str:
+    """Return the host-wide systemd unit name for a run directory."""
+    digest = hashlib.sha256(run_dir.encode()).hexdigest()[:20]
+    return f"ci-remote-{digest}.service"
 
-    The dispatcher must be orphaned inside a subshell. Backgrounding it
-    directly leaves the remote shell alive as its parent, holding the ssh
-    channel open until the whole run finishes -- which makes `--detach` block
-    for the entire pipeline, the one thing the flag exists to prevent. The
-    trailing `exit 0` keeps that shell from lingering on the last background
-    job.
-    """
+
+def systemd_run_command(run_dir: str, command: list[str]) -> str:
+    """Run a command in a cgroup that cannot retain escaped descendants."""
+    unit = dispatch_unit(run_dir)
+    options = [
+        "systemd-run",
+        "--user",
+        "--quiet",
+        "--collect",
+        f"--unit={unit}",
+        "--service-type=exec",
+        "--property=KillMode=control-group",
+        "--property=TimeoutStopSec=1s",
+        "--property=ExecStopPost="
+        + shlex.join(
+            [
+                "/bin/bash",
+                "-c",
+                'date +%%s > "$1"',
+                "ci-remote-finish",
+                f"{run_dir}/finished",
+            ]
+        ),
+    ]
+    return " ".join(shlex.quote(part) for part in [*options, "--", *command])
+
+
+def render_launch(run_dir: str) -> str:
+    """Start the dispatcher in a transient service and return immediately."""
     quoted = shlex.quote(run_dir)
+    unit = dispatch_unit(run_dir)
+    run_to_log = (
+        f"exec bash {shlex.quote(f'{run_dir}/dispatch.sh')} "
+        f"> {shlex.quote(f'{run_dir}/dispatch.log')} 2>&1"
+    )
+    command = systemd_run_command(
+        run_dir,
+        ["bash", "--noprofile", "--norc", "-c", run_to_log],
+    )
     return (
-        f"cd {quoted} || exit 1\n"
-        f"( setsid bash {quoted}/dispatch.sh "
-        f"> {quoted}/dispatch.log 2>&1 < /dev/null & )\n"
-        "exit 0\n"
+        "set -e\n"
+        f"cd {quoted}\n"
+        "exec {lifecycle_fd}> lifecycle.lock\n"
+        'flock "$lifecycle_fd"\n'
+        'if [ -e cancelled ]; then printf "run was cancelled before launch\\n" >&2; exit 4; fi\n'
+        'if [ -e lifecycle.v2 ] && [ ! -e prepared ]; then printf "run is not prepared for launch\\n" >&2; exit 4; fi\n'
+        "rm -f prepared\n"
+        f"printf %s {shlex.quote(unit)} > dispatch.unit\n"
+        ": > launching\n"
+        "trap 'rm -f launching' EXIT\n"
+        "set +e\n"
+        f"{command} < /dev/null\n"
+        "rc=$?\n"
+        "set -e\n"
+        'if [ "$rc" -ne 0 ]; then\n'
+        '  load_state=$(systemctl --user show '
+        f'{shlex.quote(unit)} --property=LoadState --value 2>/dev/null) || load_state=\n'
+        '  if [ "$load_state" = not-found ]; then\n'
+        '    date +%s > finished\n'
+        '  else\n'
+        '    printf "service registration failed but unit absence is unproven: %s\\n" '
+        f'{shlex.quote(unit)} >&2\n'
+        '  fi\n'
+        '  exit "$rc"\n'
+        'fi\n'
+        "rm -f launching\n"
+        "trap - EXIT\n"
+        'flock -u "$lifecycle_fd"\n'
     )
 
 
-def upload_tree(host: Host, files: dict[str, str]) -> None:
+def render_attached_launch(run_dir: str, job_key: str) -> str:
+    """Stream one job while systemd owns and cleans its complete process tree."""
+    unit = dispatch_unit(run_dir)
+    log = f"{run_dir}/{job_key}.log"
+    driver = f"{run_dir}/{job_key}/run.sh"
+    run_to_log = f"exec bash {shlex.quote(driver)} > {shlex.quote(log)} 2>&1"
+    command = systemd_run_command(
+        run_dir,
+        ["bash", "--noprofile", "--norc", "-c", run_to_log],
+    )
+    return (
+        "set -e\n"
+        f"cd {shlex.quote(run_dir)}\n"
+        "exec {lifecycle_fd}> lifecycle.lock\n"
+        'flock "$lifecycle_fd"\n'
+        'if [ -e cancelled ]; then printf "run was cancelled before launch\\n" >&2; exit 4; fi\n'
+        'if [ -e lifecycle.v2 ] && [ ! -e prepared ]; then printf "run is not prepared for launch\\n" >&2; exit 4; fi\n'
+        "rm -f prepared\n"
+        f"printf %s {shlex.quote(unit)} > dispatch.unit\n"
+        ": > launching\n"
+        "trap 'rm -f launching' EXIT\n"
+        f": > {shlex.quote(log)}\n"
+        "set +e\n"
+        f"{command}\n"
+        "rc=$?\n"
+        "set -e\n"
+        'if [ "$rc" -ne 0 ]; then\n'
+        '  load_state=$(systemctl --user show '
+        f'{shlex.quote(unit)} --property=LoadState --value 2>/dev/null) || load_state=\n'
+        '  if [ "$load_state" = not-found ]; then\n'
+        '    date +%s > finished\n'
+        '  else\n'
+        '    printf "service registration failed but unit absence is unproven: %s\\n" '
+        f'{shlex.quote(unit)} >&2\n'
+        '  fi\n'
+        '  exit "$rc"\n'
+        'fi\n'
+        "rm -f launching\n"
+        "trap - EXIT\n"
+        'flock -u "$lifecycle_fd"\n'
+        "main_pid=0\n"
+        "for _ in $(seq 1 100); do\n"
+        f"  main_pid=$(systemctl --user show {shlex.quote(unit)} "
+        "--property=MainPID --value 2>/dev/null || printf 0)\n"
+        '  [ "${main_pid:-0}" -gt 0 ] && break\n'
+        f"  systemctl --user is-active --quiet {shlex.quote(unit)} || break\n"
+        "  sleep 0.05\n"
+        "done\n"
+        'if [ "${main_pid:-0}" -gt 0 ]; then\n'
+        f'  tail --pid="$main_pid" -n +1 -f {shlex.quote(log)}\n'
+        "else\n"
+        f"  cat {shlex.quote(log)}\n"
+        "fi\n"
+        f"while state=$(systemctl --user show {shlex.quote(unit)} "
+        "--property=ActiveState --value 2>/dev/null); do\n"
+        '  case "$state" in active|activating|deactivating) sleep 0.05 ;; *) break ;; esac\n'
+        "done\n"
+        f"rc=$(awk 'NR == 1 {{ print $1 }}' {shlex.quote(run_dir)}/{shlex.quote(job_key)}.rc)\n"
+        'exit "${rc:-1}"\n'
+    )
+
+
+def render_cancel(run_dir: str) -> str:
+    """Stop a run, including descendants that changed session or process group."""
+    return (
+        f"cd {shlex.quote(run_dir)} 2>/dev/null || exit 3\n"
+        "exec {lifecycle_fd}> lifecycle.lock\n"
+        'flock "$lifecycle_fd"\n'
+        'if [ -e lifecycle.v2 ] && [ -e launching ]; then rm -f launching; fi\n'
+        'if [ -e cancelled ]; then\n'
+        '  [ -e finished ] || { printf "cancelled run has no completion marker\\n" >&2; exit 4; }\n'
+        '  printf "dispatcher already cancelled\\n"\n'
+        '  exit 0\n'
+        'fi\n'
+        'if [ -e dispatch.unit ]; then\n'
+        '  unit=$(cat dispatch.unit)\n'
+        '  case "$unit" in\n'
+        '    ci-remote-[0-9a-f]*.service)\n'
+        '      if systemctl --user stop "$unit" 2>/dev/null; then\n'
+        '        [ -e finished ] || { printf "service stopped without a completion marker\\n" >&2; exit 4; }\n'
+        '        : > cancelled\n'
+        '        rm -f prepared launching\n'
+        '        printf "stopped %s\\n" "$unit"\n'
+        '      elif [ -e finished ]; then\n'
+        '        printf "dispatcher already inactive\\n"\n'
+        '      elif [ ! -e launching ]; then\n'
+        '        load_state=$(systemctl --user show "$unit" --property=LoadState --value 2>/dev/null) || {\n'
+        '          printf "could not prove dispatcher absence: %s\\n" "$unit" >&2\n'
+        '          exit 4\n'
+        '        }\n'
+        '        if [ "$load_state" = not-found ]; then\n'
+        '          : > cancelled\n'
+        '          rm -f prepared launching\n'
+        '          date +%s > finished\n'
+        '          printf "dispatcher was never registered: %s\\n" "$unit"\n'
+        '        else\n'
+        '          printf "could not stop dispatcher in state %s: %s\\n" "$load_state" "$unit" >&2\n'
+        '          exit 4\n'
+        '        fi\n'
+        '      else\n'
+        '        printf "could not stop or prove inactive: %s\\n" "$unit" >&2\n'
+        '        exit 4\n'
+        '      fi\n'
+        '      ;;\n'
+        '    *) printf "invalid dispatcher unit\\n" >&2; exit 2 ;;\n'
+        '  esac\n'
+        'elif [ -e launching ]; then\n'
+        '  printf "dispatcher registration is still in progress; retry cancel\\n" >&2\n'
+        '  exit 4\n'
+        'elif [ -e dispatch.pid ]; then\n'
+        '  pid=$(cat dispatch.pid)\n'
+        '  if grep -qa dispatch.sh "/proc/$pid/cmdline" 2>/dev/null; then\n'
+        '    kill -TERM -"$pid" 2>/dev/null && printf "signalled %s\\n" "$pid"\n'
+        '    sleep 2\n'
+        '    kill -KILL -"$pid" 2>/dev/null\n'
+        '    date +%s > finished\n'
+        '  else\n'
+        '    printf "dispatcher already gone\\n"\n'
+        '    date +%s > finished\n'
+        '  fi\n'
+        'else\n'
+        '  printf "no dispatcher recorded; cannot prove that the run is inactive\\n" >&2\n'
+        '  exit 4\n'
+        'fi\n'
+    )
+
+
+def upload_tree(
+    host: Host,
+    files: dict[str, str],
+    data_files: dict[str, str] | None = None,
+) -> None:
     """Write generated scripts remotely in one SSH round trip."""
+    data_files = data_files or {}
+    all_files = {**files, **data_files}
     parts = ["set -eu"]
-    directories = sorted({str(Path(path).parent) for path in files})
+    directories = sorted({str(Path(path).parent) for path in all_files})
     parts.append("mkdir -p " + " ".join(shlex.quote(d) for d in directories))
-    for path, content in files.items():
+    for path, content in all_files.items():
         marker = "CI_REMOTE_EOF"
         parts.append(f"cat > {shlex.quote(path)} <<'{marker}'\n{content}{marker}")
-        parts.append(f"chmod +x {shlex.quote(path)}")
+        if path in files:
+            parts.append(f"chmod +x {shlex.quote(path)}")
     ssh_run(host, "\n".join(parts))
 
 
@@ -1157,6 +1373,18 @@ def job_state(manifest: dict, state: dict, key: str) -> tuple[str, str]:
     return "PEND", "-"
 
 
+def attached_exit_code(manifest: dict, state: dict, key: str) -> int:
+    """Return a CI verdict only when the remote job reached a terminal state."""
+    status, _ = job_state(manifest, state, key)
+    if status == "FAIL":
+        return 0 if key in manifest.get("advisory", []) else 1
+    if status == "FAIL(advisory)" and state["finished"] is not None:
+        return 0
+    if status == "PASS" and state["finished"] is not None:
+        return 0
+    return 2
+
+
 # ---------------------------------------------------------------------------
 # commands
 # ---------------------------------------------------------------------------
@@ -1213,6 +1441,32 @@ def report_fidelity(jobs: list[Job], stream) -> None:
             stream.write(f"  - {job.key}: skipping {skipped}\n")
         if not job.steps:
             stream.write(f"  - {job.key}: no runnable steps\n")
+
+
+def run_attached(host: Host, manifest: dict, job: Job) -> int:
+    """Stream one job and return only a terminal remote job verdict."""
+    run_dir = manifest["run_dir"]
+    print(f"ci-remote: running {job.key} …\n", flush=True)
+    subprocess.run(
+        ["ssh", "-o", "BatchMode=yes", host.ssh_target, "bash -s"],
+        input=render_attached_launch(run_dir, job.key),
+        text=True,
+        check=False,
+    )
+    state = fetch_status(host, run_dir)
+    status, elapsed = job_state(manifest, state, job.key)
+    print(
+        f"\nci-remote: {job.key} {status} in {elapsed}  "
+        f"(run {manifest['run_id']})"
+    )
+    code = attached_exit_code(manifest, state, job.key)
+    if code == 2:
+        print(
+            "ci-remote: attached transport ended before the remote service "
+            "published a terminal result",
+            file=sys.stderr,
+        )
+    return code
 
 
 def cmd_jobs(args: argparse.Namespace) -> int:
@@ -1281,6 +1535,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     print(f"ci-remote: jobs {' '.join(job.key for job in jobs)}")
     report_fidelity(jobs, sys.stdout)
 
+    check_remote_service_manager(host)
     check_free_space(host, root, args.force)
 
     active = active_run_for(host, root, workspace)
@@ -1317,7 +1572,15 @@ def cmd_run(args: argparse.Namespace) -> int:
                 )
         parallel = args.parallel or host.parallel
         files[f"{run_dir}/dispatch.sh"] = render_dispatch(run_dir, waves, parallel)
-        upload_tree(host, files)
+        upload_tree(
+            host,
+            files,
+            {
+                f"{run_dir}/dispatch.unit": dispatch_unit(run_dir) + "\n",
+                f"{run_dir}/lifecycle.v2": "",
+                f"{run_dir}/prepared": "",
+            },
+        )
     except BaseException:
         release_claim(host, run_dir)
         raise
@@ -1355,27 +1618,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         return follow_run(host, manifest, args)
 
     # Single job, attached: stream it live and mirror to the remote log.
-    job = jobs[0]
-    print(f"ci-remote: running {job.key} …\n", flush=True)
-    command = (
-        f"bash {shlex.quote(run_dir)}/{job.key}/run.sh 2>&1 | "
-        f"tee {shlex.quote(run_dir)}/{job.key}.log"
-    )
-    # stdout is inherited so the job streams live; the script goes in on stdin.
-    result = subprocess.run(
-        ["ssh", "-o", "BatchMode=yes", host.ssh_target, "bash -s"],
-        input=command,
-        text=True,
-    )
-    # The dispatcher writes this for detached runs; an attached one must too,
-    # or the workspace stays claimed and retention never reclaims the run.
-    ssh_run(host, f"date +%s > {shlex.quote(run_dir)}/finished", check=False)
-    state = fetch_status(host, run_dir)
-    status, elapsed = job_state(manifest, state, job.key)
-    print(f"\nci-remote: {job.key} {status} in {elapsed}  (run {run_id})")
-    if status.startswith("FAIL") and job.continue_on_error:
-        return 0
-    return 1 if status.startswith("FAIL") or result.returncode != 0 else 0
+    return run_attached(host, manifest, jobs[0])
 
 
 def follow_run(host: Host, manifest: dict, args: argparse.Namespace) -> int:
@@ -1406,8 +1649,6 @@ def follow_run(host: Host, manifest: dict, args: argparse.Namespace) -> int:
                 failed_early = True
 
         if failed_early or state["finished"] is not None:
-            break
-        if len(state["results"]) == len(manifest["jobs"]):
             break
         time.sleep(args.interval)
 
@@ -1464,13 +1705,19 @@ def summarise(host: Host, manifest: dict, tail: int) -> int:
 
     # Never report success for a run that is still going: a mid-run `status`
     # poll saying "all jobs passed" is a false verdict an agent will act on.
-    if unfinished:
+    if unfinished or state["finished"] is None:
         done = len(manifest["jobs"]) - len(unfinished)
-        print(
-            f"\nci-remote: NOT FINISHED — {done}/{len(manifest['jobs'])} done, "
-            f"no failures yet, {len(unfinished)} outstanding: "
-            f"{' '.join(unfinished)}"
-        )
+        if unfinished:
+            print(
+                f"\nci-remote: NOT FINISHED — {done}/{len(manifest['jobs'])} done, "
+                f"no failures yet, {len(unfinished)} outstanding: "
+                f"{' '.join(unfinished)}"
+            )
+        else:
+            print(
+                "\nci-remote: NOT FINISHED — all job results are recorded, "
+                "but service cleanup is still running"
+            )
         print(
             "ci-remote: not a verdict. If someone is waiting on this run, "
             "report these counts now and poll `status` again shortly."
@@ -1544,8 +1791,9 @@ def status_json(host: Host, manifest: dict) -> tuple[dict, int]:
         elif status not in TERMINAL_STATES:
             unfinished += 1
 
-    verdict = "failed" if failures else ("unfinished" if unfinished else "passed")
-    code = 1 if failures else (3 if unfinished else 0)
+    run_unfinished = unfinished or state["finished"] is None
+    verdict = "failed" if failures else ("unfinished" if run_unfinished else "passed")
+    code = 1 if failures else (3 if run_unfinished else 0)
     return (
         {
             "run_id": manifest["run_id"],
@@ -1618,30 +1866,12 @@ def cmd_cancel(args: argparse.Namespace) -> int:
         host = resolve_host(manifest["host"])
         run_dir = manifest["run_dir"]
 
-    # Signal the whole process group, so in-flight `go test` children die with
-    # the dispatcher rather than being orphaned. The cmdline check guards
-    # against a recycled pid belonging to something else entirely.
-    script = (
-        f"cd {shlex.quote(run_dir)} 2>/dev/null || exit 3\n"
-        'if [ -e dispatch.pid ]; then\n'
-        '  pid=$(cat dispatch.pid)\n'
-        '  if grep -qa dispatch.sh "/proc/$pid/cmdline" 2>/dev/null; then\n'
-        '    kill -TERM -"$pid" 2>/dev/null && printf "signalled %s\\n" "$pid"\n'
-        "    sleep 2\n"
-        '    kill -KILL -"$pid" 2>/dev/null\n'
-        "  else\n"
-        '    printf "dispatcher already gone\\n"\n'
-        "  fi\n"
-        "else\n"
-        '  printf "no dispatcher recorded\\n"\n'
-        "fi\n"
-        # Mark it terminal so the workspace claim releases and retention can
-        # reclaim the directory.
-        '[ -e finished ] || date +%s > finished\n'
-    )
-    result = ssh_run(host, script, check=False)
+    result = ssh_run(host, render_cancel(run_dir), check=False)
     if result.returncode == 3:
         raise Error(f"run directory is gone on {host.name}: {run_dir}")
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "cancel did not complete").strip()
+        raise Error(f"could not cancel {manifest['run_id']} on {host.name}: {detail}")
     sys.stdout.write(result.stdout or "")
     print(f"ci-remote: cancelled {manifest['run_id']}")
     return 0
