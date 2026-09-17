@@ -1098,15 +1098,14 @@ def render_launch(run_dir: str) -> str:
     return (
         "set -e\n"
         f"cd {quoted}\n"
+        f"printf %s {shlex.quote(unit)} > dispatch.unit\n"
         ": > launching\n"
-        "trap 'rm -f launching dispatch.unit.new' EXIT\n"
+        "trap 'rm -f launching' EXIT\n"
         "set +e\n"
         f"{command} < /dev/null\n"
         "rc=$?\n"
         "set -e\n"
         'if [ "$rc" -ne 0 ]; then date +%s > finished; exit "$rc"; fi\n'
-        f"printf %s {shlex.quote(unit)} > dispatch.unit.new\n"
-        "mv dispatch.unit.new dispatch.unit\n"
     )
 
 
@@ -1123,16 +1122,15 @@ def render_attached_launch(run_dir: str, job_key: str) -> str:
     return (
         "set -e\n"
         f"cd {shlex.quote(run_dir)}\n"
+        f"printf %s {shlex.quote(unit)} > dispatch.unit\n"
         ": > launching\n"
-        "trap 'rm -f launching dispatch.unit.new' EXIT\n"
+        "trap 'rm -f launching' EXIT\n"
         f": > {shlex.quote(log)}\n"
         "set +e\n"
         f"{command}\n"
         "rc=$?\n"
         "set -e\n"
         'if [ "$rc" -ne 0 ]; then date +%s > finished; exit "$rc"; fi\n'
-        f"printf %s {shlex.quote(unit)} > dispatch.unit.new\n"
-        "mv dispatch.unit.new dispatch.unit\n"
         "main_pid=0\n"
         "for _ in $(seq 1 100); do\n"
         f"  main_pid=$(systemctl --user show {shlex.quote(unit)} "
@@ -1308,6 +1306,18 @@ def job_state(manifest: dict, state: dict, key: str) -> tuple[str, str]:
     return "PEND", "-"
 
 
+def attached_exit_code(manifest: dict, state: dict, key: str) -> int:
+    """Return a CI verdict only when the remote job reached a terminal state."""
+    status, _ = job_state(manifest, state, key)
+    if status == "FAIL":
+        return 0 if key in manifest.get("advisory", []) else 1
+    if status == "FAIL(advisory)" and state["finished"] is not None:
+        return 0
+    if status == "PASS" and state["finished"] is not None:
+        return 0
+    return 2
+
+
 # ---------------------------------------------------------------------------
 # commands
 # ---------------------------------------------------------------------------
@@ -1364,6 +1374,32 @@ def report_fidelity(jobs: list[Job], stream) -> None:
             stream.write(f"  - {job.key}: skipping {skipped}\n")
         if not job.steps:
             stream.write(f"  - {job.key}: no runnable steps\n")
+
+
+def run_attached(host: Host, manifest: dict, job: Job) -> int:
+    """Stream one job and return only a terminal remote job verdict."""
+    run_dir = manifest["run_dir"]
+    print(f"ci-remote: running {job.key} …\n", flush=True)
+    subprocess.run(
+        ["ssh", "-o", "BatchMode=yes", host.ssh_target, "bash -s"],
+        input=render_attached_launch(run_dir, job.key),
+        text=True,
+        check=False,
+    )
+    state = fetch_status(host, run_dir)
+    status, elapsed = job_state(manifest, state, job.key)
+    print(
+        f"\nci-remote: {job.key} {status} in {elapsed}  "
+        f"(run {manifest['run_id']})"
+    )
+    code = attached_exit_code(manifest, state, job.key)
+    if code == 2:
+        print(
+            "ci-remote: attached transport ended before the remote service "
+            "published a terminal result",
+            file=sys.stderr,
+        )
+    return code
 
 
 def cmd_jobs(args: argparse.Namespace) -> int:
@@ -1507,21 +1543,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         return follow_run(host, manifest, args)
 
     # Single job, attached: stream it live and mirror to the remote log.
-    job = jobs[0]
-    print(f"ci-remote: running {job.key} …\n", flush=True)
-    # stdout is inherited so the job streams live; the script goes in on stdin.
-    result = subprocess.run(
-        ["ssh", "-o", "BatchMode=yes", host.ssh_target, "bash -s"],
-        input=render_attached_launch(run_dir, job.key),
-        text=True,
-        check=False,
-    )
-    state = fetch_status(host, run_dir)
-    status, elapsed = job_state(manifest, state, job.key)
-    print(f"\nci-remote: {job.key} {status} in {elapsed}  (run {run_id})")
-    if status.startswith("FAIL") and job.continue_on_error:
-        return 0
-    return 1 if status.startswith("FAIL") or result.returncode != 0 else 0
+    return run_attached(host, manifest, jobs[0])
 
 
 def follow_run(host: Host, manifest: dict, args: argparse.Namespace) -> int:
@@ -1552,8 +1574,6 @@ def follow_run(host: Host, manifest: dict, args: argparse.Namespace) -> int:
                 failed_early = True
 
         if failed_early or state["finished"] is not None:
-            break
-        if len(state["results"]) == len(manifest["jobs"]):
             break
         time.sleep(args.interval)
 
@@ -1610,13 +1630,19 @@ def summarise(host: Host, manifest: dict, tail: int) -> int:
 
     # Never report success for a run that is still going: a mid-run `status`
     # poll saying "all jobs passed" is a false verdict an agent will act on.
-    if unfinished:
+    if unfinished or state["finished"] is None:
         done = len(manifest["jobs"]) - len(unfinished)
-        print(
-            f"\nci-remote: NOT FINISHED — {done}/{len(manifest['jobs'])} done, "
-            f"no failures yet, {len(unfinished)} outstanding: "
-            f"{' '.join(unfinished)}"
-        )
+        if unfinished:
+            print(
+                f"\nci-remote: NOT FINISHED — {done}/{len(manifest['jobs'])} done, "
+                f"no failures yet, {len(unfinished)} outstanding: "
+                f"{' '.join(unfinished)}"
+            )
+        else:
+            print(
+                "\nci-remote: NOT FINISHED — all job results are recorded, "
+                "but service cleanup is still running"
+            )
         print(
             "ci-remote: not a verdict. If someone is waiting on this run, "
             "report these counts now and poll `status` again shortly."
@@ -1690,8 +1716,9 @@ def status_json(host: Host, manifest: dict) -> tuple[dict, int]:
         elif status not in TERMINAL_STATES:
             unfinished += 1
 
-    verdict = "failed" if failures else ("unfinished" if unfinished else "passed")
-    code = 1 if failures else (3 if unfinished else 0)
+    run_unfinished = unfinished or state["finished"] is None
+    verdict = "failed" if failures else ("unfinished" if run_unfinished else "passed")
+    code = 1 if failures else (3 if run_unfinished else 0)
     return (
         {
             "run_id": manifest["run_id"],

@@ -575,7 +575,7 @@ class LaunchTest(unittest.TestCase):
         self.assertIn("/r/runs/1/dispatch.sh", launch)
         self.assertIn("< /dev/null", launch)
         self.assertIn(": > launching", launch)
-        self.assertIn("mv dispatch.unit.new dispatch.unit", launch)
+        self.assertLess(launch.index("dispatch.unit"), launch.index("systemd-run"))
         self.assertEqual(
             subprocess.run(["bash", "-n"], input=launch, text=True).returncode, 0
         )
@@ -621,7 +621,7 @@ class LaunchTest(unittest.TestCase):
         )
 
         self.assertEqual(result.returncode, 12)
-        self.assertFalse((root / "dispatch.unit").exists())
+        self.assertTrue((root / "dispatch.unit").exists())
         self.assertTrue((root / "finished").exists())
 
     def test_attached_job_uses_the_same_transient_service_boundary(self) -> None:
@@ -631,6 +631,7 @@ class LaunchTest(unittest.TestCase):
         self.assertIn('tail --pid="$main_pid"', launch)
         self.assertIn("/r/runs/1/Unit/run.sh", launch)
         self.assertIn("> /r/runs/1/Unit.log 2>&1", launch)
+        self.assertLess(launch.index("dispatch.unit"), launch.index("systemd-run"))
         self.assertEqual(
             subprocess.run(
                 ["bash", "-n"], input=launch, text=True, check=False
@@ -825,6 +826,7 @@ class LaunchTest(unittest.TestCase):
                     break
                 time.sleep(0.05)
             self.assertTrue(started.exists())
+            self.assertTrue((root / "dispatch.unit").exists())
             os.killpg(process.pid, signal.SIGTERM)
             process.wait(timeout=2)
             self.assertFalse(
@@ -860,6 +862,59 @@ class LaunchTest(unittest.TestCase):
 
         self.assertNotEqual(result.returncode, 0)
         self.assertFalse((root / "finished").exists())
+
+    def test_detached_launcher_loss_after_registration_remains_cancellable(self) -> None:
+        self.require_systemd_user()
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        root = Path(temporary.name)
+        started = root / "started"
+        (root / "dispatch.sh").write_text(
+            f"date +%s > {started}\nsleep 60\n", encoding="utf-8"
+        )
+        launch = ci.render_launch(str(root)).replace(
+            "rc=$?\n", "kill -STOP $$\nrc=$?\n", 1
+        )
+        script = root / "launch.sh"
+        script.write_text(launch, encoding="utf-8")
+        process = subprocess.Popen(
+            ["bash", str(script)],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+        try:
+            for _ in range(60):
+                status = Path(f"/proc/{process.pid}/status")
+                if (
+                    started.exists()
+                    and status.exists()
+                    and "State:\tT" in status.read_text(encoding="utf-8")
+                ):
+                    break
+                time.sleep(0.05)
+            self.assertTrue(started.exists())
+            self.assertTrue((root / "dispatch.unit").exists())
+            os.killpg(process.pid, signal.SIGKILL)
+            process.wait(timeout=2)
+
+            result = subprocess.run(
+                ["bash", "-s"],
+                input=ci.render_cancel(str(root)),
+                text=True,
+                capture_output=True,
+                check=False,
+                timeout=3,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertTrue((root / "finished").exists())
+        finally:
+            subprocess.run(
+                ["systemctl", "--user", "stop", ci.dispatch_unit(str(root))],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+            )
 
 
 class RemoteServiceManagerTest(unittest.TestCase):
@@ -927,6 +982,72 @@ class RemoteServiceManagerTest(unittest.TestCase):
 
         claim.assert_not_called()
         sync.assert_not_called()
+
+
+class AttachedCommandOutcomeTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.host = ci.Host(name="box", ssh="box")
+        self.job = ci.Job(
+            key="Unit",
+            name="Unit",
+            timeout_minutes=None,
+            needs=[],
+            steps=[],
+            env={},
+            working_directory=None,
+            continue_on_error=False,
+            skipped_uses=[],
+            notes=[],
+        )
+        self.manifest = {
+            "run_id": "r1",
+            "run_dir": "/srv/ci/runs/r1",
+            "jobs": ["Unit"],
+            "advisory": [],
+        }
+
+    def run_with(self, transport_code: int, state: dict) -> int:
+        with (
+            mock.patch.object(
+                ci.subprocess,
+                "run",
+                return_value=subprocess.CompletedProcess([], transport_code),
+            ),
+            mock.patch.object(ci, "fetch_status", return_value=state),
+        ):
+            return ci.run_attached(self.host, self.manifest, self.job)
+
+    def test_systemd_launch_failure_is_a_tool_error(self) -> None:
+        state = {
+            "now": 10,
+            "queued": {},
+            "started": {},
+            "results": {},
+            "finished": 10,
+        }
+        self.assertEqual(self.run_with(12, state), 2)
+
+    def test_client_loss_while_service_runs_is_a_tool_error(self) -> None:
+        state = {
+            "now": 10,
+            "queued": {"Unit": 1},
+            "started": {"Unit": 2},
+            "results": {},
+            "finished": None,
+        }
+        with mock.patch.object(ci, "release_claim") as release:
+            self.assertEqual(self.run_with(255, state), 2)
+        release.assert_not_called()
+
+    def test_terminal_failure_is_a_ci_failure(self) -> None:
+        state = {
+            "now": 10,
+            "queued": {"Unit": 1},
+            "started": {"Unit": 2},
+            "results": {"Unit": {"rc": 1, "start": 2, "end": 9}},
+            "finished": 10,
+        }
+        self.assertEqual(self.run_with(255, state), 1)
 
 
 class PruneTest(unittest.TestCase):
@@ -1165,6 +1286,15 @@ class StatusJsonTest(unittest.TestCase):
         self.assertEqual(code, 3)
         self.assertFalse(payload["finished"])
 
+    def test_all_job_results_wait_for_service_cleanup(self) -> None:
+        payload, code = self.payload(
+            "N 100\nQ Unit 0\nS Unit 0\nR Unit 0 0 30\n"
+            "Q Race 0\nS Race 0\nR Race 0 0 30"
+        )
+        self.assertEqual(payload["verdict"], "unfinished")
+        self.assertEqual(code, 3)
+        self.assertFalse(payload["finished"])
+
     def test_separates_queue_time_from_work_time(self) -> None:
         payload, _ = self.payload(
             "N 100\nQ Unit 10\nS Unit 40\nR Unit 0 40 70\nQ Race 10\nS Race 40"
@@ -1309,6 +1439,46 @@ class VerdictTest(unittest.TestCase):
         )
         self.assertEqual(code, 0)
         self.assertIn("all jobs passed", output)
+
+    def test_all_job_results_wait_for_service_cleanup(self) -> None:
+        code, output = self.summarise(
+            "N 100\nS Unit 10\nR Unit 0 10 40\nS Race 10\nR Race 0 10 50"
+        )
+        self.assertEqual(code, 3)
+        self.assertIn("service cleanup is still running", output)
+        self.assertNotIn("all jobs passed", output)
+
+    def test_wait_does_not_return_before_service_cleanup(self) -> None:
+        manifest = {
+            "run_id": "r1",
+            "host": "h",
+            "repo": "/repo",
+            "revision": "abc",
+            "run_dir": "/r",
+            "jobs": ["Unit"],
+            "advisory": [],
+        }
+        before_cleanup = {
+            "now": 50,
+            "queued": {"Unit": 10},
+            "started": {"Unit": 10},
+            "results": {"Unit": {"rc": 0, "start": 10, "end": 40}},
+            "finished": None,
+        }
+        after_cleanup = {**before_cleanup, "finished": 50}
+        args = mock.Mock(fail_fast=False, interval=0, tail=0)
+        with (
+            mock.patch.object(
+                ci,
+                "fetch_status",
+                side_effect=[before_cleanup, after_cleanup, after_cleanup],
+            ) as fetch,
+            mock.patch.object(ci.time, "sleep"),
+        ):
+            code = ci.follow_run(ci.Host(name="h", ssh="h"), manifest, args)
+
+        self.assertEqual(code, 0)
+        self.assertEqual(fetch.call_count, 3)
 
     def test_a_failure_outranks_an_unfinished_job(self) -> None:
         code, output = self.summarise("N 100\nS Unit 10\nR Unit 1 10 40\nS Race 20")

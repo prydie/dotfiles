@@ -38,7 +38,7 @@ ordering is honoured.
 |---|---|
 | 0 | Every blocking job passed |
 | 1 | At least one blocking job failed |
-| 2 | Usage or config error (bad job name, unknown run id, host low on disk) |
+| 2 | Tool or config error (bad job name, lost transport, host low on disk) |
 | 3 | Run has not finished — **no verdict yet** |
 
 Job states in `status`: `PEND` (not launched), `QUEUE` (launched, waiting on a
@@ -57,9 +57,9 @@ Each run executes in a transient service. Systemd removes all processes in the
 service after normal completion, timeout, or cancellation, including processes
 that call `setsid`.
 
-Code 2 means *you* got something wrong and can retry differently; code 1 is a
-genuine CI signal. Code 3 comes from polling `status` mid-run: treat it as "ask
-again later", never as success.
+Code 2 means that the tool did not get a CI verdict. Retry or correct the
+configuration. Code 1 is a genuine CI signal. Code 3 comes from polling
+`status` mid-run: treat it as "ask again later", never as success.
 
 ## Watching a long run without blocking
 

@@ -333,6 +333,7 @@ Each run uses a transient service with `KillMode=control-group`. When a run
 ends, systemd sends `SIGTERM` to its processes and sends `SIGKILL` after one
 second. This cleanup also reaches processes that changed their session or
 process group. The service writes the completion marker after cleanup finishes.
+Run-level status cannot report success before this marker exists.
 
 ## Neovim Go workflow
 
