@@ -500,6 +500,12 @@ class StatusParsingTest(unittest.TestCase):
         self.assertEqual(ci.job_state(strict, state, "Fmt"), ("FAIL", "1m00s"))
         self.assertEqual(ci.job_state(soft, state, "Fmt")[0], "FAIL(advisory)")
 
+    def test_rejects_a_malformed_completion_marker(self) -> None:
+        self.stub_ssh("N 100\nF %s")
+
+        with self.assertRaisesRegex(ci.Error, "invalid finished marker.*%s"):
+            ci.fetch_status(ci.Host(name="h", ssh="h"), "/r")
+
 
 class GitIgnoreTest(unittest.TestCase):
     """The exclude list must match git's view, negations included."""
@@ -789,6 +795,9 @@ class LaunchTest(unittest.TestCase):
                     break
                 time.sleep(0.05)
             self.assertTrue((root / "finished").exists())
+            finished = (root / "finished").read_text(encoding="utf-8").strip()
+            self.assertTrue(finished.isdecimal(), finished)
+            self.assertGreater(int(finished), 0)
         finally:
             if pid is not None and Path(f"/proc/{pid}").exists():
                 os.kill(pid, signal.SIGKILL)

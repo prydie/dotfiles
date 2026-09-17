@@ -1074,7 +1074,7 @@ def systemd_run_command(run_dir: str, command: list[str]) -> str:
             [
                 "/bin/bash",
                 "-c",
-                'date +%%s > "$1"',
+                'date +%s > "$1"',
                 "ci-remote-finish",
                 f"{run_dir}/finished",
             ]
@@ -1337,7 +1337,12 @@ def fetch_status(host: Host, run_dir: str) -> dict:
             end = int(fields[4]) if len(fields) > 4 else None
             state["results"][fields[1]] = {"rc": rc, "start": start, "end": end}
         elif tag == "F" and len(fields) >= 2:
-            state["finished"] = int(fields[1])
+            try:
+                state["finished"] = int(fields[1])
+            except ValueError as exc:
+                raise Error(
+                    f"invalid finished marker on {host.name}: {fields[1]!r}"
+                ) from exc
     return state
 
 
