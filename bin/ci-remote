@@ -1166,6 +1166,18 @@ def render_cancel(run_dir: str) -> str:
         '        printf "stopped %s\\n" "$unit"\n'
         '      elif [ -e finished ]; then\n'
         '        printf "dispatcher already inactive\\n"\n'
+        '      elif [ ! -e launching ]; then\n'
+        '        load_state=$(systemctl --user show "$unit" --property=LoadState --value 2>/dev/null) || {\n'
+        '          printf "could not prove dispatcher absence: %s\\n" "$unit" >&2\n'
+        '          exit 4\n'
+        '        }\n'
+        '        if [ "$load_state" = not-found ]; then\n'
+        '          date +%s > finished\n'
+        '          printf "dispatcher was never registered: %s\\n" "$unit"\n'
+        '        else\n'
+        '          printf "could not stop dispatcher in state %s: %s\\n" "$load_state" "$unit" >&2\n'
+        '          exit 4\n'
+        '        fi\n'
         '      else\n'
         '        printf "could not stop or prove inactive: %s\\n" "$unit" >&2\n'
         '        exit 4\n'
@@ -1194,15 +1206,22 @@ def render_cancel(run_dir: str) -> str:
     )
 
 
-def upload_tree(host: Host, files: dict[str, str]) -> None:
+def upload_tree(
+    host: Host,
+    files: dict[str, str],
+    data_files: dict[str, str] | None = None,
+) -> None:
     """Write generated scripts remotely in one SSH round trip."""
+    data_files = data_files or {}
+    all_files = {**files, **data_files}
     parts = ["set -eu"]
-    directories = sorted({str(Path(path).parent) for path in files})
+    directories = sorted({str(Path(path).parent) for path in all_files})
     parts.append("mkdir -p " + " ".join(shlex.quote(d) for d in directories))
-    for path, content in files.items():
+    for path, content in all_files.items():
         marker = "CI_REMOTE_EOF"
         parts.append(f"cat > {shlex.quote(path)} <<'{marker}'\n{content}{marker}")
-        parts.append(f"chmod +x {shlex.quote(path)}")
+        if path in files:
+            parts.append(f"chmod +x {shlex.quote(path)}")
     ssh_run(host, "\n".join(parts))
 
 
@@ -1505,7 +1524,11 @@ def cmd_run(args: argparse.Namespace) -> int:
                 )
         parallel = args.parallel or host.parallel
         files[f"{run_dir}/dispatch.sh"] = render_dispatch(run_dir, waves, parallel)
-        upload_tree(host, files)
+        upload_tree(
+            host,
+            files,
+            {f"{run_dir}/dispatch.unit": dispatch_unit(run_dir) + "\n"},
+        )
     except BaseException:
         release_claim(host, run_dir)
         raise

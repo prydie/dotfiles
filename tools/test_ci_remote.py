@@ -863,6 +863,97 @@ class LaunchTest(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertFalse((root / "finished").exists())
 
+    def test_cancel_releases_claim_after_pre_execution_transport_failure(self) -> None:
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        root = Path(temporary.name)
+        fake_bin = root / "bin"
+        fake_bin.mkdir()
+        (root / "dispatch.unit").write_text(
+            ci.dispatch_unit(str(root)), encoding="utf-8"
+        )
+        systemctl = fake_bin / "systemctl"
+        systemctl.write_text(
+            "#!/bin/sh\n"
+            "case \"$*\" in\n"
+            "  *' stop '*) exit 5 ;;\n"
+            "  *'--property=LoadState'*) printf 'not-found\\n'; exit 0 ;;\n"
+            "esac\n"
+            "exit 1\n",
+            encoding="utf-8",
+        )
+        systemctl.chmod(0o755)
+
+        result = subprocess.run(
+            ["bash", "-s"],
+            input=ci.render_cancel(str(root)),
+            text=True,
+            capture_output=True,
+            check=False,
+            env={**os.environ, "PATH": f"{fake_bin}:{os.environ['PATH']}"},
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue((root / "finished").exists())
+
+    def test_cancel_does_not_release_claim_when_unit_absence_is_unproven(self) -> None:
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        root = Path(temporary.name)
+        fake_bin = root / "bin"
+        fake_bin.mkdir()
+        (root / "dispatch.unit").write_text(
+            ci.dispatch_unit(str(root)), encoding="utf-8"
+        )
+        systemctl = fake_bin / "systemctl"
+        systemctl.write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
+        systemctl.chmod(0o755)
+
+        result = subprocess.run(
+            ["bash", "-s"],
+            input=ci.render_cancel(str(root)),
+            text=True,
+            capture_output=True,
+            check=False,
+            env={**os.environ, "PATH": f"{fake_bin}:{os.environ['PATH']}"},
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse((root / "finished").exists())
+
+    def test_cancel_does_not_release_claim_when_unit_exists(self) -> None:
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        root = Path(temporary.name)
+        fake_bin = root / "bin"
+        fake_bin.mkdir()
+        (root / "dispatch.unit").write_text(
+            ci.dispatch_unit(str(root)), encoding="utf-8"
+        )
+        systemctl = fake_bin / "systemctl"
+        systemctl.write_text(
+            "#!/bin/sh\n"
+            "case \"$*\" in\n"
+            "  *' stop '*) exit 5 ;;\n"
+            "  *'--property=LoadState'*) printf 'loaded\\n'; exit 0 ;;\n"
+            "esac\n"
+            "exit 1\n",
+            encoding="utf-8",
+        )
+        systemctl.chmod(0o755)
+
+        result = subprocess.run(
+            ["bash", "-s"],
+            input=ci.render_cancel(str(root)),
+            text=True,
+            capture_output=True,
+            check=False,
+            env={**os.environ, "PATH": f"{fake_bin}:{os.environ['PATH']}"},
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse((root / "finished").exists())
+
     def test_detached_launcher_loss_after_registration_remains_cancellable(self) -> None:
         self.require_systemd_user()
         temporary = tempfile.TemporaryDirectory()
@@ -1545,6 +1636,19 @@ class UploadTest(unittest.TestCase):
             self.assertTrue(written.exists(), path)
             self.assertEqual(written.read_text(encoding="utf-8"), content)
             self.assertTrue(os.access(written, os.X_OK), path)
+
+    def test_records_unit_identity_as_data_before_launch(self) -> None:
+        target = self.root / "remote" / "runs" / "1"
+        unit_path = target / "dispatch.unit"
+        unit = ci.dispatch_unit(str(target))
+        ci.upload_tree(
+            ci.Host(name="h", ssh="h"),
+            {f"{target}/dispatch.sh": "#!/bin/sh\ntrue\n"},
+            {str(unit_path): unit + "\n"},
+        )
+
+        self.assertEqual(unit_path.read_text(encoding="utf-8"), unit + "\n")
+        self.assertFalse(os.access(unit_path, os.X_OK))
 
     def test_preserves_shell_metacharacters_in_step_bodies(self) -> None:
         target = self.root / "remote"
