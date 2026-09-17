@@ -12,6 +12,7 @@ import time
 import unittest
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
+from unittest import mock
 
 SCRIPT = Path(__file__).parents[1] / "bin" / "ci-remote"
 
@@ -569,10 +570,12 @@ class LaunchTest(unittest.TestCase):
         self.assertIn("systemd-run --user --quiet --collect", launch)
         self.assertIn("--property=KillMode=control-group", launch)
         self.assertIn("--property=TimeoutStopSec=1s", launch)
+        self.assertIn("--property=ExecStopPost=", launch)
         self.assertNotIn("--wait", launch)
         self.assertIn("/r/runs/1/dispatch.sh", launch)
         self.assertIn("< /dev/null", launch)
-        self.assertTrue(launch.rstrip().endswith("exit 0"))
+        self.assertIn(": > launching", launch)
+        self.assertIn("mv dispatch.unit.new dispatch.unit", launch)
         self.assertEqual(
             subprocess.run(["bash", "-n"], input=launch, text=True).returncode, 0
         )
@@ -596,6 +599,30 @@ class LaunchTest(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0)
         self.assertFalse((root / "done").exists(), "dispatcher should still run")
+
+    def test_detached_systemd_failure_propagates(self) -> None:
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        root = Path(temporary.name)
+        fake_bin = root / "bin"
+        fake_bin.mkdir()
+        (root / "dispatch.sh").write_text("true\n", encoding="utf-8")
+        systemd_run = fake_bin / "systemd-run"
+        systemd_run.write_text("#!/bin/sh\nexit 12\n", encoding="utf-8")
+        systemd_run.chmod(0o755)
+
+        result = subprocess.run(
+            ["bash", "-s"],
+            input=ci.render_launch(str(root)),
+            text=True,
+            capture_output=True,
+            check=False,
+            env={**os.environ, "PATH": f"{fake_bin}:{os.environ['PATH']}"},
+        )
+
+        self.assertEqual(result.returncode, 12)
+        self.assertFalse((root / "dispatch.unit").exists())
+        self.assertTrue((root / "finished").exists())
 
     def test_attached_job_uses_the_same_transient_service_boundary(self) -> None:
         launch = ci.render_attached_launch("/r/runs/1", "Unit")
@@ -650,6 +677,11 @@ class LaunchTest(unittest.TestCase):
                 Path(f"/proc/{pid}").exists(),
                 "daemonized descendant survived the completed run",
             )
+            for _ in range(40):
+                if (root / "finished").exists():
+                    break
+                time.sleep(0.05)
+            self.assertTrue((root / "finished").exists())
         finally:
             if pid is not None and Path(f"/proc/{pid}").exists():
                 os.kill(pid, signal.SIGKILL)
@@ -760,9 +792,141 @@ class LaunchTest(unittest.TestCase):
                 Path(f"/proc/{pid}").exists(),
                 "daemonized descendant survived the job timeout",
             )
+            self.assertTrue((run_dir / "finished").exists())
         finally:
             if pid is not None and Path(f"/proc/{pid}").exists():
                 os.kill(pid, signal.SIGKILL)
+
+    def test_attached_client_loss_does_not_finish_a_live_job(self) -> None:
+        self.require_systemd_user()
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        root = Path(temporary.name)
+        job_dir = root / "J"
+        job_dir.mkdir()
+        started = root / "started"
+        (job_dir / "run.sh").write_text(
+            f"date +%s > {started}\n"
+            "sleep 1\n"
+            f"printf '0 1 2\\n' > {root}/J.rc\n",
+            encoding="utf-8",
+        )
+        script = root / "attached.sh"
+        script.write_text(ci.render_attached_launch(str(root), "J"), encoding="utf-8")
+        process = subprocess.Popen(
+            ["bash", str(script)],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+        try:
+            for _ in range(40):
+                if started.exists():
+                    break
+                time.sleep(0.05)
+            self.assertTrue(started.exists())
+            os.killpg(process.pid, signal.SIGTERM)
+            process.wait(timeout=2)
+            self.assertFalse(
+                (root / "finished").exists(),
+                "client loss must not release a workspace while its job runs",
+            )
+            for _ in range(60):
+                if (root / "finished").exists():
+                    break
+                time.sleep(0.05)
+            self.assertTrue((root / "finished").exists())
+        finally:
+            subprocess.run(
+                ["systemctl", "--user", "stop", ci.dispatch_unit(str(root))],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+            )
+
+    def test_cancel_during_unit_registration_does_not_mark_finished(self) -> None:
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        root = Path(temporary.name)
+        (root / "launching").write_text("", encoding="utf-8")
+
+        result = subprocess.run(
+            ["bash", "-s"],
+            input=ci.render_cancel(str(root)),
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse((root / "finished").exists())
+
+
+class RemoteServiceManagerTest(unittest.TestCase):
+    def test_rejects_a_remote_account_without_linger(self) -> None:
+        host = ci.Host(name="box", ssh="box")
+        probe = subprocess.CompletedProcess([], 0, stdout="remote-user\nno\n259\n")
+        with mock.patch.object(ci, "ssh_run", return_value=probe):
+            with self.assertRaises(ci.Error) as caught:
+                ci.check_remote_service_manager(host)
+
+        message = str(caught.exception)
+        self.assertIn("loginctl enable-linger remote-user", message)
+        self.assertIn("did not claim or sync", message)
+
+    def test_accepts_a_persistent_remote_user_manager(self) -> None:
+        host = ci.Host(name="box", ssh="box")
+        probe = subprocess.CompletedProcess([], 0, stdout="remote-user\nyes\n259\n")
+        with mock.patch.object(ci, "ssh_run", return_value=probe):
+            ci.check_remote_service_manager(host)
+
+    def test_run_rejects_linger_before_claim_or_sync(self) -> None:
+        host = ci.Host(name="box", ssh="box")
+        job = ci.Job(
+            key="Unit",
+            name="Unit",
+            timeout_minutes=None,
+            needs=[],
+            steps=[],
+            env={},
+            working_directory=None,
+            continue_on_error=False,
+            skipped_uses=[],
+            notes=[],
+        )
+        job.steps.append(
+            ci.Step(1, "test", "true", "bash", {}, None, False)
+        )
+        args = mock.Mock(
+            host=None,
+            workflow=None,
+            job=[],
+            force=False,
+            take_workspace=False,
+            verbose=False,
+            parallel=None,
+            detach=False,
+        )
+        with (
+            mock.patch.object(ci, "resolve_host", return_value=host),
+            mock.patch.object(ci, "repo_root_of", return_value=Path("/repo")),
+            mock.patch.object(ci, "discover_workflow", return_value=Path("/repo/ci.yml")),
+            mock.patch.object(ci, "parse_workflow", return_value=[job]),
+            mock.patch.object(ci, "remote_root", return_value="/srv/ci"),
+            mock.patch.object(ci, "head_description", return_value="abc"),
+            mock.patch.object(
+                ci,
+                "check_remote_service_manager",
+                side_effect=ci.Error("linger is disabled"),
+            ),
+            mock.patch.object(ci, "claim_workspace") as claim,
+            mock.patch.object(ci, "sync_workspace") as sync,
+        ):
+            with self.assertRaises(ci.Error):
+                ci.cmd_run(args)
+
+        claim.assert_not_called()
+        sync.assert_not_called()
 
 
 class PruneTest(unittest.TestCase):
