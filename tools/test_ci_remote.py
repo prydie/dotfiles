@@ -607,6 +607,8 @@ class LaunchTest(unittest.TestCase):
         fake_bin = root / "bin"
         fake_bin.mkdir()
         (root / "dispatch.sh").write_text("true\n", encoding="utf-8")
+        (root / "lifecycle.v2").write_text("", encoding="utf-8")
+        (root / "prepared").write_text("", encoding="utf-8")
         systemd_run = fake_bin / "systemd-run"
         systemd_run.write_text("#!/bin/sh\nexit 12\n", encoding="utf-8")
         systemd_run.chmod(0o755)
@@ -623,6 +625,110 @@ class LaunchTest(unittest.TestCase):
         self.assertEqual(result.returncode, 12)
         self.assertTrue((root / "dispatch.unit").exists())
         self.assertTrue((root / "finished").exists())
+
+    def test_replayed_launch_cannot_finish_an_active_service(self) -> None:
+        self.require_systemd_user()
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        root = Path(temporary.name)
+        started = root / "started"
+        (root / "dispatch.sh").write_text(
+            f"date +%s > {started}\nsleep 60\n", encoding="utf-8"
+        )
+        (root / "lifecycle.v2").write_text("", encoding="utf-8")
+        (root / "prepared").write_text("", encoding="utf-8")
+        self.addCleanup(
+            subprocess.run,
+            ["systemctl", "--user", "stop", ci.dispatch_unit(str(root))],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+        first = subprocess.run(
+            ["bash", "-s"],
+            input=ci.render_launch(str(root)),
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=3,
+        )
+        self.assertEqual(first.returncode, 0, first.stderr)
+        for _ in range(40):
+            if started.exists():
+                break
+            time.sleep(0.05)
+        self.assertTrue(started.exists())
+
+        replay = subprocess.run(
+            ["bash", "-s"],
+            input=ci.render_launch(str(root)),
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=3,
+        )
+
+        self.assertNotEqual(replay.returncode, 0)
+        self.assertFalse((root / "finished").exists())
+        self.assertEqual(
+            subprocess.run(
+                [
+                    "systemctl",
+                    "--user",
+                    "is-active",
+                    ci.dispatch_unit(str(root)),
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+            ).returncode,
+            0,
+        )
+        cancelled = subprocess.run(
+            ["bash", "-s"],
+            input=ci.render_cancel(str(root)),
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=3,
+        )
+        self.assertEqual(cancelled.returncode, 0, cancelled.stderr)
+        self.assertTrue((root / "finished").exists())
+
+    def test_failed_registration_preserves_claim_when_unit_may_exist(self) -> None:
+        for name, show_body in (
+            ("loaded", "printf 'loaded\\n'"),
+            ("unproven", "exit 1"),
+        ):
+            with self.subTest(name=name):
+                temporary = tempfile.TemporaryDirectory()
+                self.addCleanup(temporary.cleanup)
+                root = Path(temporary.name)
+                fake_bin = root / "bin"
+                fake_bin.mkdir()
+                (root / "dispatch.sh").write_text("true\n", encoding="utf-8")
+                (root / "lifecycle.v2").write_text("", encoding="utf-8")
+                (root / "prepared").write_text("", encoding="utf-8")
+                systemd_run = fake_bin / "systemd-run"
+                systemd_run.write_text("#!/bin/sh\nexit 12\n", encoding="utf-8")
+                systemd_run.chmod(0o755)
+                systemctl = fake_bin / "systemctl"
+                systemctl.write_text(
+                    f"#!/bin/sh\n{show_body}\n", encoding="utf-8"
+                )
+                systemctl.chmod(0o755)
+
+                result = subprocess.run(
+                    ["bash", "-s"],
+                    input=ci.render_launch(str(root)),
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                    env={**os.environ, "PATH": f"{fake_bin}:{os.environ['PATH']}"},
+                )
+
+                self.assertNotEqual(result.returncode, 0)
+                self.assertFalse((root / "finished").exists())
 
     def test_attached_job_uses_the_same_transient_service_boundary(self) -> None:
         launch = ci.render_attached_launch("/r/runs/1", "Unit")

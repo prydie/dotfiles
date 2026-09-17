@@ -1101,6 +1101,8 @@ def render_launch(run_dir: str) -> str:
         "exec {lifecycle_fd}> lifecycle.lock\n"
         'flock "$lifecycle_fd"\n'
         'if [ -e cancelled ]; then printf "run was cancelled before launch\\n" >&2; exit 4; fi\n'
+        'if [ -e lifecycle.v2 ] && [ ! -e prepared ]; then printf "run is not prepared for launch\\n" >&2; exit 4; fi\n'
+        "rm -f prepared\n"
         f"printf %s {shlex.quote(unit)} > dispatch.unit\n"
         ": > launching\n"
         "trap 'rm -f launching' EXIT\n"
@@ -1108,8 +1110,17 @@ def render_launch(run_dir: str) -> str:
         f"{command} < /dev/null\n"
         "rc=$?\n"
         "set -e\n"
-        "rm -f prepared\n"
-        'if [ "$rc" -ne 0 ]; then date +%s > finished; exit "$rc"; fi\n'
+        'if [ "$rc" -ne 0 ]; then\n'
+        '  load_state=$(systemctl --user show '
+        f'{shlex.quote(unit)} --property=LoadState --value 2>/dev/null) || load_state=\n'
+        '  if [ "$load_state" = not-found ]; then\n'
+        '    date +%s > finished\n'
+        '  else\n'
+        '    printf "service registration failed but unit absence is unproven: %s\\n" '
+        f'{shlex.quote(unit)} >&2\n'
+        '  fi\n'
+        '  exit "$rc"\n'
+        'fi\n'
         "rm -f launching\n"
         "trap - EXIT\n"
         'flock -u "$lifecycle_fd"\n'
@@ -1132,6 +1143,8 @@ def render_attached_launch(run_dir: str, job_key: str) -> str:
         "exec {lifecycle_fd}> lifecycle.lock\n"
         'flock "$lifecycle_fd"\n'
         'if [ -e cancelled ]; then printf "run was cancelled before launch\\n" >&2; exit 4; fi\n'
+        'if [ -e lifecycle.v2 ] && [ ! -e prepared ]; then printf "run is not prepared for launch\\n" >&2; exit 4; fi\n'
+        "rm -f prepared\n"
         f"printf %s {shlex.quote(unit)} > dispatch.unit\n"
         ": > launching\n"
         "trap 'rm -f launching' EXIT\n"
@@ -1140,8 +1153,17 @@ def render_attached_launch(run_dir: str, job_key: str) -> str:
         f"{command}\n"
         "rc=$?\n"
         "set -e\n"
-        "rm -f prepared\n"
-        'if [ "$rc" -ne 0 ]; then date +%s > finished; exit "$rc"; fi\n'
+        'if [ "$rc" -ne 0 ]; then\n'
+        '  load_state=$(systemctl --user show '
+        f'{shlex.quote(unit)} --property=LoadState --value 2>/dev/null) || load_state=\n'
+        '  if [ "$load_state" = not-found ]; then\n'
+        '    date +%s > finished\n'
+        '  else\n'
+        '    printf "service registration failed but unit absence is unproven: %s\\n" '
+        f'{shlex.quote(unit)} >&2\n'
+        '  fi\n'
+        '  exit "$rc"\n'
+        'fi\n'
         "rm -f launching\n"
         "trap - EXIT\n"
         'flock -u "$lifecycle_fd"\n'
