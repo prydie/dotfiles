@@ -896,6 +896,68 @@ class LaunchTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertTrue((root / "finished").exists())
 
+    def test_cancel_before_delayed_launch_prevents_service_registration(self) -> None:
+        self.require_systemd_user()
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        root = Path(temporary.name)
+        started = root / "started"
+        (root / "dispatch.sh").write_text(
+            f"date +%s > {started}\nsleep 60\n", encoding="utf-8"
+        )
+        (root / "dispatch.unit").write_text(
+            ci.dispatch_unit(str(root)), encoding="utf-8"
+        )
+        (root / "prepared").write_text("", encoding="utf-8")
+        launch = root / "launch.sh"
+        launch.write_text(
+            "sleep 0.3\n" + ci.render_launch(str(root)), encoding="utf-8"
+        )
+        launcher = subprocess.Popen(
+            ["bash", str(launch)],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+        try:
+            cancelled = subprocess.run(
+                ["bash", "-s"],
+                input=ci.render_cancel(str(root)),
+                text=True,
+                capture_output=True,
+                check=False,
+                timeout=3,
+            )
+            self.assertEqual(cancelled.returncode, 0, cancelled.stderr)
+            self.assertNotEqual(launcher.wait(timeout=3), 0)
+            self.assertTrue((root / "cancelled").exists())
+            self.assertTrue((root / "finished").exists())
+            self.assertFalse(started.exists())
+            load_state = subprocess.run(
+                [
+                    "systemctl",
+                    "--user",
+                    "show",
+                    ci.dispatch_unit(str(root)),
+                    "--property=LoadState",
+                    "--value",
+                ],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(load_state.stdout.strip(), "not-found")
+        finally:
+            if launcher.poll() is None:
+                os.killpg(launcher.pid, signal.SIGKILL)
+                launcher.wait(timeout=2)
+            subprocess.run(
+                ["systemctl", "--user", "stop", ci.dispatch_unit(str(root))],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+            )
+
     def test_cancel_does_not_release_claim_when_unit_absence_is_unproven(self) -> None:
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
@@ -953,6 +1015,67 @@ class LaunchTest(unittest.TestCase):
 
         self.assertNotEqual(result.returncode, 0)
         self.assertFalse((root / "finished").exists())
+
+    def test_cancel_recovers_after_launcher_dies_during_registration(self) -> None:
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        root = Path(temporary.name)
+        fake_bin = root / "bin"
+        fake_bin.mkdir()
+        (root / "dispatch.sh").write_text("true\n", encoding="utf-8")
+        (root / "dispatch.unit").write_text(
+            ci.dispatch_unit(str(root)), encoding="utf-8"
+        )
+        (root / "lifecycle.v2").write_text("", encoding="utf-8")
+        (root / "prepared").write_text("", encoding="utf-8")
+        systemd_run = fake_bin / "systemd-run"
+        systemd_run.write_text("#!/bin/sh\nsleep 60\n", encoding="utf-8")
+        systemd_run.chmod(0o755)
+        systemctl = fake_bin / "systemctl"
+        systemctl.write_text(
+            "#!/bin/sh\n"
+            "case \"$*\" in\n"
+            "  *' stop '*) exit 5 ;;\n"
+            "  *'--property=LoadState'*) printf 'not-found\\n'; exit 0 ;;\n"
+            "esac\n"
+            "exit 1\n",
+            encoding="utf-8",
+        )
+        systemctl.chmod(0o755)
+        environment = {**os.environ, "PATH": f"{fake_bin}:{os.environ['PATH']}"}
+        launcher = subprocess.Popen(
+            ["bash", "-s"],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            env=environment,
+            start_new_session=True,
+        )
+        assert launcher.stdin is not None
+        launcher.stdin.write(ci.render_launch(str(root)))
+        launcher.stdin.close()
+        for _ in range(40):
+            if (root / "launching").exists():
+                break
+            time.sleep(0.05)
+        self.assertTrue((root / "launching").exists())
+        os.killpg(launcher.pid, signal.SIGKILL)
+        launcher.wait(timeout=2)
+
+        cancelled = subprocess.run(
+            ["bash", "-s"],
+            input=ci.render_cancel(str(root)),
+            text=True,
+            capture_output=True,
+            check=False,
+            env=environment,
+        )
+
+        self.assertEqual(cancelled.returncode, 0, cancelled.stderr)
+        self.assertFalse((root / "launching").exists())
+        self.assertTrue((root / "cancelled").exists())
+        self.assertTrue((root / "finished").exists())
 
     def test_detached_launcher_loss_after_registration_remains_cancellable(self) -> None:
         self.require_systemd_user()
@@ -1644,11 +1767,17 @@ class UploadTest(unittest.TestCase):
         ci.upload_tree(
             ci.Host(name="h", ssh="h"),
             {f"{target}/dispatch.sh": "#!/bin/sh\ntrue\n"},
-            {str(unit_path): unit + "\n"},
+            {
+                str(unit_path): unit + "\n",
+                f"{target}/lifecycle.v2": "",
+                f"{target}/prepared": "",
+            },
         )
 
         self.assertEqual(unit_path.read_text(encoding="utf-8"), unit + "\n")
         self.assertFalse(os.access(unit_path, os.X_OK))
+        self.assertTrue((target / "lifecycle.v2").exists())
+        self.assertTrue((target / "prepared").exists())
 
     def test_preserves_shell_metacharacters_in_step_bodies(self) -> None:
         target = self.root / "remote"

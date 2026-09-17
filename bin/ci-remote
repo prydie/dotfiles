@@ -1098,6 +1098,9 @@ def render_launch(run_dir: str) -> str:
     return (
         "set -e\n"
         f"cd {quoted}\n"
+        "exec {lifecycle_fd}> lifecycle.lock\n"
+        'flock "$lifecycle_fd"\n'
+        'if [ -e cancelled ]; then printf "run was cancelled before launch\\n" >&2; exit 4; fi\n'
         f"printf %s {shlex.quote(unit)} > dispatch.unit\n"
         ": > launching\n"
         "trap 'rm -f launching' EXIT\n"
@@ -1105,7 +1108,11 @@ def render_launch(run_dir: str) -> str:
         f"{command} < /dev/null\n"
         "rc=$?\n"
         "set -e\n"
+        "rm -f prepared\n"
         'if [ "$rc" -ne 0 ]; then date +%s > finished; exit "$rc"; fi\n'
+        "rm -f launching\n"
+        "trap - EXIT\n"
+        'flock -u "$lifecycle_fd"\n'
     )
 
 
@@ -1122,6 +1129,9 @@ def render_attached_launch(run_dir: str, job_key: str) -> str:
     return (
         "set -e\n"
         f"cd {shlex.quote(run_dir)}\n"
+        "exec {lifecycle_fd}> lifecycle.lock\n"
+        'flock "$lifecycle_fd"\n'
+        'if [ -e cancelled ]; then printf "run was cancelled before launch\\n" >&2; exit 4; fi\n'
         f"printf %s {shlex.quote(unit)} > dispatch.unit\n"
         ": > launching\n"
         "trap 'rm -f launching' EXIT\n"
@@ -1130,7 +1140,11 @@ def render_attached_launch(run_dir: str, job_key: str) -> str:
         f"{command}\n"
         "rc=$?\n"
         "set -e\n"
+        "rm -f prepared\n"
         'if [ "$rc" -ne 0 ]; then date +%s > finished; exit "$rc"; fi\n'
+        "rm -f launching\n"
+        "trap - EXIT\n"
+        'flock -u "$lifecycle_fd"\n'
         "main_pid=0\n"
         "for _ in $(seq 1 100); do\n"
         f"  main_pid=$(systemctl --user show {shlex.quote(unit)} "
@@ -1157,12 +1171,22 @@ def render_cancel(run_dir: str) -> str:
     """Stop a run, including descendants that changed session or process group."""
     return (
         f"cd {shlex.quote(run_dir)} 2>/dev/null || exit 3\n"
+        "exec {lifecycle_fd}> lifecycle.lock\n"
+        'flock "$lifecycle_fd"\n'
+        'if [ -e lifecycle.v2 ] && [ -e launching ]; then rm -f launching; fi\n'
+        'if [ -e cancelled ]; then\n'
+        '  [ -e finished ] || { printf "cancelled run has no completion marker\\n" >&2; exit 4; }\n'
+        '  printf "dispatcher already cancelled\\n"\n'
+        '  exit 0\n'
+        'fi\n'
         'if [ -e dispatch.unit ]; then\n'
         '  unit=$(cat dispatch.unit)\n'
         '  case "$unit" in\n'
         '    ci-remote-[0-9a-f]*.service)\n'
         '      if systemctl --user stop "$unit" 2>/dev/null; then\n'
         '        [ -e finished ] || { printf "service stopped without a completion marker\\n" >&2; exit 4; }\n'
+        '        : > cancelled\n'
+        '        rm -f prepared launching\n'
         '        printf "stopped %s\\n" "$unit"\n'
         '      elif [ -e finished ]; then\n'
         '        printf "dispatcher already inactive\\n"\n'
@@ -1172,6 +1196,8 @@ def render_cancel(run_dir: str) -> str:
         '          exit 4\n'
         '        }\n'
         '        if [ "$load_state" = not-found ]; then\n'
+        '          : > cancelled\n'
+        '          rm -f prepared launching\n'
         '          date +%s > finished\n'
         '          printf "dispatcher was never registered: %s\\n" "$unit"\n'
         '        else\n'
@@ -1527,7 +1553,11 @@ def cmd_run(args: argparse.Namespace) -> int:
         upload_tree(
             host,
             files,
-            {f"{run_dir}/dispatch.unit": dispatch_unit(run_dir) + "\n"},
+            {
+                f"{run_dir}/dispatch.unit": dispatch_unit(run_dir) + "\n",
+                f"{run_dir}/lifecycle.v2": "",
+                f"{run_dir}/prepared": "",
+            },
         )
     except BaseException:
         release_claim(host, run_dir)
