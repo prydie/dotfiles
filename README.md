@@ -563,6 +563,44 @@ This stores/loads:
 - `config/gnome/clipboard-indicator.dconf`
 - `config/gnome/caffeine.dconf`
 
+## Bluetooth headsets (A2DP only)
+
+[config/wireplumber/wireplumber.conf.d/51-bluetooth-no-headset-autoswitch.conf](config/wireplumber/wireplumber.conf.d/51-bluetooth-no-headset-autoswitch.conf)
+turns off WirePlumber's automatic switch to the HSP/HFP headset profile, so
+Bluetooth devices stay on A2DP.
+
+WirePlumber normally switches a Bluetooth device to the headset profile as soon
+as an application opens its microphone. That profile carries audio over a SCO
+link, and each switch renegotiates the link while audio is streaming. An
+application that holds the microphone open pins the device in the headset
+profile. Chrome does this — it can leave capture streams running after a call
+ends — and WirePlumber then persists the headset profile as both the default
+and the profile to restore *after* a call:
+
+```
+~/.local/state/wireplumber/default-profile        bluez_card...=headset-head-unit
+~/.local/state/wireplumber/bluetooth-autoswitch   saved-headset-profile:...=headset-head-unit
+```
+
+The device never returns to A2DP, every later connection starts in the headset
+profile, and playback stutters badly in video calls.
+
+The trade-off is that Bluetooth microphones are unavailable. Pick a built-in or
+USB microphone for calls.
+
+To recover a device already stuck in the headset profile, clear the persisted
+state and reconnect:
+
+```bash
+systemctl --user stop wireplumber
+sed -i '/<card-name>/d' ~/.local/state/wireplumber/default-profile \
+                        ~/.local/state/wireplumber/bluetooth-autoswitch
+systemctl --user start wireplumber
+bluetoothctl disconnect <mac> && bluetoothctl connect <mac>
+```
+
+Check the result with `wpctl status`; the device should report an A2DP profile.
+
 ## Kubernetes installers (no `curl | bash`)
 
 Fast-moving CLI tools are managed centrally in [config/mise/config.toml](config/mise/config.toml)
