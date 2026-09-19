@@ -1,0 +1,1 @@
+../../../Notes/Nscale/Agents/Global Agent Notes.md
