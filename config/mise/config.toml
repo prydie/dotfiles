@@ -48,3 +48,4 @@ cosign = "3.1.3"
 helm-docs = "1.14.2"
 terraform = "latest"
 "pipx:sshuttle" = "1.3.2"  # poor man's VPN over SSH
+"npm:opencode-ai" = "1.18.23"  # opencode agentic CLI; a multi-review engine alongside claude and codex

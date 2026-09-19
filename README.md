@@ -596,6 +596,29 @@ Helm, `kubebuilder`, `kind`, `gh`, `tuicr`, `kubectx`, `kubens`, `promtool`, `aw
 The repo-managed [config/mise/config.toml](config/mise/config.toml) is linked to `~/.config/mise/config.toml`, and the hooks pass `MISE_GLOBAL_CONFIG_FILE` so tools install even before the config is linked.
 Vale's global config lives at `~/.config/vale/vale.ini` and setup runs `vale sync` to install the configured style packages.
 
+### opencode
+
+[opencode](https://opencode.ai) is pinned in the mise config like any other CLI,
+but its npm package installs in two stages: the tarball ships a launcher whose
+postinstall script downloads the real platform binary, and mise's npm backend
+installs with `--ignore-scripts`. A plain `mise install` therefore leaves an
+`opencode` on `PATH` that refuses to start. `tools::finish_opencode_install` in
+[hooks/os](hooks/os) runs the missing step. It is idempotent and keys off the
+binary rather than a marker file, so bumping the pin repairs itself on the next
+`make setup`.
+
+Provider and model selection live in `~/.config/opencode/opencode.jsonc`, which
+is deliberately machine-local and not tracked here — those endpoints are work
+infrastructure and this repo is public. That config reads its credential from
+the environment, so the key belongs in `~/.zshenv.local` (untracked, sourced by
+[zshenv](zshenv)) and never in a file under this repo. Confirm a working setup
+with:
+
+```bash
+opencode run "say hello"
+```
+
+
 ## TLA+ tooling
 
 `PROFILE=dev|full` installs command-line tooling for validating and proving TLA+ models:

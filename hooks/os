@@ -107,6 +107,45 @@ tools::install_mise_tools() {
 
   tools::install_mise
   MISE_GLOBAL_CONFIG_FILE="${config_file}" mise install
+  tools::finish_opencode_install || log::f "opencode postinstall skipped"
+}
+
+# mise's npm backend installs with --ignore-scripts, so any package whose real
+# payload arrives via a postinstall script lands half-installed. opencode-ai is
+# one: npm gets a launcher whose job is to download the platform binary, and
+# without that step every `opencode` invocation exits telling you to run the
+# script by hand. Finish the job here so `make setup` leaves a working CLI.
+#
+# The check is for the binary itself rather than a marker file, so bumping the
+# pin in config/mise/config.toml re-fetches into the new version directory on
+# the next run. The launcher writes bin/opencode.exe on every platform, Linux
+# included -- the .exe suffix is not a Windows-only artefact.
+tools::finish_opencode_install() {
+  local prefix pkg binary
+
+  prefix="$(mise where "npm:opencode-ai" 2>/dev/null)" || return 0
+  [ -n "${prefix}" ] || return 0
+
+  pkg="${prefix}/node_modules/opencode-ai"
+  if [ ! -f "${pkg}/postinstall.mjs" ]; then
+    return 0
+  fi
+
+  binary="${pkg}/bin/opencode.exe"
+  if [ -s "${binary}" ]; then
+    return 0
+  fi
+
+  if ! command -v node >/dev/null 2>&1; then
+    log::e "Cannot finish the opencode install: node not on PATH"
+    return 1
+  fi
+
+  log::f "Downloading the opencode platform binary (mise's npm backend skips postinstall)"
+  if ! (cd "${pkg}" && node postinstall.mjs); then
+    log::e "opencode postinstall failed; 'opencode' will not run until it does"
+    return 1
+  fi
 }
 
 tools::sync_vale_styles() {
