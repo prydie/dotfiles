@@ -30,6 +30,7 @@
 #   lq queries                            list named queries
 #   lq containers                         container names in the current datasource
 #   lq q <name> [args...] [-- logcli-args...]
+#                                         add `-- --tail` to follow
 #   lq completion zsh|bash
 #
 # Everything else: use logcli directly once `lq up` has been eval'd.
@@ -287,6 +288,16 @@ cmd_q() {
     *) passthru=("--quiet" ${passthru+"${passthru[@]}"}) ;;
   esac
   printf '%s: %s\n' "$PROG" "$q" >&2
+
+  # Follow mode must NOT go through the counting filter: awk block-buffers a
+  # pipe, so a slow live stream would deliver nothing until ~4KB accumulated or
+  # the stream ended. A line count is meaningless for an unbounded stream
+  # anyway, and "no lines yet" is the normal state while tailing.
+  case " ${passthru[*]-} " in
+    *" --tail"*|*" -t "*|*" --no-tail"*)
+      exec logcli query ${passthru+"${passthru[@]}"} "$q";;
+  esac
+
   # logcli exits 0 and prints nothing when a query matches nothing, which is
   # indistinguishable from a healthy quiet window. Say so rather than let an
   # empty screen be read as an absence.
