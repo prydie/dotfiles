@@ -1,0 +1,52 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+
+  "permission": {
+    "read": {
+      "*": "allow",
+
+      "*.env": "deny",
+      "*.env.*": "deny",
+      "*.envrc": "deny",
+
+      "*.env.example": "allow",
+      "*.env.sample": "allow",
+      "*.env.template": "allow",
+      "*.env.dist": "allow",
+      "*.env.defaults": "allow",
+      "*.env.schema": "allow",
+      "*env.example": "allow",
+      "*env.sample": "allow",
+      "*env.template": "allow",
+      "*example.env": "allow",
+      "*sample.env": "allow",
+      "*template.env": "allow",
+      "*.envrc.example": "allow"
+    },
+
+    "glob": "allow",
+    "grep": "allow",
+    "webfetch": "allow",
+    "task": "allow",
+    "external_directory": "allow",
+
+    "edit": "deny",
+
+    "bash": {
+      "*": "allow",
+
+      "git push*": "deny",
+      "git commit*": "deny",
+      "git checkout*": "deny",
+      "git reset*": "deny",
+      "git clean*": "deny",
+
+      "gh pr comment*": "deny",
+      "gh pr review*": "deny",
+      "gh pr merge*": "deny",
+      "gh pr edit*": "deny",
+      "gh api -X POST*": "deny",
+      "gh api --method POST*": "deny"
+    }
+  }
+}
