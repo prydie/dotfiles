@@ -1,0 +1,99 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+CONFIG_FILE="${NKS_DEV_CONFIG_FILE:-${XDG_CONFIG_HOME:-${HOME}/.config}/nks-dev/env}"
+
+# Snapshot the knobs before sourcing the config file so explicit environment
+# wins over the file's values.
+_env_clouds="${NKS_DEV_CLOUDS:-}"
+_env_cloud="${NKS_DEV_CLOUD:-}"
+_env_start="${NKS_DEV_TUNNEL_START_CMD:-}"
+_env_skip="${NKS_DEV_SKIP_PROBE:-}"
+
+if [[ -f "${CONFIG_FILE}" ]]; then
+  # shellcheck source=/dev/null
+  source "${CONFIG_FILE}"
+fi
+
+NKS_DEV_CLOUDS="${_env_clouds:-${NKS_DEV_CLOUDS:-}}"
+NKS_DEV_CLOUD="${_env_cloud:-${NKS_DEV_CLOUD:-}}"
+NKS_DEV_TUNNEL_START_CMD="${_env_start:-${NKS_DEV_TUNNEL_START_CMD:-}}"
+NKS_DEV_SKIP_PROBE="${_env_skip:-${NKS_DEV_SKIP_PROBE:-0}}"
+
+usage() {
+  cat <<'EOF'
+Usage: dev-openstack [openstack args...]
+
+Runs the OpenStack CLI against the dev cloud described by a clouds.yaml,
+probing the API first so a dead tunnel or VPN fails fast with a fix hint
+instead of hanging in connect timeouts.
+
+Resolution order for the clouds file:
+  OS_CLIENT_CONFIG_FILE  standard openstack env (wins if set)
+  NKS_DEV_CLOUDS         set in ~/.config/nks-dev/env
+
+Environment:
+  NKS_DEV_CLOUD            cloud name inside the clouds.yaml (default: openstack)
+  NKS_DEV_TUNNEL_START_CMD  printed when the API is unreachable, so the fix is
+                           machine-specific without living in this public repo
+  NKS_DEV_SKIP_PROBE=1     skip the reachability probe
+
+Credentials are whatever the clouds.yaml holds. OS_* passes through untouched,
+so runtime-secret-resolved credentials also work, e.g. with OS_USERNAME and
+OS_PASSWORD pointing at a secrets manager:
+
+  op run -- dev-openstack server list
+EOF
+}
+
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help-wrapper" ]]; then
+  usage
+  exit 0
+fi
+
+command -v openstack >/dev/null 2>&1 || {
+  echo "openstack not found on PATH" >&2
+  exit 1
+}
+
+clouds="${OS_CLIENT_CONFIG_FILE:-${NKS_DEV_CLOUDS:-}}"
+if [[ -z "${clouds}" ]]; then
+  echo "no clouds file: set OS_CLIENT_CONFIG_FILE or NKS_DEV_CLOUDS in ${CONFIG_FILE}" >&2
+  exit 1
+fi
+if [[ ! -f "${clouds}" ]]; then
+  echo "clouds file missing: ${clouds}" >&2
+  exit 1
+fi
+
+cloud="${NKS_DEV_CLOUD:-openstack}"
+
+# Single-cloud assumption: probe the first auth_url in the file. Revisit if a
+# clouds.yaml ever carries several clouds with different endpoints.
+if [[ "${NKS_DEV_SKIP_PROBE:-0}" != "1" ]]; then
+  auth_url=$(awk '/auth_url:/{$0=$2; sub(/^https?:\/\//,""); sub(/\/.*/,""); print; exit}' "${clouds}")
+  hostport="${auth_url}"
+  host="${hostport%%:*}"
+  port="${hostport##*:}"
+  [[ "${port}" == "${hostport}" ]] && port=443
+  probe() {
+    # curl exit 7 = connect refused/unreachable, 28 = timeout; any other code
+    # (TLS or HTTP errors included) still proves the route is up.
+    local rc=0
+    curl -s -o /dev/null --connect-timeout 2 --max-time 3 "https://${host}:${port}/v3" || rc=$?
+    [[ ${rc} -ne 7 && ${rc} -ne 28 ]]
+  }
+  # One retry: an idle NAT'd route can stall the first connection while the
+  # transport recovers; a genuine outage fails both attempts.
+  if ! { probe; } 2>/dev/null && ! { sleep 1; probe; } 2>/dev/null; then
+    echo "OpenStack API ${host}:${port} unreachable — route down?" >&2
+    if [[ -n "${NKS_DEV_TUNNEL_START_CMD:-}" ]]; then
+      echo "start it: ${NKS_DEV_TUNNEL_START_CMD}" >&2
+    else
+      echo "start your route to the API and retry" >&2
+    fi
+    exit 1
+  fi
+fi
+
+exec env OS_CLIENT_CONFIG_FILE="${clouds}" OS_CLOUD="${cloud}" openstack "$@"

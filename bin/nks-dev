@@ -82,7 +82,7 @@ NKS_DEV_REGISTRY_NAME=nks-dev-registry
 NKS_DEV_REGISTRY_PORT=5001
 
 # Optional: wrapper command for dev OpenStack checks, for example:
-# NKS_DEV_OPENSTACK_CMD=uni-openstack
+# NKS_DEV_OPENSTACK_CMD=dev-openstack
 
 # Optional: reverse SSH tunnel for dev OpenStack instances that need to reach
 # a service running on this workstation.
