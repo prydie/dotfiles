@@ -48,12 +48,12 @@ agent-session-hooks: ## Register Codex and Claude session checkpoint hooks
 	@python3 bin/agent-sessions install-hooks
 
 .PHONY: ai-skills
-ai-skills: ## Install the mattpocock/skills pilot subset for Claude Code and Codex
+ai-skills: ## Install the third-party skill sources for Claude Code and Codex
 	@bash hooks/os ai-skills
 
 .PHONY: skills
-skills: ## Link this repo's own skills/ into Claude Code and Codex
-	@bash hooks/os local-skills
+skills: ## Link this repo's skills/ and the shared ~/.agents store into Claude Code and Codex
+	@bash hooks/os skills
 
 .PHONY: tla-tools
 tla-tools: ## Install and verify TLA+ validation/proof tooling

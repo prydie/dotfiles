@@ -1114,51 +1114,66 @@ tools::install_codex_superpowers_optional() {
   return 0
 }
 
-# Conservative pilot subset of https://github.com/mattpocock/skills, installed
-# globally for both Claude Code and Codex. Every skill here is self-contained:
-# none depend on /setup-matt-pocock-skills, an issue tracker, or triage labels.
-# grill-me and grill-with-docs delegate to grilling; grill-with-docs also uses
-# domain-modeling, so those backing skills are included.
-AI_SKILLS_REPO="${AI_SKILLS_REPO:-mattpocock/skills}"
-AI_SKILLS=(
-  grill-me
-  grilling
-  grill-with-docs
-  domain-modeling
-  diagnosing-bugs
-  resolving-merge-conflicts
-  codebase-design
-  writing-great-skills
-  prototype
-  handoff
-  tdd
-  research
+# Third-party skills, installed globally for both Claude Code and Codex from the
+# shared ~/.agents/skills store. One entry per upstream repo, as
+# "<github repo>:<space-separated skill names>". This array is the source of
+# truth for which third-party skills a machine gets; adding a repo here is the
+# whole change.
+#
+# mattpocock/skills is a conservative pilot subset: every skill listed is
+# self-contained, so none depend on /setup-matt-pocock-skills, an issue tracker,
+# or triage labels. grill-me and grill-with-docs delegate to grilling;
+# grill-with-docs also uses domain-modeling, so those backing skills are listed.
+AI_SKILL_SOURCES=(
+  "mattpocock/skills:grill-me grilling grill-with-docs domain-modeling diagnosing-bugs resolving-merge-conflicts codebase-design writing-great-skills prototype handoff tdd research"
+  "AminBlg/SimpleEnglish:simple-english"
 )
 
 tools::install_ai_skills() {
+  local entry repo skills
+
   if ! command -v npx >/dev/null 2>&1; then
     log::f "Skipping agent skills install: npx not on PATH (use PROFILE=dev|full to install Node)"
     return 0
   fi
 
-  log::f "Installing ${#AI_SKILLS[@]} ${AI_SKILLS_REPO} skills globally for Claude Code and Codex"
-  # skills.sh installs universal skills into the shared ~/.agents/skills store and
-  # symlinks them into ~/.claude/skills for Claude Code. It is not pinned by
-  # design; refresh later with: skills update -g
-  npx -y skills@latest add "${AI_SKILLS_REPO}" \
-    -g --yes \
-    --agent claude-code codex \
-    --skill "${AI_SKILLS[@]}"
+  for entry in "${AI_SKILL_SOURCES[@]}"; do
+    repo="${entry%%:*}"
+    read -r -a skills <<<"${entry#*:}"
 
-  # skills.sh marks Codex a "universal" agent and leaves the skills only in
-  # ~/.agents/skills, but codex-cli (0.145) discovers global skills under
-  # ${CODEX_HOME}/skills. Bridge them with the same relative symlinks skills.sh
-  # uses for Claude Code so both agents read one source of truth.
-  tools::link_ai_skills_into_codex
+    if [ "${#skills[@]}" -eq 0 ]; then
+      log::e "Skipping ${repo}: no skills listed in AI_SKILL_SOURCES"
+      continue
+    fi
+
+    log::f "Installing ${#skills[@]} ${repo} skill(s) globally for Claude Code and Codex"
+    # skills.sh installs universal skills into the shared ~/.agents/skills store
+    # and symlinks them into ~/.claude/skills for Claude Code. It is not pinned
+    # by design; refresh later with: skills update -g
+    npx -y skills@latest add "${repo}" \
+      -g --yes \
+      --agent claude-code codex \
+      --skill "${skills[@]}"
+  done
+
+  tools::link_shared_skills_into_codex
 }
 
-tools::link_ai_skills_into_codex() {
-  local store codex_skills name
+# skills.sh marks Codex a "universal" agent and leaves the skills only in
+# ~/.agents/skills, but codex-cli (0.145) discovers global skills under
+# ${CODEX_HOME}/skills. Bridge the store into Codex so both agents read one copy
+# of every third-party skill.
+#
+# Discovery is a listing of the store rather than a replay of AI_SKILL_SOURCES,
+# deliberately: a skill added by hand with `npx skills add <repo>` reaches Codex
+# on the next run with no list to keep in sync. The store wins a name collision
+# with a skill authored here, which is the same precedence
+# tools::install_local_skills applies.
+#
+# Needs no npx and no network, so this is safe to run on every profile.
+tools::link_shared_skills_into_codex() {
+  local store codex_skills path name linked=0
+
   store="${HOME}/.agents/skills"
   codex_skills="${CODEX_HOME:-${HOME}/.codex}/skills"
 
@@ -1168,16 +1183,57 @@ tools::link_ai_skills_into_codex() {
   fi
 
   mkdir -p "${codex_skills}"
-  for name in "${AI_SKILLS[@]}"; do
-    if [ ! -e "${store}/${name}" ]; then
-      log::e "Expected skill ${name} missing from ${store}; skipping Codex link"
+  for path in "${store}"/*/; do
+    [ -d "${path}" ] || continue
+    name="$(basename "${path}")"
+
+    if [ ! -f "${path}SKILL.md" ]; then
+      log::e "Skipping Codex link for ${name}: no SKILL.md in ${store}"
       continue
     fi
-    # ${codex_skills}/${name} and ${store}/${name} are both two levels under
-    # $HOME, so this relative target resolves the same as the Claude Code links.
-    ln -sfn "../../.agents/skills/${name}" "${codex_skills}/${name}"
+
+    # Absolute, unlike the relative links skills.sh writes for Claude Code: the
+    # relative form only resolves while ${codex_skills} sits exactly two levels
+    # under $HOME, which a non-default CODEX_HOME breaks.
+    ln -sfn "${store}/${name}" "${codex_skills}/${name}"
+    linked=$((linked + 1))
   done
-  log::f "Linked ${#AI_SKILLS[@]} skills into ${codex_skills}"
+
+  tools::prune_codex_skill_links "${store}" "${codex_skills}"
+  log::f "Linked ${linked} shared skill(s) into ${codex_skills}"
+}
+
+# A mirror that only ever adds leaves a dangling link behind after
+# `skills remove -g -s <name>`, and Codex then reads a skill directory with no
+# SKILL.md in it. Drop the links this mirror owns once their store entry is gone.
+#
+# Ownership is decided from the raw link target, not a resolved path: the target
+# of a stale link does not exist, so it cannot be resolved. Both the absolute
+# form written above and the relative form the earlier implementation wrote are
+# recognised. Anything else in ${codex_skills} -- a real directory, or a link
+# into this repo's skills/ -- is left alone.
+tools::prune_codex_skill_links() {
+  local store codex_skills path name target pruned=0
+  store="${1}"
+  codex_skills="${2}"
+
+  for path in "${codex_skills}"/*; do
+    [ -L "${path}" ] || continue
+    name="$(basename "${path}")"
+    [ -e "${store}/${name}" ] && continue
+
+    target="$(readlink "${path}")"
+    case "${target}" in
+      "${store}/"* | ../../.agents/skills/*) ;;
+      *) continue ;;
+    esac
+
+    rm -f "${path}"
+    pruned=$((pruned + 1))
+    log::f "Removed Codex link for ${name}: no longer in ${store}"
+  done
+
+  [ "${pruned}" -eq 0 ] || log::f "Pruned ${pruned} stale Codex skill link(s)"
 }
 
 # Skills authored in this repo, as opposed to the third-party set above. The
@@ -1937,8 +1993,17 @@ if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
     ai-skills)
       tools::install_ai_skills
       ;;
+    skills)
+      # Everything both agents should see, with no network: this repo's own
+      # skills plus whatever already sits in the shared ~/.agents store.
+      tools::install_local_skills
+      tools::link_shared_skills_into_codex
+      ;;
     local-skills)
       tools::install_local_skills
+      ;;
+    codex-skill-links)
+      tools::link_shared_skills_into_codex
       ;;
     tmux-plugins)
       tools::install_tmux_plugins
@@ -1969,11 +2034,11 @@ if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
       os::ghostty::install_terminfo
       ;;
     "")
-      echo "No action selected. Use: $0 codex-superpowers | ai-skills | tmux-plugins | tla-tools | verify-tla-tools | full-install | ghostty | bruno | claude | install-dell-dock-fix | ghostty-terminfo"
+      echo "No action selected. Use: $0 codex-superpowers | ai-skills | skills | local-skills | codex-skill-links | tmux-plugins | tla-tools | verify-tla-tools | full-install | ghostty | bruno | claude | install-dell-dock-fix | ghostty-terminfo"
       ;;
     *)
       echo "Unknown action: $1"
-      echo "Usage: $0 codex-superpowers | ai-skills | tmux-plugins | tla-tools | verify-tla-tools | full-install | ghostty | bruno | claude | install-dell-dock-fix | ghostty-terminfo"
+      echo "Usage: $0 codex-superpowers | ai-skills | skills | local-skills | codex-skill-links | tmux-plugins | tla-tools | verify-tla-tools | full-install | ghostty | bruno | claude | install-dell-dock-fix | ghostty-terminfo"
       exit 1
       ;;
   esac

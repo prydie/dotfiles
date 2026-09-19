@@ -51,6 +51,7 @@ make setup
 make codex-sandbox-fix
 make codex-superpowers
 make ai-skills
+make skills
 make tmux-plugins
 make agent-session-hooks
 make tla-tools
@@ -104,6 +105,10 @@ for **both** Claude Code and Codex by `tools::install_local_skills`:
 make skills
 ```
 
+`make skills` is the no-network half of the skill setup: it links the skills
+below *and* mirrors the shared third-party store into Codex (see
+[One store, both agents](#one-store-both-agents)).
+
 The install is a pair of symlinks per skill:
 
 ```
@@ -119,32 +124,38 @@ runs the installer on every profile (it needs no network or Node), so a
 Adding a skill is `mkdir skills/<name>` plus a `SKILL.md`: discovery is a
 directory listing, so there is no manifest to keep in sync. A directory without
 a `SKILL.md` is skipped with a warning, and a name already provided by the
-third-party `~/.agents/skills` store is refused rather than silently
-overridden. `skills` is excluded from rcm in `rcrc` so this installer owns it —
-rcm would otherwise link the directory to `~/.skills`, which neither agent
-reads.
+third-party `~/.agents/skills` store is refused rather than silently overridden
+— the store wins a name collision in both directions. `skills` is excluded from
+rcm in `rcrc` so this installer owns it — rcm would otherwise link the directory
+to `~/.skills`, which neither agent reads.
 
 Agents load skills at startup, so restart Claude Code / Codex to pick up a
 newly added one (an edit to an existing skill's body needs no restart).
 
 Current skills: `ci-remote` (see [Remote CI execution](#remote-ci-execution)).
 
-## Agent skills (mattpocock/skills pilot)
+## Agent skills (third party)
 
-A conservative pilot subset of [`mattpocock/skills`](https://github.com/mattpocock/skills)
-is installed globally for both Claude Code and Codex via the
+Third-party skills are installed globally for both Claude Code and Codex via the
 [skills.sh](https://skills.sh/) installer:
 
 ```bash
 make ai-skills
 ```
 
-The pilot deliberately excludes the skills that require Matt's
-`/setup-matt-pocock-skills` workflow (issue tracker, triage labels, doc layout) —
-`ask-matt`, `code-review`, `to-spec`, `to-tickets`, `triage`, `wayfinder`,
-`implement`, and `improve-codebase-architecture`. Every skill in the pilot is
-self-contained and low blast radius. The subset is the single source of truth in
-the `AI_SKILLS` array in [hooks/os](hooks/os):
+The `AI_SKILL_SOURCES` array in [hooks/os](hooks/os) is the single source of
+truth for which skills a machine gets. Each entry is one upstream repo and the
+skills to take from it, so adding a source is a one-line change:
+
+```bash
+AI_SKILL_SOURCES=(
+  "mattpocock/skills:grill-me grilling grill-with-docs …"
+  "AminBlg/SimpleEnglish:simple-english"
+)
+```
+
+From [`mattpocock/skills`](https://github.com/mattpocock/skills), a conservative
+pilot subset:
 
 - `grill-me`, `grilling`, `grill-with-docs` — relentless alignment interviews;
   `grill-with-docs` also uses `domain-modeling` to build ADRs and a glossary.
@@ -156,13 +167,50 @@ the `AI_SKILLS` array in [hooks/os](hooks/os):
 - `prototype`, `handoff`, `tdd`, `research` — design spikes, conversation
   handoff, red-green-refactor, and cited investigation.
 
-`skills.sh` installs the skills into the shared `~/.agents/skills` store and
-symlinks them into `~/.claude/skills` for Claude Code. It marks Codex a
-"universal" agent and does not populate `~/.codex/skills`, but `codex-cli`
-discovers global skills under `${CODEX_HOME:-~/.codex}/skills`, so `make ai-skills`
-also symlinks each skill there. The installed skills live outside this repo and
-are not tracked; the install is not version-pinned by design — refresh with
-`skills update -g`, and remove with `skills remove -g -a claude-code codex -s <name>`.
+The pilot deliberately excludes the skills that require Matt's
+`/setup-matt-pocock-skills` workflow (issue tracker, triage labels, doc layout) —
+`ask-matt`, `code-review`, `to-spec`, `to-tickets`, `triage`, `wayfinder`,
+`implement`, and `improve-codebase-architecture`. Every skill in the pilot is
+self-contained and low blast radius.
+
+From [`AminBlg/SimpleEnglish`](https://github.com/AminBlg/SimpleEnglish):
+
+- `simple-english` — write or rewrite technical prose under
+  [ASD-STE100](https://asd-ste100.org/) Simplified Technical English: sentence
+  length limits, one word one meaning, active voice, condition before command.
+  Triggers on documentation, READMEs, runbooks, error messages, and release
+  notes, or on asking to "de-slop" text. The upstream repo also ships a
+  Claude Code [output style](https://code.claude.com/docs/en/output-styles) that
+  applies STE to *every* reply; that is deliberately not installed here, because
+  the skill only fires on writing tasks. Enable it by hand via `/config` →
+  **Output style** if you want it always on.
+
+### One store, both agents
+
+`skills.sh` installs into the shared `~/.agents/skills` store and symlinks each
+skill into `~/.claude/skills` for Claude Code. It marks Codex a "universal"
+agent and does not populate `~/.codex/skills`, but `codex-cli` discovers global
+skills under `${CODEX_HOME:-~/.codex}/skills`, so
+`tools::link_shared_skills_into_codex` mirrors the store there:
+
+```
+~/.claude/skills/<name> -> ~/.agents/skills/<name>   (skills.sh)
+~/.codex/skills/<name>  -> ~/.agents/skills/<name>   (hooks/os)
+```
+
+Both agents therefore read one copy of every skill, exactly as they do for the
+skills authored here. The mirror lists the store rather than replaying
+`AI_SKILL_SOURCES`, so a skill added by hand with `npx skills add <repo>` reaches
+Codex too, and a skill removed from the store has its Codex link pruned. Only
+links into the store are pruned: a link into this repo's `skills/` and a
+Codex-native skill directory are both left alone. The mirror needs no network and
+no Node, so it runs on every profile — a `make up` or `make skills` re-syncs Codex
+on a box that has never run `make ai-skills`.
+
+The installed skills live outside this repo and are not tracked; the install is
+not version-pinned by design — refresh with `skills update -g`, and remove with
+`skills remove -g -a claude-code codex -s <name>` (then `make skills` to drop the
+Codex link).
 
 ## Tmux agent checkpoints
 
