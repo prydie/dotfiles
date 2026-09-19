@@ -169,3 +169,42 @@ function vpn::kill-anyconnect() {
 
 # Make zsh know about hosts already accessed by SSH
 zstyle -e ':completion:*:(ssh|scp|sftp|rsh|rsync):hosts' hosts 'reply=(${=${${(f)"$(cat {/etc/ssh_,~/.ssh/known_}hosts(|2)(N) /dev/null)"}%%[# ]*}//,/ })'
+
+
+# nscale CLI environment switching
+###################################
+#
+# `nsc <profile> ...` is the stateless form and needs nothing from the shell --
+# see bin/nsc. This wrapper exists only for the two forms that have to change
+# the current shell's environment, which a child process cannot do.
+#
+# `nsc use <profile>` also defines a `nscale` function for this shell. Exporting
+# $ENV alone is not enough: --user and --context are flags with no environment
+# equivalent, so an unwrapped `nscale` would still take its org/project/region
+# from `current:` in contexts.yaml -- the exact mismatch (one environment's IDs
+# sent to another's endpoints) this is all here to prevent. Keeping it a shell
+# function keeps the choice scoped to one shell, so `current:` stays cleared and
+# two terminals can sit in two environments at once.
+nsc() {
+  case "${1:-}" in
+    use)
+      if [[ -z "${2:-}" ]]; then
+        print -u2 "nsc use: need a profile name; try 'nsc list'"
+        return 2
+      fi
+      local exports
+      exports="$(command nsc shell-export "$2")" || return $?
+      eval "${exports}"
+      nscale() { command nsc "${NSC_PROFILE}" "$@" }
+      print -u2 "nsc: this shell is now ${NSC_PROFILE} (${NSC_DESC:-no description})"
+      ;;
+    unuse)
+      unfunction nscale 2>/dev/null
+      eval "$(command nsc shell-unexport)"
+      print -u2 "nsc: profile cleared for this shell"
+      ;;
+    *)
+      command nsc "$@"
+      ;;
+  esac
+}

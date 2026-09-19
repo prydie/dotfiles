@@ -32,3 +32,14 @@ printf "%s %s" "${env}" "${domain}"
 """
 when = """ [ -n "$MAPI_ENDPOINT" ] """
 format = " [\\($symbol  $output\\) ]($style)"
+
+# Which nscale environment this shell is pointed at, after `nsc use <profile>`.
+# The failure mode this guards against is invisible by nature -- the CLI takes
+# its endpoints, its IDs and its credentials from three unrelated places -- so
+# seeing the answer in the prompt is most of the fix.
+[custom.nscale]
+symbol = "☁"
+command = 'printf "%s" "${NSC_PROFILE}"'
+when = ''' [ -n "$NSC_PROFILE" ] '''
+format = " [\\($symbol  $output\\) ]($style)"
+style = "bold red"

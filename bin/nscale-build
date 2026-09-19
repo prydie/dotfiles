@@ -1,0 +1,119 @@
+#!/usr/bin/env bash
+# Build the nscale CLI from a local checkout into ~/.local/bin/nscale.
+#
+# The CLI is a private repo with no public release channel, so it gets built by
+# hand -- which is how four divergent binaries came to sit in two directories,
+# the newest of them a patched build on the earlier half of PATH, shadowing the
+# stock one. This is the single place that produces a binary: it stamps what it
+# built into `nscale version`, and it builds from a throwaway git worktree so
+# the checkout is never touched and a local patch can never reach a commit.
+#
+# Usage:
+#   nscale-build                     # latest v* tag -> ~/.local/bin/nscale
+#   nscale-build v4.0.1              # a specific tag, branch or commit
+#   nscale-build --force-k8s-flag    # fallback build: kubernetesEnabled forced on
+#   nscale-build --out PATH          # write somewhere else
+#
+# --force-k8s-flag exists only for an environment whose console does not serve
+# /api/feature-flags, which gates every `kubernetes` subcommand except `token`.
+# As of 2026-09-14 no such environment is left -- dev, stg and production all
+# serve it -- so the plain build is correct everywhere and this should stay
+# unused. It writes a separate output path and a -localk8s version suffix, so a
+# patched binary can never be mistaken for the stock one.
+set -euo pipefail
+
+PROG=${0##*/}
+REPO="${NSCALE_CLI_REPO:-$HOME/Projects/nscale-cli}"
+OUT="${NSCALE_BIN_OUT:-$HOME/.local/bin/nscale}"
+FLAG_ANCHOR='// FlagObjectStorageEnabled: true,'
+
+die() { printf '%s: %s\n' "$PROG" "$*" >&2; exit 1; }
+note() { printf '%s: %s\n' "$PROG" "$*" >&2; }
+
+ref=""
+force_k8s=0
+
+while (($#)); do
+  case $1 in
+    --force-k8s-flag) force_k8s=1 ;;
+    --out) shift; [[ $# -gt 0 ]] || die "--out needs a path"; OUT=$1 ;;
+    --out=*) OUT=${1#--out=} ;;
+    -h|--help) sed -n '2,/^set -euo/p' "$0" | sed 's|^# \{0,1\}||;$d'; exit 0 ;;
+    -*) die "unknown option $1" ;;
+    *) [[ -z $ref ]] || die "only one ref may be given (got '$ref' and '$1')"; ref=$1 ;;
+  esac
+  shift
+done
+
+[[ -d $REPO/.git ]] || die "not a git checkout: $REPO (set NSCALE_CLI_REPO)"
+command -v go >/dev/null 2>&1 || die "go not on PATH"
+
+# Resolve the ref against the remote's tags, not just what happens to be
+# fetched: the usual reason to run this is that a release landed upstream.
+git -C "$REPO" fetch --tags --quiet origin || note "fetch failed; building from what is already local"
+
+if [[ -z $ref ]]; then
+  ref=$(git -C "$REPO" tag --list 'v*' --sort=-v:refname | head -1)
+  [[ -n $ref ]] || die "no v* tag found in $REPO; name a ref explicitly"
+  note "no ref given, using the newest tag: $ref"
+fi
+
+git -C "$REPO" rev-parse --verify --quiet "${ref}^{commit}" >/dev/null \
+  || die "unknown ref '$ref' in $REPO"
+
+if ((force_k8s)); then
+  case $OUT in
+    */nscale) OUT="${OUT}-k8sflag" ;;
+  esac
+fi
+
+# A detached worktree, not the checkout: --force-k8s-flag edits a tracked file,
+# and doing that in a throwaway tree is what makes it impossible to commit by
+# accident -- no backup copy, no restore trap, nothing to leave behind if this
+# script dies halfway.
+work=$(mktemp -d "${TMPDIR:-/tmp}/nscale-build.XXXXXX")
+cleanup() { git -C "$REPO" worktree remove --force "$work/src" >/dev/null 2>&1 || true; rm -rf "$work"; }
+trap cleanup EXIT
+
+git -C "$REPO" worktree add --detach --quiet "$work/src" "$ref"
+
+version=$(git -C "$work/src" describe --tags --always)
+
+if ((force_k8s)); then
+  flags="$work/src/internal/featureflags/flags.go"
+  [[ -f $flags ]] || die "no internal/featureflags/flags.go at $ref"
+  grep -qF "$FLAG_ANCHOR" "$flags" \
+    || die "the overrides-map anchor is gone from flags.go at $ref; patch by hand and update this script"
+  # The gate consults this compile-time map before any fetch, so forcing the
+  # entry on is the only way to run the kubernetes commands where the console
+  # serves no flag proxy.
+  sed -i "s|^\t${FLAG_ANCHOR}|\t${FLAG_ANCHOR}\n\tFlagKubernetesEnabled: true, // forced by nscale-build --force-k8s-flag|" "$flags"
+  version="${version}-localk8s"
+fi
+
+mkdir -p "$(dirname "$OUT")"
+tmp="$work/nscale"
+( cd "$work/src" && go build -mod=vendor -ldflags "-X 'nscale/cmd.version=$version'" -o "$tmp" . )
+install -m 0755 "$tmp" "$OUT"
+
+note "wrote $OUT ($version)"
+
+# Completions into the fpath entry .zshrc already adds, so a new shell picks
+# them up with no further wiring.
+comp_dir="${XDG_DATA_HOME:-$HOME/.local/share}/zsh/site-functions"
+if mkdir -p "$comp_dir" 2>/dev/null && "$OUT" completion zsh > "$comp_dir/_nscale.tmp" 2>/dev/null; then
+  mv "$comp_dir/_nscale.tmp" "$comp_dir/_nscale"
+  note "wrote $comp_dir/_nscale"
+else
+  rm -f "$comp_dir/_nscale.tmp"
+  note "zsh completion generation skipped"
+fi
+
+# The stock build must win on PATH. ~/.local/bin precedes ~/go/bin (see zshenv),
+# so warn rather than meddle with someone else's install.
+if [[ $OUT != *-k8sflag ]]; then
+  resolved=$(command -v nscale 2>/dev/null || true)
+  if [[ -n $resolved && $resolved != "$OUT" ]]; then
+    note "WARNING: 'nscale' on PATH resolves to $resolved, not $OUT"
+  fi
+fi

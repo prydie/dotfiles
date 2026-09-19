@@ -17,3 +17,8 @@ __pycache__/
 
 # Machine-local ci-remote host overrides (may name private hosts).
 /config/ci-remote/hosts.local.conf
+
+# Real nscale CLI profiles name internal organizations, projects and regions, so
+# only the *.example shapes are tracked. The live ones belong in
+# ~/.config/nscale/profiles.d/ (see config/nscale/profiles.d/README.example).
+/config/nscale/profiles.d/*.env

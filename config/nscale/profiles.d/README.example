@@ -1,0 +1,42 @@
+# nscale CLI environment profiles, read by bin/nsc.
+#
+# Copy the .env.example files in this directory to
+# ~/.config/nscale/profiles.d/<name>.env and fill in the real values. The real
+# files are NOT tracked: they name internal organizations, projects and regions,
+# and this repository is public. Only the shape lives here.
+#
+# Keys (every one optional; an omitted key means "not applicable"):
+#
+#   NSC_DESC              One line describing the environment. Shown by
+#                         `nsc list` and in the confirmation prompt.
+#   NSC_ENV               Value for $ENV, which is what selects the CLI's
+#                         endpoint set (cmd/config.go). Leave EMPTY for
+#                         production: an absent ENV is what production means.
+#   NSC_USER              Keyring slot for credentials, passed as --user. Give
+#                         every environment its own: the slot is keyed on this
+#                         name alone, with no environment in the key, and the
+#                         feature-flag and completion caches are keyed the same
+#                         way. Sharing a slot across environments overwrites
+#                         one's refresh token with the other's and mixes up
+#                         their cached completions. Use "default" for
+#                         production only.
+#   NSC_CONTEXT           Context name passed as --context, holding the
+#                         org/project/region IDs. Create it with
+#                         `nscale contexts set`. Always named explicitly, so
+#                         contexts.yaml's `current:` stays cleared and can
+#                         never point one environment's IDs at another's URLs.
+#   NSC_BIN               Override the nscale binary for this profile. Only
+#                         needed for a --force-k8s-flag build; leave unset.
+#   NSC_VERCEL_BYPASS_OP  1Password reference (op://...) for the Vercel
+#                         deployment-protection bypass secret, needed by any
+#                         environment whose console is behind Vercel SSO. Read
+#                         at runtime and cached in the per-login tmpfs, never
+#                         written to disk. One secret covers dev and staging.
+#   NSC_TOKEN_FILE        Path to a service-account token file, for headless
+#                         use where no device flow is possible. Read on every
+#                         invocation so a rotation needs no action here.
+#                         Mutually exclusive with NSC_USER in practice: a
+#                         service token short-circuits login entirely.
+#   NSC_CONFIRM           1 asks before any command that is not plainly a read.
+#                         Worth it for an environment holding real customer
+#                         infrastructure.
