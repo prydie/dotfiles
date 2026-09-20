@@ -7,7 +7,9 @@ description: Hand a coding or analysis task to GLM 5.3 through the opencode CLI 
 
 `opencode` is a headless agentic CLI. This machine points it at GLM 5.3 with a
 large context window, so it is the cheapest way to get a *second model's*
-attempt at a problem without leaving the terminal.
+attempt at a problem without leaving the terminal. Claude Code can host GLM too,
+via `bin/claude-glm` — see
+[Claude Code as the harness](#claude-code-as-the-harness).
 
 This skill is the dispatch path. For adversarial code review specifically, use
 `multi-review` instead — it already runs GLM as one of three engines, with
@@ -87,6 +89,31 @@ The real flag is `--auto`.
 --format json              # raw JSON events, for scripting
 --thinking                 # show reasoning blocks
 ```
+
+## Claude Code as the harness
+
+The same GLM 5.3 is reachable through the Claude Code harness:
+`bin/claude-glm` points `claude` at a local LiteLLM proxy that translates the
+Anthropic API to the GLM endpoint, with the subscription `claude` left
+untouched. Use it when Claude Code is the better harness — its allowed-tools
+list is a real boundary, unlike opencode's overlays — or when a Claude Code
+session is doing the dispatching.
+
+```bash
+claude-glm -p "<task>"                        # print mode; result on stdout
+claude-glm -p "<task>" --allowedTools "Read,Glob,Grep"   # read-only GLM run
+```
+
+The prompt goes immediately after `-p`: with a flag in between, claude treats
+the prompt as that flag's value and dies with "Input must be provided either
+through stdin or as a prompt argument". A prompt on stdin works too.
+
+With no `Bash` in `--allowedTools`, GLM has no write primitive at all — the
+opencode `read-only.json` caveat ("a denylist cannot close the hole; every
+shell is a write primitive") does not apply, because there is no shell. For a
+write-capable run, prefer a disposable clone or worktree as below, or allow only
+the specific tools the task needs. Without `-p`, `claude-glm` opens an
+interactive session with the normal permission prompts.
 
 ## Write-capable vs read-only — the opposite of Codex
 

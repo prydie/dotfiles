@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+# Claude Code with GLM 5.3 as the model, via the local LiteLLM proxy.
+#
+# The regular `claude` command is untouched: this wrapper scopes every override
+# to its own process, so a subscription session and a GLM session run side by
+# side. Everything the proxy needs lives in ~/.config/litellm/ (machine-local;
+# see config/litellm/*.example in ~/.dotfiles).
+#
+# Usage:
+#   claude-glm [claude args...]        interactive session on GLM 5.3
+#   claude-glm -p "<prompt>"           print mode, for dispatching work to GLM
+#                                       from another session or a script
+set -euo pipefail
+
+ENV_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/litellm/env"
+BASE_URL="http://127.0.0.1:4000"
+
+if [[ ! -r "${ENV_FILE}" ]]; then
+  echo "claude-glm: missing ${ENV_FILE} (copy the shape from config/litellm/env.example in ~/.dotfiles)" >&2
+  exit 1
+fi
+
+# Bring the proxy up if it is not running, so the failure surfaces here with a
+# fix hint instead of as a timeout inside the session.
+if ! systemctl --user is-active --quiet litellm.service; then
+  systemctl --user start litellm.service || {
+    echo "claude-glm: could not start litellm.service; see: journalctl --user -u litellm" >&2
+    exit 1
+  }
+fi
+
+# `is-active` flips the moment the process spawns, not when the port opens;
+# wait for the socket so the first message does not eat a connect error.
+for _ in $(seq 1 50); do
+  curl -sf -o /dev/null "${BASE_URL}/health/liveliness" && break
+  sleep 0.2
+done
+if ! curl -sf -o /dev/null "${BASE_URL}/health/liveliness"; then
+  echo "claude-glm: proxy at ${BASE_URL} did not come up; see: journalctl --user -u litellm" >&2
+  exit 1
+fi
+
+set -a
+# shellcheck disable=SC1090  # a machine-local settings file, by design
+. "${ENV_FILE}"
+set +a
+
+if [[ -z "${LITELLM_MASTER_KEY:-}" ]]; then
+  echo "claude-glm: LITELLM_MASTER_KEY not set in ${ENV_FILE}" >&2
+  exit 1
+fi
+
+export ANTHROPIC_BASE_URL="${BASE_URL}"
+export ANTHROPIC_AUTH_TOKEN="${LITELLM_MASTER_KEY}"
+export ANTHROPIC_MODEL="glm-5.3"
+export ANTHROPIC_SMALL_FAST_MODEL="glm-5.3"
+# glm-5.3 is not in Claude Code's model catalog, so it assumes a 200k window
+# for auto-compact; tell it the real one (524288, see the opencode provider
+# entry) or a long session compacts far too early.
+export CLAUDE_CODE_MAX_CONTEXT_TOKENS=512000
+# A subscription key in the environment would race the proxy auth; the token
+# above is the only credential the proxy needs.
+unset ANTHROPIC_API_KEY
+# Keep the session off Anthropic's non-API endpoints; the proxy is the API.
+export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
+
+exec claude "$@"

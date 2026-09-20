@@ -130,6 +130,26 @@ lq completion zsh > "${XDG_DATA_HOME:-$HOME/.local/share}/zsh/site-functions/_lq
 
 Override app discovery with `LQ_APP_PATTERN` (default `grafana`).
 
+## GLM via Claude Code (claude-glm)
+
+`bin/claude-glm` runs Claude Code with GLM 5.3 as the model, through the local
+LiteLLM proxy (systemd user unit `litellm`, 127.0.0.1:4000, started on demand).
+The regular `claude` command keeps using the Anthropic subscription; every
+override is scoped to the wrapper's process.
+
+```bash
+claude-glm                                        # interactive session on GLM
+claude-glm -p "<task>" --allowedTools "Read,Glob,Grep"   # read-only dispatch
+```
+
+With no `Bash` in `--allowedTools`, GLM has no write primitive at all — a real
+boundary, unlike opencode's permission overlays. The proxy config and its env
+file are machine-local in `~/.config/litellm/` (the endpoint names internal
+infrastructure; only `*.example` shapes are tracked). One Claude Code process
+speaks to one provider: to combine models, dispatch `claude-glm -p` from the
+subscription session rather than trying to mix providers inside one process.
+The `glm-dispatch` skill covers when to dispatch and how to babysit long runs.
+
 ## Visual Review
 
 Use `bin/webshot` to capture webpages for visual inspection.

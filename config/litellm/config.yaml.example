@@ -1,0 +1,34 @@
+# LiteLLM proxy config for Claude Code on an OpenAI-compatible endpoint.
+#
+# Copy to ~/.config/litellm/config.yaml and fill in the real provider values.
+# The real file is NOT tracked: it names internal endpoints, and this repo is
+# public. The key is read from the environment (see env.example) so no secret
+# ever sits in this file. env.example also carries
+# LITELLM_USE_CHAT_COMPLETIONS_URL_FOR_ANTHROPIC_MESSAGES=1: litellm sends
+# OpenAI-backed /v1/messages requests to the Responses API (/v1/responses) by
+# default, which vLLM does not serve — route them to /v1/chat/completions.
+model_list:
+  - model_name: glm-5.3 # the name bin/claude-glm pins ANTHROPIC_MODEL to
+    litellm_params: &glm
+      model: openai/<org>/<model>
+      api_base: https://<openai-compatible-endpoint>/v1
+      api_key: os.environ/GLM_TEST_API_KEY
+  # Claude Code requests these ids when no ANTHROPIC_MODEL/SMALL_FAST_MODEL is
+  # pinned (or a subagent names a default); map them to the same backend so
+  # nothing 404s.
+  - model_name: claude-sonnet-4-5-20250929
+    litellm_params: *glm
+  - model_name: claude-opus-4-5-20251101
+    litellm_params: *glm
+  - model_name: claude-haiku-4-5-20251001
+    litellm_params: *glm
+  - model_name: claude-3-5-haiku-20241022
+    litellm_params: *glm
+
+litellm_settings:
+  drop_params: true # Claude Code sends Anthropic-only params the backend lacks
+  num_retries: 2
+  request_timeout: 600
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY

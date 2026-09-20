@@ -54,3 +54,4 @@ terraform = "latest"
 "pipx:sshuttle" = "1.3.2"  # poor man's VPN over SSH
 "github:tailscale/tailcat" = "0.6.0"  # netcat over Tailscale's WireGuard data plane; no Tailscale account needed
 gcloud = "585.0.0"
+"pipx:litellm" = { version = "1.101.0", uvx_args = "--with litellm[proxy]==1.101.0" }  # proxy extras: the PyPI wheel alone cannot run the server

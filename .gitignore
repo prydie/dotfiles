@@ -22,3 +22,9 @@ __pycache__/
 # only the *.example shapes are tracked. The live ones belong in
 # ~/.config/nscale/profiles.d/ (see config/nscale/profiles.d/README.example).
 /config/nscale/profiles.d/*.env
+
+# Machine-local litellm proxy config names the internal GLM endpoint; only the
+# *.example shapes are tracked (config/litellm/*.example). The live ones belong
+# in ~/.config/litellm/ (see config/litellm/env.example).
+/config/litellm/config.yaml
+/config/litellm/env

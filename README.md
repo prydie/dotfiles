@@ -657,6 +657,43 @@ opencode run "say hello"
 ```
 
 
+### Claude Code on GLM 5.3
+
+[`bin/claude-glm`](bin/claude-glm) runs the Claude Code harness with GLM 5.3 as
+the model. The subscription `claude` is untouched — every override is scoped to
+the wrapper's process, so both run side by side:
+
+```bash
+claude-glm              # interactive session on GLM 5.3
+claude-glm -p "<task>"  # print mode, for dispatching work from another session
+```
+
+Claude Code speaks the Anthropic API and the GLM endpoint speaks OpenAI, so a
+local [LiteLLM](https://litellm.ai) proxy translates between them:
+`claude → 127.0.0.1:4000 → GLM endpoint`. The proxy runs as the
+[config/systemd/user/litellm.service](config/systemd/user/litellm.service) user
+unit, and the wrapper starts it on demand. `litellm` itself is pinned in the
+mise config like any other CLI.
+
+The proxy's config and env are machine-local in `~/.config/litellm/` — the
+config names the internal GLM endpoint, and this repo is public — so only the
+example shapes are tracked ([config/litellm/](config/litellm)). Setup:
+
+1. Copy `config/litellm/config.yaml.example` to `~/.config/litellm/config.yaml`
+   and fill in the real endpoint and model.
+2. Copy `config/litellm/env.example` to `~/.config/litellm/env` (mode 600) and
+   fill in the provider key — the same value `~/.zshenv.local` exports for
+   opencode — plus a generated master key:
+   `printf 'sk-%s\n' "$(openssl rand -hex 24)"`.
+3. `make up` to link the unit, then
+   `systemctl --user daemon-reload && systemctl --user enable --now litellm`.
+
+Verify with `claude-glm -p "say hello"`. One Claude Code process talks to one
+provider, so a subscription session cannot host GLM subagents in-process; an
+Opus or Sonnet session dispatches GLM work with `claude-glm -p` instead — see
+the `glm-dispatch` skill.
+
+
 ## nscale CLI environments
 
 [`bin/nsc`](bin/nsc) runs the nscale CLI against a named environment, and
