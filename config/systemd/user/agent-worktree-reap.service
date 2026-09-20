@@ -1,0 +1,15 @@
+[Unit]
+Description=Reap agent-created git worktrees that hold no work
+Documentation=man:git-worktree(1)
+
+[Service]
+Type=oneshot
+Slice=agents.slice
+Nice=19
+IOSchedulingClass=idle
+# --rescue keeps an uncommitted edit recoverable rather than blocking the reap
+# forever on a worktree nobody will return to.
+ExecStart=%h/.dotfiles/bin/agent-worktree-reap \
+    --repo %h/Projects/nks-management-plane \
+    --rescue %h/.cache/worktree-rescue \
+    --quiet

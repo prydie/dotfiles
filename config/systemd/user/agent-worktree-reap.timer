@@ -1,0 +1,10 @@
+[Unit]
+Description=Reap Stale Agent Worktrees Daily
+
+[Timer]
+OnCalendar=*-*-* 04:15:00
+RandomizedDelaySec=45m
+Persistent=true
+
+[Install]
+WantedBy=timers.target

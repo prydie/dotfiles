@@ -1,0 +1,431 @@
+#!/usr/bin/env python3
+"""Remove agent-created git worktrees that no longer hold work.
+
+Agent launchers create a worktree per run and never remove it. The checkouts
+accumulate without bound, and because Go keys its build cache on the build
+directory, each distinct path also multiplies the cache. Reaping the checkouts
+is upstream of both.
+
+Removing a worktree cannot lose committed work: a worktree is a `gitdir:`
+pointer into the main repository's object store, and the branch ref keeps its
+commits reachable. This never deletes a branch. The only state at risk is an
+uncommitted edit, so a worktree with one is skipped unless --rescue is given, in
+which case the edit is captured first.
+"""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+import shutil
+import stat
+import subprocess
+import sys
+import time
+
+# Roots whose worktrees are agent scratch. Relative entries resolve against the
+# repository; absolute ones are shared launcher directories. A worktree outside
+# every root is assumed to be hand-made and is never touched.
+DEFAULT_RELATIVE_ROOTS = (".claude/worktrees", ".worktrees")
+DEFAULT_ABSOLUTE_ROOTS = (
+    "~/.codex/worktrees",
+    "~/.cache/agent-tmp",
+    "~/.cache/nks-remediation",
+    "~/.cache/nks-pr-fixes",
+    "~/.cache/nks-followup",
+)
+
+# The shared launcher directories differ per machine, so allow the list to be
+# replaced wholesale. Colon-separated, like PATH.
+ROOTS_ENV = "AGENT_WORKTREE_REAP_ROOTS"
+
+# A rescue entry exists so a removal stays reversible, not as an archive. Give
+# it long enough to notice the worktree is gone and want the edit back.
+DEFAULT_RESCUE_RETAIN_DAYS = 90
+
+# Agents here routinely live one to two days, and a scratch directory is not
+# touched while its agent thinks. A short age reaps under a running agent.
+DEFAULT_AGE_DAYS = 10
+
+
+class Skip(Exception):
+    """A worktree that must not be removed, carrying the reason."""
+
+
+def git(cwd: str, *args: str) -> tuple[int, str, str]:
+    p = subprocess.run(
+        ("git", "-C", cwd) + args, capture_output=True, text=True, check=False
+    )
+    return p.returncode, p.stdout, p.stderr
+
+
+def list_worktrees(repo: str) -> list[dict]:
+    rc, out, err = git(repo, "worktree", "list", "--porcelain")
+    if rc != 0:
+        sys.exit(f"agent-worktree-reap: cannot list worktrees in {repo}: {err.strip()}")
+    entries, cur = [], {}
+    for line in out.splitlines():
+        if not line:
+            if cur:
+                entries.append(cur)
+                cur = {}
+            continue
+        key, _, value = line.partition(" ")
+        if key == "worktree":
+            cur["path"] = value
+        elif key == "HEAD":
+            cur["head"] = value
+        elif key == "branch":
+            cur["branch"] = value
+        elif key == "detached":
+            cur["branch"] = None
+        elif key in ("bare", "locked", "prunable"):
+            cur[key] = value or True
+    if cur:
+        entries.append(cur)
+    return entries
+
+
+def live_paths() -> set[str]:
+    """Directories any running process is sitting in or holding open.
+
+    Deleting a worktree from under a running agent or envtest apiserver breaks
+    it, and the process holds no lock that git would notice.
+    """
+    live = set()
+    for pid in os.listdir("/proc"):
+        if not pid.isdigit():
+            continue
+        try:
+            live.add(os.readlink(f"/proc/{pid}/cwd"))
+        except OSError:
+            pass
+        fddir = f"/proc/{pid}/fd"
+        try:
+            names = os.listdir(fddir)
+        except OSError:
+            continue
+        for name in names:
+            try:
+                live.add(os.readlink(os.path.join(fddir, name)))
+            except OSError:
+                pass
+    return live
+
+
+def is_under(path: str, parent: str) -> bool:
+    path, parent = os.path.normpath(path), os.path.normpath(parent)
+    return path == parent or path.startswith(parent + os.sep)
+
+
+def absolute_roots() -> tuple[str, ...]:
+    override = os.environ.get(ROOTS_ENV)
+    if override is None:
+        return DEFAULT_ABSOLUTE_ROOTS
+    return tuple(p for p in override.split(os.pathsep) if p)
+
+
+def roots_for(repo: str, extra: list[str]) -> list[str]:
+    roots = [os.path.join(repo, r) for r in DEFAULT_RELATIVE_ROOTS]
+    roots += [os.path.abspath(os.path.expanduser(r)) for r in absolute_roots()]
+    roots += [os.path.abspath(os.path.expanduser(r)) for r in extra]
+    return roots
+
+
+def idle_days(repo: str, wt: dict) -> float:
+    """Days since the worktree last showed a sign of life.
+
+    Takes the newest of three signals, so anything recent by any measure counts
+    as active: the checkout's own mtime, the administrative HEAD file git
+    rewrites on checkout, and the commit date of HEAD.
+    """
+    newest = 0.0
+    for candidate in (wt["path"], os.path.join(wt["path"], ".git")):
+        try:
+            newest = max(newest, os.stat(candidate).st_mtime)
+        except OSError:
+            pass
+    rc, out, _ = git(repo, "log", "-1", "--format=%ct", wt["head"])
+    if rc == 0 and out.strip().isdigit():
+        newest = max(newest, float(out.strip()))
+    if newest == 0.0:
+        return -1.0
+    return (time.time() - newest) / 86400.0
+
+
+def working_state(path: str) -> tuple[int, int]:
+    """Counts of modified tracked files and untracked, non-ignored files."""
+    rc, out, err = git(path, "status", "--porcelain")
+    if rc != 0:
+        raise Skip(f"status failed: {err.strip()[:80]}")
+    lines = [ln for ln in out.splitlines() if ln.strip()]
+    untracked = sum(1 for ln in lines if ln.startswith("??"))
+    return len(lines) - untracked, untracked
+
+
+def rescue(path: str, wt: dict, dest_root: str) -> dict:
+    """Capture uncommitted work so removal stays reversible."""
+    slug = os.path.basename(path.rstrip("/")) + "-" + hashlib.sha1(
+        path.encode()
+    ).hexdigest()[:8]
+    dest = os.path.join(dest_root, slug)
+    os.makedirs(dest, exist_ok=True)
+    meta = {"path": path, "branch": wt.get("branch"), "head": wt["head"], "slug": slug}
+
+    rc, out, err = git(path, "diff", "HEAD", "--binary")
+    if rc != 0:
+        raise Skip(f"cannot capture diff: {err.strip()[:80]}")
+    with open(os.path.join(dest, "tracked.patch"), "w") as fh:
+        fh.write(out)
+    meta["patch_bytes"] = len(out)
+
+    rc, out, err = git(path, "ls-files", "--others", "--exclude-standard", "-z")
+    if rc != 0:
+        raise Skip(f"cannot list untracked: {err.strip()[:80]}")
+    names = [n for n in out.split("\0") if n]
+    meta["untracked"] = len(names)
+    if names:
+        with open(os.path.join(dest, "untracked.list"), "w") as fh:
+            fh.write("\n".join(names) + "\n")
+        tar = subprocess.run(
+            ["tar", "-czf", os.path.join(dest, "untracked.tar.gz"),
+             "-C", path, "--null", "-T", "-"],
+            input=out, capture_output=True, text=True, check=False,
+        )
+        if tar.returncode != 0:
+            raise Skip(f"cannot archive untracked: {tar.stderr.strip()[:80]}")
+    with open(os.path.join(dest, "meta.json"), "w") as fh:
+        json.dump(meta, fh, indent=2)
+    return meta
+
+
+def prune_rescue(dest_root: str, retain_days: float) -> list[str]:
+    """Drop rescue entries older than the retention window.
+
+    Without this the store grows without bound, which is the same unbounded
+    growth this tool exists to stop.
+    """
+    dropped = []
+    if retain_days <= 0 or not os.path.isdir(dest_root):
+        return dropped
+    cutoff = time.time() - retain_days * 86400
+    for name in sorted(os.listdir(dest_root)):
+        entry = os.path.join(dest_root, name)
+        if not os.path.isdir(entry):
+            continue
+        newest = 0.0
+        for walk_root, _, files in os.walk(entry):
+            for f in files:
+                try:
+                    newest = max(newest, os.stat(os.path.join(walk_root, f)).st_mtime)
+                except OSError:
+                    pass
+        try:
+            newest = max(newest, os.stat(entry).st_mtime)
+        except OSError:
+            continue
+        if newest < cutoff:
+            if force_delete(entry) is None:
+                dropped.append(entry)
+    return dropped
+
+
+def force_delete(path: str) -> str | None:
+    """Delete a directory git left behind, returning an error string or None.
+
+    setup-envtest writes its asset directories read-only, so the files inside
+    cannot be unlinked until the directory itself regains write permission.
+    """
+    for root, dirs, _ in os.walk(path, topdown=True):
+        for d in dirs:
+            target = os.path.join(root, d)
+            try:
+                os.chmod(target, os.stat(target).st_mode | stat.S_IWUSR | stat.S_IXUSR)
+            except OSError:
+                pass
+    try:
+        shutil.rmtree(path)
+    except OSError as exc:
+        return str(exc)[:120]
+    return None
+
+
+def remove(repo: str, path: str) -> str | None:
+    """Remove one worktree, returning an error string or None.
+
+    `git worktree remove` deregisters before it deletes, so a failure partway
+    leaves the directory orphaned on disk while a retry reports "is not a
+    working tree". Finish the deletion directly rather than retrying git.
+    """
+    rc, _, err = git(repo, "worktree", "remove", "--force", path)
+    if rc == 0:
+        return None
+    if os.path.isdir(path):
+        failure = force_delete(path)
+        if failure:
+            return failure
+    git(repo, "worktree", "prune")
+    return None if not os.path.isdir(path) else err.strip()[:120]
+
+
+def classify(repo: str, wt: dict, roots: list[str], live: set[str],
+             age_days: float, main: str) -> None:
+    path = wt["path"]
+    if os.path.normpath(path) == os.path.normpath(main):
+        raise Skip("main checkout")
+    if wt.get("bare"):
+        raise Skip("bare")
+    if wt.get("locked"):
+        raise Skip("locked")
+    if not any(is_under(path, r) for r in roots):
+        raise Skip("outside agent roots")
+    if not os.path.isdir(path):
+        raise Skip("path missing (run git worktree prune)")
+    for used in live:
+        if is_under(used, path):
+            raise Skip("in use by a running process")
+    idle = idle_days(repo, wt)
+    if idle < 0:
+        raise Skip("age unknown")
+    if idle < age_days:
+        raise Skip(f"active {idle:.1f}d ago")
+    wt["idle_days"] = idle
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(
+        prog="agent-worktree-reap",
+        description="Remove agent-created git worktrees that hold no work.",
+    )
+    ap.add_argument("--repo", action="append", default=[],
+                    help="repository to reap (default: the repository of cwd)")
+    ap.add_argument("--root", action="append", default=[],
+                    help="additional directory to treat as an agent root")
+    ap.add_argument("--show-roots", action="store_true",
+                    help="print the agent roots in effect and exit")
+    ap.add_argument("--age-days", type=float, default=DEFAULT_AGE_DAYS,
+                    help=f"minimum idle age (default: {DEFAULT_AGE_DAYS})")
+    ap.add_argument("--rescue", metavar="DIR",
+                    help="capture uncommitted work here, then remove the worktree")
+    ap.add_argument("--rescue-retain-days", type=float,
+                    default=DEFAULT_RESCUE_RETAIN_DAYS,
+                    help="drop rescue entries older than this "
+                         f"(default: {DEFAULT_RESCUE_RETAIN_DAYS}, 0 to keep forever)")
+    ap.add_argument("--dry-run", action="store_true",
+                    help="report what would be removed and change nothing")
+    ap.add_argument("--json", action="store_true", help="emit a JSON report")
+    ap.add_argument("--quiet", action="store_true", help="only report removals")
+    args = ap.parse_args()
+
+    repos = args.repo
+    if not repos:
+        rc, out, _ = git(os.getcwd(), "rev-parse", "--path-format=absolute",
+                         "--git-common-dir")
+        if rc != 0:
+            return fail("not inside a git repository; pass --repo")
+        repos = [os.path.dirname(out.strip()) or os.getcwd()]
+
+    if args.show_roots:
+        for repo in repos:
+            rc, out, _ = git(os.path.abspath(os.path.expanduser(repo)),
+                             "rev-parse", "--path-format=absolute", "--git-common-dir")
+            if rc != 0:
+                return fail(f"not a git repository: {repo}")
+            for root in roots_for(os.path.dirname(out.strip()), args.root):
+                print(root)
+        return 0
+
+    live = live_paths()
+    report = {"removed": [], "rescued": [], "skipped": [], "failed": [],
+              "rescue_pruned": []}
+
+    if args.rescue and not args.dry_run:
+        report["rescue_pruned"] = prune_rescue(
+            os.path.expanduser(args.rescue), args.rescue_retain_days
+        )
+
+    for repo in repos:
+        repo = os.path.abspath(os.path.expanduser(repo))
+        rc, out, _ = git(repo, "rev-parse", "--path-format=absolute", "--git-common-dir")
+        if rc != 0:
+            report["failed"].append({"path": repo, "error": "not a git repository"})
+            continue
+        main_wt = os.path.dirname(out.strip())
+        roots = roots_for(main_wt, args.root)
+
+        for wt in list_worktrees(repo):
+            path = wt["path"]
+            try:
+                classify(repo, wt, roots, live, args.age_days, main_wt)
+            except Skip as exc:
+                report["skipped"].append({"path": path, "reason": str(exc)})
+                continue
+
+            try:
+                dirty, untracked = working_state(path)
+            except Skip as exc:
+                report["skipped"].append({"path": path, "reason": str(exc)})
+                continue
+
+            if dirty or untracked:
+                if not args.rescue:
+                    report["skipped"].append({
+                        "path": path,
+                        "reason": f"uncommitted work ({dirty} modified, "
+                                  f"{untracked} untracked); pass --rescue",
+                    })
+                    continue
+                if args.dry_run:
+                    report["rescued"].append({"path": path, "dry_run": True})
+                else:
+                    try:
+                        meta = rescue(path, wt, os.path.expanduser(args.rescue))
+                    except Skip as exc:
+                        report["failed"].append({"path": path, "error": str(exc)})
+                        continue
+                    report["rescued"].append(meta)
+
+            if args.dry_run:
+                report["removed"].append({"path": path, "idle_days": wt["idle_days"],
+                                          "dry_run": True})
+                continue
+            failure = remove(repo, path)
+            if failure:
+                report["failed"].append({"path": path, "error": failure})
+            else:
+                report["removed"].append({"path": path, "idle_days": wt["idle_days"]})
+
+    if args.json:
+        json.dump(report, sys.stdout, indent=2)
+        sys.stdout.write("\n")
+    else:
+        verb = "would remove" if args.dry_run else "removed"
+        for entry in report["removed"]:
+            print(f"{verb}: {entry['path']} (idle {entry['idle_days']:.1f}d)")
+        for entry in report["rescued"]:
+            print(f"rescued: {entry['path']}")
+        for entry in report["rescue_pruned"]:
+            print(f"rescue expired: {entry}")
+        if not args.quiet:
+            for entry in report["skipped"]:
+                print(f"kept: {entry['path']} ({entry['reason']})")
+        for entry in report["failed"]:
+            print(f"FAILED: {entry['path']}: {entry['error']}", file=sys.stderr)
+        print(f"{verb} {len(report['removed'])}, "
+              f"rescued {len(report['rescued'])}, "
+              f"kept {len(report['skipped'])}, "
+              f"rescue expired {len(report['rescue_pruned'])}, "
+              f"failed {len(report['failed'])}")
+
+    return 1 if report["failed"] else 0
+
+
+def fail(message: str) -> int:
+    print(f"agent-worktree-reap: {message}", file=sys.stderr)
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())
