@@ -63,5 +63,13 @@ export CLAUDE_CODE_MAX_CONTEXT_TOKENS=512000
 unset ANTHROPIC_API_KEY
 # Keep the session off Anthropic's non-API endpoints; the proxy is the API.
 export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
+# Auto mode's server-side safety checks are an Anthropic-API feature: Claude
+# Code asks the server (via `safeguards` request fields) to classify actions
+# free of charge. This proxy's upstream is the GLM endpoint, which cannot
+# perform them, so Claude Code would fall back to its own classifier requests
+# and hold the first checked action behind a "not eligible" notice (printed to
+# stderr in -p mode). Tell it not to ask: its own classifier requests are
+# ordinary GLM calls through this proxy.
+export CLAUDE_CODE_AUTO_MODE_SERVER=0
 
 exec claude "$@"

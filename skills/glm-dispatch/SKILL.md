@@ -106,7 +106,10 @@ claude-glm -p "<task>" --allowedTools "Read,Glob,Grep"   # read-only GLM run
 
 The prompt goes immediately after `-p`: with a flag in between, claude treats
 the prompt as that flag's value and dies with "Input must be provided either
-through stdin or as a prompt argument". A prompt on stdin works too.
+through stdin or as a prompt argument". A prompt on stdin works too. The
+wrapper also sets `CLAUDE_CODE_AUTO_MODE_SERVER=0`, so an auto-mode session
+never holds an action behind the gateway "not eligible" notice nor prints it
+to stderr.
 
 With no `Bash` in `--allowedTools`, GLM has no write primitive at all — the
 opencode `read-only.json` caveat ("a denylist cannot close the hole; every

@@ -693,6 +693,12 @@ provider, so a subscription session cannot host GLM subagents in-process; an
 Opus or Sonnet session dispatches GLM work with `claude-glm -p` instead — see
 the `glm-dispatch` skill.
 
+Auto mode's server-side safety checks are an Anthropic-API feature the GLM
+endpoint cannot perform, so `claude-glm` sets `CLAUDE_CODE_AUTO_MODE_SERVER=0`:
+Claude Code runs its own classifier requests — ordinary GLM calls through the
+proxy — and never holds a checked action behind the gateway "not eligible"
+notice.
+
 
 ## nscale CLI environments
 

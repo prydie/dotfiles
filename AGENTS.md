@@ -148,6 +148,10 @@ file are machine-local in `~/.config/litellm/` (the endpoint names internal
 infrastructure; only `*.example` shapes are tracked). One Claude Code process
 speaks to one provider: to combine models, dispatch `claude-glm -p` from the
 subscription session rather than trying to mix providers inside one process.
+The wrapper also sets `CLAUDE_CODE_AUTO_MODE_SERVER=0`: Anthropic's server-side
+auto-mode checks cannot run on the GLM upstream, so Claude Code uses its own
+classifier requests and never holds an action behind the gateway "not eligible"
+notice.
 The `glm-dispatch` skill covers when to dispatch and how to babysit long runs.
 
 ## Visual Review
