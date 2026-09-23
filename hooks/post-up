@@ -120,6 +120,9 @@ fi
 # on every profile -- a `make up` on a fresh box gets them even at PROFILE=link.
 tools::install_local_skills || log::f "Local skills install skipped"
 
+# Private Nscale tooling lives in its own repository; link it when checked out.
+tools::install_nks_ops || log::f "nks-ops install skipped"
+
 # Mirror the shared ~/.agents store into Codex. tools::install_ai_skills already
 # does this after a network install; repeating it here is what keeps a PROFILE=link
 # box (and any skill added by hand with `npx skills add`) in sync across both agents.

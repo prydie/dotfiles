@@ -85,6 +85,10 @@ setopt share_history
 
 [[ -f ~/.aliases ]] && . ~/.aliases
 
+# Private Nscale tooling (the nsc shell function), when that checkout exists.
+[[ -r "${NKS_OPS_DIR:-$HOME/Projects/nks-ops}/shell/init.zsh" ]] &&
+  . "${NKS_OPS_DIR:-$HOME/Projects/nks-ops}/shell/init.zsh"
+
 # Put local agent processes and their build/test children under one aggregate
 # CPU limit. The external launcher prevents these functions from recursing.
 agent::run() {

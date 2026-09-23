@@ -700,76 +700,16 @@ proxy — and never holds a checked action behind the gateway "not eligible"
 notice.
 
 
-## nscale CLI environments
+## Private Nscale tooling
 
-[`bin/nsc`](bin/nsc) runs the nscale CLI against a named environment, and
-[`bin/nscale-build`](bin/nscale-build) is the one place that builds the binary.
+Nscale-specific helpers (the `nsc` CLI wrapper and its shell function,
+`nscale-build`, agent skills) live in a private repository. When it is checked
+out at `$NKS_OPS_DIR` (default `~/Projects/nks-ops`), `make up` and
+`make skills` run its `install.sh`, and `zshrc` sources its
+`shell/init.zsh`. Without the checkout both steps are skipped.
 
-```bash
-nsc list                          # what profiles exist
-nsc dev kubernetes cluster list   # one command, one environment
-nsc login stg                     # log in to that environment's own keyring slot
-nsc use prod                      # point THIS shell at prod; the prompt shows it
-nsc unuse
-```
-
-`nsc <profile> …` is stateless, so nothing can be left pointing somewhere
-unintended — prefer it, particularly in scripts and for agents. `nsc use` is the
-interactive form and is scoped to one shell, so two terminals can sit in two
-environments at once.
-
-### Why a wrapper
-
-The CLI takes its endpoints from `$ENV`, its organization/project/region from
-`--context`, and its credentials from a keyring slot named by `--user`. Nothing
-ties those three together, and each mismatch fails quietly:
-
-- Its context file has no environment field, so a selected "current context" is
-  sent to whatever `$ENV` happens to say — one environment's resource IDs
-  addressed at another's endpoints.
-- The keyring slot is keyed on the user name alone, with no environment in the
-  key, so a login without `--user` can overwrite a different environment's
-  refresh token. The feature-flag and completion caches are keyed the same way,
-  so a shared slot also mixes up cached completions between environments.
-
-`nsc` binds all three under one profile name and always passes them explicitly.
-The CLI's own "current context" is therefore kept cleared, and
-[`config/starship.toml`](config/starship.toml) shows the active profile in the
-prompt — the failure mode is invisible by nature, so seeing the answer is most
-of the fix. A profile can opt into `NSC_CONFIRM=1` to be asked before any
-command that is not plainly a read; non-interactive callers are refused rather
-than waved through, since a guard that disables itself when nobody is watching
-is no guard.
-
-### Profiles and secrets
-
-Profiles live in `~/.config/nscale/profiles.d/<name>.env` and are **not
-tracked**: they name internal organizations, projects and regions, and this repo
-is public. Only the shapes are here —
-[`config/nscale/profiles.d/`](config/nscale/profiles.d) holds one `.env.example`
-per environment plus a `README.example` documenting every key.
-
-Secrets are referenced, never stored. A profile names a 1Password reference
-(`op://…`) for the deployment-protection bypass secret some consoles need, or a
-path to a service-account token file that is re-read on every invocation so a
-rotation needs no action. The bypass secret is cached for the login session in
-`$XDG_RUNTIME_DIR`, which is tmpfs — the same shape as the agent GitHub token in
-[zshenv](zshenv), and for the same reason.
-
-### Building the CLI
-
-```bash
-nscale-build              # newest v* tag -> ~/.local/bin/nscale
-nscale-build v4.0.1       # a specific tag, branch or commit
-```
-
-The CLI is a private repo with no public release channel, so it gets built by
-hand — which is how four divergent binaries came to sit in two directories, the
-newest of them a locally patched build on the earlier half of `PATH`, shadowing
-the stock one. `nscale-build` stamps what it built into `nscale version`, drops
-zsh completions into the `fpath` entry [zshrc](zshrc) already adds, and warns if
-something else still wins on `PATH`. It builds from a throwaway git worktree, so
-the checkout is never touched and a local patch cannot reach a commit.
+[`config/starship.toml`](config/starship.toml) still shows an active `nsc`
+profile (`$NSC_PROFILE`) in the prompt.
 
 
 ## TLA+ tooling
