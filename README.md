@@ -708,6 +708,9 @@ out at `$NKS_OPS_DIR` (default `~/Projects/nks-ops`), `make up` and
 `make skills` run its `install.sh`, and `zshrc` sources its
 `shell/init.zsh`. Without the checkout both steps are skipped.
 
+On another machine, after pulling, remove the rcm links left dangling in
+`~/bin`: `find ~/bin -maxdepth 1 -xtype l -lname "$HOME/.dotfiles/*" -delete`.
+
 [`config/starship.toml`](config/starship.toml) still shows an active `nsc`
 profile (`$NSC_PROFILE`) in the prompt.
 

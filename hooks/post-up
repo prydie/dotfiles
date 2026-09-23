@@ -121,7 +121,7 @@ fi
 tools::install_local_skills || log::f "Local skills install skipped"
 
 # Private Nscale tooling lives in its own repository; link it when checked out.
-tools::install_nks_ops || log::f "nks-ops install skipped"
+tools::install_nks_ops || log::f "nks-ops install incomplete"
 
 # Mirror the shared ~/.agents store into Codex. tools::install_ai_skills already
 # does this after a network install; repeating it here is what keeps a PROFILE=link

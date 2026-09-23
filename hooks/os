@@ -1287,19 +1287,6 @@ tools::prune_codex_skill_links() {
 # Takes the skills directory as an optional argument. Sourcing this file always
 # resets _ROOT to the repo it lives in, so an explicit parameter is the only way
 # to point the installer somewhere else -- which the tests rely on.
-# Private Nscale operational tooling (skills, bin/, shell integration) lives in
-# a separate repository. It owns its own installer, so this only runs it when
-# the checkout exists; machines without it are unaffected.
-tools::install_nks_ops() {
-  local dir="${NKS_OPS_DIR:-${HOME}/Projects/nks-ops}"
-
-  if [ ! -x "${dir}/install.sh" ]; then
-    log::f "Skipping nks-ops: ${dir}/install.sh not found"
-    return 0
-  fi
-  "${dir}/install.sh"
-}
-
 tools::install_local_skills() {
   local source claude_skills codex_skills path name linked=0
   source="${1:-${_ROOT}/skills}"
@@ -1335,6 +1322,19 @@ tools::install_local_skills() {
   done
 
   log::f "Linked ${linked} local skill(s) into ${claude_skills} and ${codex_skills}"
+}
+
+# Private Nscale operational tooling (skills, bin/, shell integration) lives in
+# a separate repository. It owns its own installer, so this only runs it when
+# the checkout exists; machines without it are unaffected.
+tools::install_nks_ops() {
+  local dir="${NKS_OPS_DIR:-${HOME}/Projects/nks-ops}"
+
+  if [ ! -x "${dir}/install.sh" ]; then
+    log::f "Skipping nks-ops: ${dir}/install.sh not found"
+    return 0
+  fi
+  "${dir}/install.sh"
 }
 
 tools::plugin_capable_codex_bin() {

@@ -52,7 +52,7 @@ ai-skills: ## Install the third-party skill sources for Claude Code and Codex
 	@bash hooks/os ai-skills
 
 .PHONY: skills
-skills: ## Link this repo's skills/ and the shared ~/.agents store into Claude Code and Codex
+skills: ## Link this repo's skills/ and the shared ~/.agents store into Claude Code and Codex; run the nks-ops installer when present
 	@bash hooks/os skills
 
 .PHONY: tla-tools

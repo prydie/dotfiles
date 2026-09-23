@@ -86,8 +86,16 @@ setopt share_history
 [[ -f ~/.aliases ]] && . ~/.aliases
 
 # Private Nscale tooling (the nsc shell function), when that checkout exists.
-[[ -r "${NKS_OPS_DIR:-$HOME/Projects/nks-ops}/shell/init.zsh" ]] &&
-  . "${NKS_OPS_DIR:-$HOME/Projects/nks-ops}/shell/init.zsh"
+# A checkout older than shell/init.zsh has bin/nsc but no function, so
+# `nsc use` would fail obscurely; say so instead.
+() {
+  local dir="${NKS_OPS_DIR:-$HOME/Projects/nks-ops}"
+  if [[ -r "$dir/shell/init.zsh" ]]; then
+    . "$dir/shell/init.zsh"
+  elif [[ -o interactive && -e "$dir/bin/nsc" ]]; then
+    print -u2 "zshrc: $dir lacks shell/init.zsh, so nsc use is unavailable; pull nks-ops"
+  fi
+}
 
 # Put local agent processes and their build/test children under one aggregate
 # CPU limit. The external launcher prevents these functions from recursing.
