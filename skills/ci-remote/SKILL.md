@@ -113,6 +113,16 @@ restores. Those are listed before each run; read that list. Consequences:
 A `strategy: matrix` cannot be expanded, and `if:` conditions are not
 evaluated — both are reported as warnings, and matrixed jobs must go to GitHub.
 
+`${{ }}` expressions in `run:` and `env:` are evaluated when they are plain
+property lookups: `steps.<id>.outputs.<name>` (read from that step's
+`GITHUB_OUTPUT`), `env.X`, `github.repository`/`sha`/`ref`/`ref_name`/
+`workflow`/`server_url`/`workspace`/`run_id`, and `runner.os`/`arch`/`temp`.
+`github.token`, `github.event.*` and the other event-derived values expand to
+empty, as does an output of a step that has not run — so a PR-scoped step
+widens to its no-PR behaviour. Those are listed before the run. Anything else
+(`matrix`, `secrets`, `needs`, functions, operators) fails its step with exit 2
+and a message naming the expression, rather than expanding to a silent empty.
+
 **One host, one network.** GitHub runs each job on its own VM; here they share
 the box's network namespace. Jobs that bind fixed or weakly-randomised ports —
 envtest, anything standing up a control plane or test server — can therefore

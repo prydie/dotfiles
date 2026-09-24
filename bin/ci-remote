@@ -9,7 +9,9 @@ state and the generated scripts all live under the remote host's `root`.
 
 Fidelity is a deliberate trade. `uses:` steps are skipped rather than emulated,
 and every skip is reported before a run starts, so the gap between "green here"
-and "green on GitHub" stays visible instead of implied.
+and "green on GitHub" stays visible instead of implied. Likewise `${{ }}` is
+evaluated only for property lookups this runner can answer; any other
+expression fails its step rather than expanding to a silent empty string.
 """
 
 from __future__ import annotations
@@ -184,6 +186,12 @@ class Step:
     env: dict[str, str]
     working_directory: str | None
     continue_on_error: bool
+    id: str | None = None
+    # `run` and `env` split into literals and `${{ }}` Refs, and the reason the
+    # step cannot run here if one of its expressions is unsupported.
+    run_template: Template = field(default_factory=list)
+    env_templates: dict[str, Template] = field(default_factory=dict)
+    error: str | None = None
 
 
 @dataclass
@@ -198,6 +206,8 @@ class Job:
     continue_on_error: bool
     skipped_uses: list[str]
     notes: list[str]
+    workflow_name: str = ""
+    env_templates: dict[str, Template] = field(default_factory=dict)
 
 
 def _as_dict(value) -> dict[str, str]:
@@ -215,6 +225,102 @@ def _truthy(value) -> bool:
     if isinstance(value, bool):
         return value
     return bool(value)
+
+
+# ---------------------------------------------------------------------------
+# `${{ }}` expressions
+# ---------------------------------------------------------------------------
+#
+# GitHub splices an expression's value into the step's text before any shell
+# sees it. A left-in `${{ x }}` is a bash "bad substitution", so a step that
+# consumes one fails on a line that says nothing about why. Only property
+# lookups are supported. Anything else -- matrix, secrets, needs, a function or
+# an operator -- fails its step loudly: an empty expansion is how a gate ends up
+# passing with zero subjects.
+
+EXPRESSION = re.compile(r"\$\{\{(.*?)\}\}")
+PROPERTY_PATH = re.compile(r"^[A-Za-z_][A-Za-z0-9_-]*(\.[A-Za-z_][A-Za-z0-9_-]*)+$")
+SHELL_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+# github.* values this runner can state truthfully. There is no event payload
+# and no token here, so those expand empty -- the same value GitHub gives an
+# absent property -- and the run reports that before it starts.
+GITHUB_LITERALS = ("repository", "sha", "ref", "ref_name", "workflow", "server_url")
+GITHUB_ABSENT = ("token", "event", "head_ref", "base_ref", "actor", "triggering_actor")
+
+
+@dataclass(frozen=True)
+class Ref:
+    """One `${{ }}`, classified when the workflow is parsed.
+
+    kind is "output" (steps.<a>.outputs.<b>), "env" (a), "github" (a),
+    "runner" (a) or "empty".
+    """
+
+    kind: str
+    text: str
+    a: str = ""
+    b: str = ""
+
+
+# A template is the source text split into literal strings and Refs.
+Template = list  # list[str | Ref]
+
+
+class Unsupported(Exception):
+    pass
+
+
+def classify(expr: str, step_ids: dict[str, int], action_ids: set[str], index: int) -> Ref:
+    """Classify one expression for the step at `index` (1-based; 0 = job level)."""
+    body = expr.strip()
+    text = "${{ " + body + " }}"
+    if not PROPERTY_PATH.match(body):
+        raise Unsupported(f"{text} is not a plain property lookup")
+    parts = body.split(".")
+    head = parts[0]
+    if head == "steps":
+        if index == 0:
+            raise Unsupported(f"{text} is not available outside a step")
+        if len(parts) != 4 or parts[2] != "outputs":
+            raise Unsupported(f"{text}: only steps.<id>.outputs.<name> is supported")
+        sid, name = parts[1], parts[3]
+        if sid in action_ids:
+            raise Unsupported(f"{text} reads a `uses:` step, which is skipped here")
+        # GitHub yields an empty string for a step that does not exist or has
+        # not run yet; say the same thing rather than inventing a failure.
+        if sid not in step_ids or step_ids[sid] >= index:
+            return Ref("empty", text)
+        return Ref("output", text, sid, name)
+    if head == "env" and len(parts) == 2 and SHELL_NAME.match(parts[1]):
+        return Ref("env", text, parts[1])
+    if head == "github":
+        if parts[1] in GITHUB_ABSENT:
+            return Ref("empty", text)
+        if len(parts) == 2 and parts[1] in GITHUB_LITERALS + ("workspace", "run_id"):
+            return Ref("github", text, parts[1])
+    if head == "runner" and len(parts) == 2 and parts[1] in ("os", "arch", "temp"):
+        return Ref("runner", text, parts[1])
+    raise Unsupported(f"{text} cannot be evaluated by this runner")
+
+
+def parse_template(
+    source: str, step_ids: dict[str, int], action_ids: set[str], index: int
+) -> Template:
+    out: Template = []
+    pos = 0
+    for match in EXPRESSION.finditer(source):
+        if match.start() > pos:
+            out.append(source[pos : match.start()])
+        out.append(classify(match.group(1), step_ids, action_ids, index))
+        pos = match.end()
+    if pos < len(source):
+        out.append(source[pos:])
+    return out
+
+
+def template_refs(template: Template) -> list[Ref]:
+    return [part for part in template if isinstance(part, Ref)]
 
 
 def discover_workflow(repo_root: Path, explicit: str | None) -> Path:
@@ -296,6 +402,7 @@ def parse_workflow(path: Path) -> list[Job]:
 
         steps: list[Step] = []
         skipped: list[str] = []
+        action_ids: set[str] = set()
         for raw_step in spec.get("steps") or []:
             if not isinstance(raw_step, dict):
                 continue
@@ -303,6 +410,8 @@ def parse_workflow(path: Path) -> list[Job]:
             if "run" not in raw_step:
                 uses = str(raw_step.get("uses") or "<no run, no uses>")
                 skipped.append(f"{label or uses} ({uses})")
+                if raw_step.get("id"):
+                    action_ids.add(str(raw_step["id"]))
                 continue
             if "if" in raw_step:
                 notes.append(
@@ -334,7 +443,43 @@ def parse_workflow(path: Path) -> list[Job]:
                     working_directory=raw_step.get("working-directory")
                     or job_workdir,
                     continue_on_error=_truthy(raw_step.get("continue-on-error")),
+                    id=str(raw_step["id"]) if raw_step.get("id") else None,
                 )
+            )
+
+        step_ids = {step.id: step.index for step in steps if step.id}
+        empties: set[str] = set()
+        try:
+            job_env_templates = {
+                name: parse_template(value, step_ids, action_ids, 0)
+                for name, value in env.items()
+            }
+            job_error = None
+        except Unsupported as exc:
+            job_env_templates, job_error = {}, f"job env: {exc}"
+        for step in steps:
+            try:
+                if job_error:
+                    raise Unsupported(job_error)
+                step.run_template = parse_template(
+                    step.run, step_ids, action_ids, step.index
+                )
+                step.env_templates = {
+                    name: parse_template(value, step_ids, action_ids, step.index)
+                    for name, value in step.env.items()
+                }
+            except Unsupported as exc:
+                step.error = str(exc)
+                notes.append(f"step {step.name!r} will fail: {exc}")
+                continue
+            for template in [step.run_template, *step.env_templates.values()]:
+                empties.update(
+                    ref.text for ref in template_refs(template) if ref.kind == "empty"
+                )
+        if empties:
+            notes.append(
+                "expands to empty (no event payload, token, or earlier step "
+                "output here): " + ", ".join(sorted(empties))
             )
 
         jobs.append(
@@ -353,6 +498,8 @@ def parse_workflow(path: Path) -> list[Job]:
                 continue_on_error=_truthy(spec.get("continue-on-error")),
                 skipped_uses=skipped,
                 notes=notes,
+                workflow_name=str(document.get("name") or path.name),
+                env_templates=job_env_templates,
             )
         )
 
@@ -817,6 +964,57 @@ ci_remote_apply_path_file() {
     PATH=$line:$PATH
   done < "$file"
   export PATH
+}
+
+# Print the last value a step wrote for KEY to its GITHUB_OUTPUT file. GitHub
+# reads `KEY=value` when `=` comes before any `<<`, else the `KEY<<DELIM` heredoc.
+ci_remote_output() {
+  local file=$1 want=$2 line key value delim found=
+  [ -s "$file" ] || return 0
+  while IFS= read -r line || [ -n "$line" ]; do
+    case ${line%%<<*} in
+      *=*)
+        key=${line%%=*}
+        value=${line#*=}
+        ;;
+      *)
+        case $line in *"<<"*) ;; *) continue ;; esac
+        key=${line%%<<*}
+        delim=${line#*<<}
+        value=
+        local first=1
+        while IFS= read -r line || [ -n "$line" ]; do
+          [ "$line" = "$delim" ] && break
+          if [ $first -eq 1 ]; then value=$line; first=0; else value="$value
+$line"; fi
+        done
+        ;;
+    esac
+    [ "$key" = "$want" ] && found=$value
+  done < "$file"
+  printf '%s' "$found"
+}
+
+ci_remote_runner_arch() {
+  case $(uname -m) in
+    x86_64) printf X64 ;; aarch64|arm64) printf ARM64 ;; armv7l) printf ARM ;;
+    *) uname -m ;;
+  esac
+}
+
+# Write a step's script from its template, splicing each expression's value in
+# as text -- which is what GitHub does before the shell ever sees the script.
+# Arguments after the two paths are placeholder/value pairs.
+ci_remote_render_step() {
+  local template=$1 out=$2 text
+  shift 2
+  text=$(cat "$template"; printf x)
+  text=${text%x}
+  while [ $# -ge 2 ]; do
+    text=${text//"$1"/"$2"}
+    shift 2
+  done
+  printf '%s' "$text" > "$out"
 }"""
 
 
@@ -826,12 +1024,84 @@ def exports(env: dict[str, str]) -> str:
     )
 
 
+def ref_word(ref: Ref, job_dir: str, job: Job, context: dict[str, str]) -> str:
+    """A bash word that evaluates, in the job driver, to the expression's value."""
+    if ref.kind == "output":
+        producer = next(step for step in job.steps if step.id == ref.a)
+        path = f"{job_dir}/step-{producer.index:02d}.output"
+        return f'"$(ci_remote_output {shlex.quote(path)} {shlex.quote(ref.b)})"'
+    if ref.kind == "env":
+        return '"${' + ref.a + '-}"'
+    if ref.kind == "github":
+        if ref.a == "workspace":
+            return '"$GITHUB_WORKSPACE"'
+        return shlex.quote(context.get(ref.a, ""))
+    if ref.kind == "runner":
+        return {
+            "os": "Linux",
+            "arch": '"$(ci_remote_runner_arch)"',
+            "temp": '"$RUNNER_TEMP"',
+        }[ref.a]
+    return "''"
+
+
+def template_word(template: Template, job_dir: str, job: Job, context: dict[str, str]) -> str:
+    words = [
+        shlex.quote(part) if isinstance(part, str) else ref_word(part, job_dir, job, context)
+        for part in template
+        if not (isinstance(part, str) and part == "")
+    ]
+    return "".join(words) or "''"
+
+
+def template_exports(
+    templates: dict[str, Template], job_dir: str, job: Job, context: dict[str, str]
+) -> str:
+    return "".join(
+        f"export {key}={template_word(templates[key], job_dir, job, context)}\n"
+        for key in sorted(templates)
+    )
+
+
+def placeholder(step: Step, n: int) -> str:
+    return f"@@CI_REMOTE_EXPR_{step.index}_{n}@@"
+
+
+def step_template_text(step: Step) -> str:
+    """The uploaded step template: literals verbatim, expressions as placeholders."""
+    if step.error:
+        return (
+            f"printf 'ci-remote: %s\\n' {shlex.quote(step.error)} >&2\n"
+            "exit 2\n"
+        )
+    text = "".join(
+        part if isinstance(part, str) else placeholder(step, n)
+        for n, part in enumerate(step.run_template)
+    )
+    for n, part in enumerate(step.run_template):
+        if isinstance(part, str) and "@@CI_REMOTE_EXPR_" in part:
+            raise Error(f"step {step.name!r} contains this runner's placeholder text")
+    return text if text.endswith("\n") else text + "\n"
+
+
+def step_render_args(step: Step, job_dir: str, job: Job, context: dict[str, str]) -> str:
+    if step.error:
+        return ""
+    return "".join(
+        f" {shlex.quote(placeholder(step, n))} {ref_word(part, job_dir, job, context)}"
+        for n, part in enumerate(step.run_template)
+        if isinstance(part, Ref)
+    )
+
+
 def remote_root_of(run_dir: str) -> str:
     """The host root from a run dir: locks are shared by every run on the box."""
     return run_dir.rsplit("/runs/", 1)[0]
 
 
-def render_job_driver(host: Host, job: Job, run_dir: str, workspace: str) -> str:
+def render_job_driver(
+    host: Host, job: Job, run_dir: str, workspace: str, context: dict[str, str]
+) -> str:
     job_dir = f"{run_dir}/{job.key}"
 
     lines = [
@@ -857,7 +1127,7 @@ def render_job_driver(host: Host, job: Job, run_dir: str, workspace: str) -> str
     if host.prelude:
         lines += ["# host prelude", host.prelude, ""]
     lines += [
-        exports(job.env).rstrip("\n"),
+        template_exports(job.env_templates, job_dir, job, context).rstrip("\n"),
         "",
     ]
 
@@ -884,7 +1154,9 @@ def render_job_driver(host: Host, job: Job, run_dir: str, workspace: str) -> str
             "slot_held=0",
             "try_slot() {",
             f"  for slot in $(seq 1 {host.max_jobs}); do",
-            f'    exec {{slot_fd}}>"{lock_dir}/slot.$slot" 2>/dev/null || continue',
+            # The braces scope the 2>/dev/null: on a bare `exec` it would stay
+            # applied and silence stderr for every step of the job.
+            f'    {{ exec {{slot_fd}}>"{lock_dir}/slot.$slot"; }} 2>/dev/null || continue',
             '    if flock -n "$slot_fd"; then slot_held=1; return 0; fi',
             '    exec {slot_fd}>&-',
             "  done",
@@ -947,11 +1219,9 @@ def render_job_driver(host: Host, job: Job, run_dir: str, workspace: str) -> str
     # GITHUB_ENV and GITHUB_PATH are then APPLIED to the following steps, which
     # is the half with behaviour -- a step that stages a tool on the PATH for
     # later steps must really do it, or the later step fails obscurely.
-    # GITHUB_OUTPUT, GITHUB_STATE and GITHUB_STEP_SUMMARY are accepted and kept
-    # but go nowhere: carrying an output onward needs `${{ steps.x.outputs.y }}`
-    # evaluation, and this runner does not expand `${{ }}` at all. So a step
-    # that only PUBLISHES an output now passes honestly, while one whose later
-    # step CONSUMES it still meets an unexpanded expression, exactly as before.
+    # GITHUB_STATE and GITHUB_STEP_SUMMARY are only kept. GITHUB_OUTPUT is read
+    # back through `${{ steps.x.outputs.y }}`: ci_remote_render_step splices the
+    # producer's value into the consuming step's script just before it runs.
     #
     # GITHUB_ACTIONS is deliberately NOT set. Tools branch on it to emit
     # workflow annotations and to assume runner facilities absent here, and a
@@ -1031,7 +1301,9 @@ def render_job_driver(host: Host, job: Job, run_dir: str, workspace: str) -> str
             " GITHUB_STEP_SUMMARY",
             ': > "$GITHUB_OUTPUT"; : > "$GITHUB_ENV"; : > "$GITHUB_PATH"',
             ': > "$GITHUB_STATE"; : > "$GITHUB_STEP_SUMMARY"',
-            exports(step.env).rstrip("\n"),
+            template_exports(step.env_templates, job_dir, job, context).rstrip("\n"),
+            f"ci_remote_render_step {shlex.quote(stem + '.tmpl')} {shlex.quote(script)}"
+            + step_render_args(step, job_dir, job, context),
             # The admission locks are held by fds open in THIS shell. Close them in
             # the step's subshell so nothing the step spawns can inherit one: a
             # descendant that outlives the step (envtest's etcd and kube-apiserver
@@ -1533,6 +1805,33 @@ def head_description(repo_root: Path) -> str:
     return f"{sha}{suffix}"
 
 
+GITHUB_REMOTE = re.compile(
+    r"github\.com[:/]+([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+?)(?:\.git)?/?$"
+)
+
+
+def _git_out(repo_root: Path, *args: str) -> str:
+    result = subprocess.run(
+        ["git", "-C", str(repo_root), *args], text=True, capture_output=True
+    )
+    return result.stdout.strip() if result.returncode == 0 else ""
+
+
+def github_context(repo_root: Path, job: Job, run_id: str) -> dict[str, str]:
+    """The github.* values this checkout can state; anything unknown is empty."""
+    match = GITHUB_REMOTE.search(_git_out(repo_root, "remote", "get-url", "origin"))
+    branch = _git_out(repo_root, "symbolic-ref", "--quiet", "--short", "HEAD")
+    return {
+        "repository": match.group(1) if match else "",
+        "sha": _git_out(repo_root, "rev-parse", "HEAD"),
+        "ref": f"refs/heads/{branch}" if branch else "",
+        "ref_name": branch,
+        "workflow": job.workflow_name,
+        "server_url": "https://github.com",
+        "run_id": run_id,
+    }
+
+
 def select_jobs(jobs: list[Job], wanted: list[str]) -> list[Job]:
     if not wanted:
         return [job for job in jobs if job.steps]
@@ -1680,11 +1979,11 @@ def cmd_run(args: argparse.Namespace) -> int:
         files: dict[str, str] = {}
         for job in jobs:
             files[f"{run_dir}/{job.key}/run.sh"] = render_job_driver(
-                host, job, run_dir, workspace
+                host, job, run_dir, workspace, github_context(repo_root, job, run_id)
             )
             for step in job.steps:
-                files[f"{run_dir}/{job.key}/step-{step.index:02d}.sh"] = (
-                    step.run if step.run.endswith("\n") else step.run + "\n"
+                files[f"{run_dir}/{job.key}/step-{step.index:02d}.tmpl"] = (
+                    step_template_text(step)
                 )
         parallel = args.parallel or host.parallel
         files[f"{run_dir}/dispatch.sh"] = render_dispatch(run_dir, waves, parallel)
