@@ -862,6 +862,13 @@ def render_job_driver(host: Host, job: Job, run_dir: str, workspace: str) -> str
     ]
 
     lock_dir = f"{remote_root_of(run_dir)}/locks"
+    # Names of the lock fds this job opens, so each step can close its inherited
+    # copies before exec'ing anything.
+    lock_fd_names: list[str] = []
+    if host.max_jobs > 0:
+        lock_fd_names.append("slot_fd")
+    if job.key in host.exclusive_jobs:
+        lock_fd_names.append("excl_fd")
     if host.max_jobs > 0 or job.key in host.exclusive_jobs:
         lines += [f"mkdir -p {shlex.quote(lock_dir)} 2>/dev/null || true", ""]
 
@@ -1009,6 +1016,9 @@ def render_job_driver(host: Host, job: Job, run_dir: str, workspace: str) -> str
         label = f"{step.index}/{total} {step.name}"
         runner = f"{host.nice} " if host.nice else ""
         stem = f"{job_dir}/step-{step.index:02d}"
+        # Close-on-exec for the admission locks, rendered only for the locks this
+        # job actually took (the fd vars are undefined otherwise).
+        lock_closes = "".join(f"{{{name}}}>&- " for name in lock_fd_names)
         lines += [
             f'printf "\\n===== step %s =====\\n" {shlex.quote(label)}',
             "step_start=$(date +%s)",
@@ -1022,9 +1032,24 @@ def render_job_driver(host: Host, job: Job, run_dir: str, workspace: str) -> str
             ': > "$GITHUB_OUTPUT"; : > "$GITHUB_ENV"; : > "$GITHUB_PATH"',
             ': > "$GITHUB_STATE"; : > "$GITHUB_STEP_SUMMARY"',
             exports(step.env).rstrip("\n"),
-            f"( cd {step_workdir} && exec {runner}{budget}"
-            f"{step.shell} --noprofile --norc -eo pipefail {shlex.quote(script)} )",
+            # The admission locks are held by fds open in THIS shell. Close them in
+            # the step's subshell so nothing the step spawns can inherit one: a
+            # descendant that outlives the step (envtest's etcd and kube-apiserver
+            # survive a SIGKILLed `go test`, because its TearDown never runs) would
+            # otherwise hold the slot or the exclusive lock forever, and the queue
+            # wedges with jobs waiting on locks no live job owns. Closing a dup does
+            # not release the lock -- this shell still holds its own fd.
+            f"( cd {step_workdir} && exec {lock_closes}{runner}{budget}"
+            f"{step.shell} --noprofile --norc -eo pipefail {shlex.quote(script)} ) &",
+            "step_pid=$!",
+            'wait "$step_pid"',
             "rc=$?",
+            # timeout(1) puts the command in its own process group, and the subshell
+            # exec'd into it, so step_pid IS that group. Sweep it: a step that timed
+            # out or failed can leave a tree behind, and on this tool's own shared
+            # hosts those strays accumulated one etcd/kube-apiserver pair per envtest
+            # job until the box had no free admission slots left.
+            'kill -- -"$step_pid" 2>/dev/null || true',
             # Applied even when the step failed: GitHub keeps what was written
             # before it died, and rc is already captured so this cannot mask it.
             'ci_remote_apply_env_file "$GITHUB_ENV"',
